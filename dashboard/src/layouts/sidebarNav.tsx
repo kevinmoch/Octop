@@ -19,6 +19,7 @@ import {
   GraduationCap,
   Shield,
   PanelsTopLeft,
+  Globe,
 } from "lucide-react";
 import type { OctopUser } from "../api/modules/auth";
 import { navAllowed, userCan } from "../utils/permissions";
@@ -76,6 +77,7 @@ export const SIDEBAR_NAV_KEYS = [
   "knowledge-bases",
   "bridge",
   "workbench",
+  "webskill-browser",
   "remote-desktop",
   "acp",
   "admin-users",
@@ -130,6 +132,7 @@ export const SIDEBAR_GROUPED_NAV_KEYS = [
   "knowledge-bases",
   "bridge",
   "workbench",
+  "webskill-browser",
   "remote-desktop",
   "acp",
   "admin-users",
@@ -249,6 +252,14 @@ export function buildNavSections(
       path: "/workbench",
       icon: <PanelsTopLeft size={iconSize} strokeWidth={iconStroke} />,
       labelKey: "nav.workbench",
+    });
+  }
+  if (navAllowed(user, "webskill-browser")) {
+    controlItems.push({
+      key: "webskill-browser",
+      path: "/browser",
+      icon: <Globe size={iconSize} strokeWidth={iconStroke} />,
+      labelKey: "nav.webskillBrowser",
     });
   }
   // Server desktop + phone share one nav entry; phone tab also needs host capability.

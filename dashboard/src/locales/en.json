@@ -290,6 +290,7 @@
     "terminal": "Terminal AI+",
     "remoteBrowser": "Browser AI+",
     "workbench": "Workbench",
+    "webskillBrowser": "Browser",
     "remoteDesktop": "Remote Desktop",
     "agent": "Agent",
     "skills": "Skills",
@@ -7683,5 +7684,14 @@
     "nameRequired": "Enter a name first",
     "failed": "Polish failed. Please try again later.",
     "emptyResult": "The model returned an empty result"
+  },
+  "webskill": {
+    "insecureTitle": "WebSkill cannot run in this context",
+    "insecureDescription": "Open Octop over HTTPS or localhost in a modern browser with OPFS and WebCrypto. Plain remote HTTP is never silently accepted.",
+    "loading": "Loading WebSkill",
+    "startRequired": "Start the browser to use the WebSkill assistant.",
+    "takeControl": "Take control",
+    "returnControl": "Return to assistant",
+    "handoffFailed": "Could not change browser control"
   }
 }

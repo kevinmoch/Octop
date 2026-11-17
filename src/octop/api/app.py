@@ -53,6 +53,16 @@ def _dashboard_response(path: Path, full_path: str) -> FileResponse:
     cache_control = dashboard_cache_control(full_path)
     if cache_control is not None:
         response.headers["Cache-Control"] = cache_control
+    if full_path == "webskill" or full_path.startswith("webskill/"):
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob: http: https:; font-src 'self' data:; "
+            "connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; "
+            "object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
     return response
 
 
@@ -63,7 +73,7 @@ def is_dashboard_asset_path(full_path: str) -> bool:
     editor tree. Returning ``index.html`` for either makes the browser treat
     HTML as a script or worker.
     """
-    return full_path.startswith(("assets/", "monaco/"))
+    return full_path.startswith(("assets/", "monaco/", "webskill/assets/"))
 
 
 def _dashboard_fallback(index_file: Path, full_path: str) -> FileResponse:
@@ -75,6 +85,10 @@ def _dashboard_fallback(index_file: Path, full_path: str) -> FileResponse:
     """
     if is_dashboard_asset_path(full_path):
         raise HTTPException(status_code=404, detail="Not Found")
+    if full_path == "webskill" or full_path.startswith("webskill/"):
+        webskill_index = index_file.parent / "webskill" / "index.html"
+        if webskill_index.is_file():
+            return _dashboard_response(webskill_index, full_path)
     return _dashboard_response(index_file, "")
 
 

@@ -34,14 +34,17 @@ interface ConnectOptions {
   sessionId?: string | null;
   /** When set, screencast is relayed to the peer Octop via Bridge. */
   bridgeConnectionId?: string | null;
+  /** Obtain a one-shot ticket, renewing an expired WebSkill session if needed. */
+  issueTicket?: () => Promise<{ ticket: string }>;
 }
 
 function buildWsUrl(
   width: number,
   height: number,
   bridgeConnectionId?: string | null,
+  ticket?: string,
 ): string {
-  const token = getAuthToken();
+  const token = ticket ? "" : getAuthToken();
   const path = bridgeConnectionId
     ? `/bridge/connections/${encodeURIComponent(
         bridgeConnectionId,
@@ -52,7 +55,8 @@ function buildWsUrl(
     width: String(width),
     height: String(height),
   });
-  if (token) params.set("token", token);
+  if (ticket) params.set("ticket", ticket);
+  else if (token) params.set("token", token);
   return `${base}?${params.toString()}`;
 }
 
@@ -74,6 +78,7 @@ export interface StreamSessionInfo {
 
 export function useBrowserStream() {
   const wsRef = useRef<WebSocket | null>(null);
+  const connectionGenerationRef = useRef(0);
   const callbacksRef = useRef<BrowserStreamCallbacks | null>(null);
   const statusRef = useRef<BrowserStreamState>("idle");
   const [status, setStatus] = useState<BrowserStreamState>("idle");
@@ -106,98 +111,115 @@ export function useBrowserStream() {
         wsRef.current.close();
       }
 
-      const wsUrl = buildWsUrl(width, height, options.bridgeConnectionId);
-      let ws: WebSocket;
-      try {
-        ws = new WebSocket(wsUrl);
-      } catch (err) {
-        console.error("[BrowserStream] Failed to create WebSocket:", err);
-        updateStatus("error");
-        return;
-      }
-
-      ws.onopen = () => {
-        const startMsg: Record<string, unknown> = {
-          type: "start",
-          url,
+      const generation = ++connectionGenerationRef.current;
+      void (async () => {
+        let ticket: string | undefined;
+        if (options.issueTicket) {
+          ticket = (await options.issueTicket()).ticket;
+          if (generation !== connectionGenerationRef.current) return;
+        }
+        if (generation !== connectionGenerationRef.current) return;
+        const wsUrl = buildWsUrl(
           width,
           height,
-          reuse_session: true,
-        };
-        if (options.sessionId) {
-          startMsg.session_id = options.sessionId;
-        }
-        ws.send(JSON.stringify(startMsg));
-        setCurrentUrl(url);
-      };
+          options.bridgeConnectionId,
+          ticket,
+        );
+        const ws = new WebSocket(wsUrl);
 
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as {
-            type: string;
-            data?: string;
-            status?: string;
-            message?: string;
-            tabs?: BrowserTab[];
+        ws.onopen = () => {
+          const startMsg: Record<string, unknown> = {
+            type: "start",
+            url,
+            width,
+            height,
+            reuse_session: true,
           };
-
-          if (msg.type === "frame" && msg.data) {
-            callbacksRef.current?.onFrame(msg.data);
-          } else if (msg.type === "status" && msg.status) {
-            updateStatus(msg.status as BrowserStreamState);
-          } else if (msg.type === "tabs" && msg.tabs) {
-            setTabs((prevTabs) =>
-              mergeBrowserTabsStable(prevTabs, msg.tabs ?? []),
-            );
-            const activeTab = msg.tabs.find((t) => t.active);
-            if (activeTab) setCurrentUrl(activeTab.url);
-          } else if (msg.type === "error") {
-            console.error("[BrowserStream] Server error:", msg.message);
-            callbacksRef.current?.onError?.(msg.message ?? "Unknown error");
-            updateStatus("error");
-          } else if (msg.type === "session_update") {
-            // Real-time session state pushed by the backend
-            const info: StreamSessionInfo = {
-              session_id:
-                ((msg as Record<string, unknown>).session_id as string) ?? "",
-              state: ((msg as Record<string, unknown>).state as string) ?? "",
-              control_owner:
-                ((msg as Record<string, unknown>).control_owner as
-                  | "agent"
-                  | "user") ?? "agent",
-              current_url:
-                ((msg as Record<string, unknown>).current_url as string) ?? "",
-              conversation_id:
-                ((msg as Record<string, unknown>).conversation_id as string) ??
-                "",
-              channel_source:
-                ((msg as Record<string, unknown>).channel_source as string) ??
-                "dashboard",
-            };
-            setSessionInfo(info);
+          if (options.sessionId) {
+            startMsg.session_id = options.sessionId;
           }
-        } catch {
-          // Non-JSON frames — ignore
-        }
-      };
+          ws.send(JSON.stringify(startMsg));
+          setCurrentUrl(url);
+        };
 
-      ws.onerror = () => {
+        ws.onmessage = (ev) => {
+          if (generation !== connectionGenerationRef.current) return;
+          try {
+            const msg = JSON.parse(ev.data as string) as {
+              type: string;
+              data?: string;
+              status?: string;
+              message?: string;
+              tabs?: BrowserTab[];
+            };
+
+            if (msg.type === "frame" && msg.data) {
+              callbacksRef.current?.onFrame(msg.data);
+            } else if (msg.type === "status" && msg.status) {
+              updateStatus(msg.status as BrowserStreamState);
+            } else if (msg.type === "tabs" && msg.tabs) {
+              setTabs((prevTabs) =>
+                mergeBrowserTabsStable(prevTabs, msg.tabs ?? []),
+              );
+              const activeTab = msg.tabs.find((t) => t.active);
+              if (activeTab) setCurrentUrl(activeTab.url);
+            } else if (msg.type === "error") {
+              console.error("[BrowserStream] Server error:", msg.message);
+              callbacksRef.current?.onError?.(msg.message ?? "Unknown error");
+              updateStatus("error");
+            } else if (msg.type === "session_update") {
+              // Real-time session state pushed by the backend
+              const info: StreamSessionInfo = {
+                session_id:
+                  ((msg as Record<string, unknown>).session_id as string) ?? "",
+                state: ((msg as Record<string, unknown>).state as string) ?? "",
+                control_owner:
+                  ((msg as Record<string, unknown>).control_owner as
+                    | "agent"
+                    | "user") ?? "agent",
+                current_url:
+                  ((msg as Record<string, unknown>).current_url as string) ??
+                  "",
+                conversation_id:
+                  ((msg as Record<string, unknown>)
+                    .conversation_id as string) ?? "",
+                channel_source:
+                  ((msg as Record<string, unknown>).channel_source as string) ??
+                  "dashboard",
+              };
+              setSessionInfo(info);
+            }
+          } catch {
+            // Non-JSON frames — ignore
+          }
+        };
+
+        ws.onerror = () => {
+          if (generation === connectionGenerationRef.current)
+            updateStatus("error");
+        };
+
+        ws.onclose = () => {
+          if (generation !== connectionGenerationRef.current) return;
+          if (
+            statusRef.current !== "stopped" &&
+            statusRef.current !== "idle" &&
+            statusRef.current !== "error"
+          ) {
+            updateStatus("stopped");
+          }
+          // Don't clear tabs on close — this preserves the tab bar state
+          // during auto-reconnect so it doesn't flash empty.
+        };
+
+        wsRef.current = ws;
+      })().catch((error: unknown) => {
+        if (generation !== connectionGenerationRef.current) return;
+        callbacksRef.current?.onError?.(
+          error instanceof Error ? error.message : "Browser connection failed",
+        );
         updateStatus("error");
-      };
-
-      ws.onclose = () => {
-        if (
-          statusRef.current !== "stopped" &&
-          statusRef.current !== "idle" &&
-          statusRef.current !== "error"
-        ) {
-          updateStatus("stopped");
-        }
-        // Don't clear tabs on close — this preserves the tab bar state
-        // during auto-reconnect so it doesn't flash empty.
-      };
-
-      wsRef.current = ws;
+      });
     },
     [updateStatus],
   );
@@ -253,6 +275,7 @@ export function useBrowserStream() {
 
   /** Disconnect WebSocket completely. */
   const disconnect = useCallback(() => {
+    connectionGenerationRef.current += 1;
     if (wsRef.current) {
       try {
         wsRef.current.close();

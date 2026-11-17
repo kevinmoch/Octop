@@ -1,0 +1,32 @@
+{
+  "name": "octop-webskill-host",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@a2ui/lit": "0.10.2",
+    "@a2ui/markdown-it": "0.1.0",
+    "@a2ui/web_core": "0.10.5",
+    "@lit/context": "1.1.6",
+    "@monaco-editor/react": "4.7.0",
+    "@openuidev/react-lang": "0.2.8",
+    "mermaid": "12.0.0",
+    "@webskill/chatbot": "0.26.0",
+    "@webskill/console": "0.22.5",
+    "@webskill/sdk": "0.29.0",
+    "monaco-editor": "0.56.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.3.0",
+    "typescript": "6.0.3",
+    "vite": "8.1.5"
+  }
+}

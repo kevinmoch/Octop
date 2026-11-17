@@ -42,16 +42,21 @@ from starlette.websockets import WebSocketState
 
 from octop.api.deps import resolve_user_from_token
 from octop.api.routers.browser.harness import (
+    _CONTROL_OWNERS,
     control_owner_for,
     harness_list_tabs,
     harness_page_url,
     resolve_harness_session,
 )
+from octop.api.routers.browser.webskill import check_websocket_origin
+from octop.infra.control.browser.webskill.sessions import browser_agent_registry
+from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+LEGACY_STREAM_JWT_REMOVAL = "Octop 1.1.0"
 
 _FRAME_INTERVAL_S = 1 / 12
 _SESSION_INTERVAL_S = 1.0
@@ -388,21 +393,38 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
 async def browser_stream_ws(
     websocket: WebSocket,
     token: str | None = Query(default=None),
+    ticket: str | None = Query(default=None),
     listen_only: int = Query(default=0),
     width: int = Query(default=1280),
     height: int = Query(default=800),
 ) -> None:
     server = websocket.app.state.octop_server
-    if not token:
-        await websocket.close(code=4001, reason="missing token")
-        return
+    stream_session_id: str | None = None
+    stream_connection_id: str | None = None
+    if token is not None and ticket is None:
+        logger.warning(
+            "Legacy browser-stream JWT auth is deprecated; removal target: %s",
+            LEGACY_STREAM_JWT_REMOVAL,
+        )
     try:
-        user = resolve_user_from_token(server, token)
-    except Exception as exc:
-        await websocket.close(code=4001, reason=f"auth failed: {exc}")
+        if ticket is not None or websocket.headers.get("origin") is not None:
+            check_websocket_origin(websocket)
+        if ticket is not None:
+            session = browser_agent_registry.consume_ticket(ticket)
+            user_id = session.user_id
+        elif token:
+            user_id = resolve_user_from_token(server, token).id
+        else:
+            raise ValueError("missing credentials")
+        user = server.user_manager.get_by_id(user_id) if server.user_manager is not None else None
+        if user is None or not user_has_permission(user, "browser"):
+            raise ValueError("browser permission required")
+        if ticket is not None:
+            stream_connection_id = browser_agent_registry.attach_stream(session)
+            stream_session_id = session.id
+    except Exception:
+        await websocket.close(code=4001, reason="Browser-stream authentication failed")
         return
-
-    await websocket.accept()
 
     async def send_json(payload: dict[str, Any]) -> None:
         await _send_json(websocket, payload)
@@ -414,6 +436,7 @@ async def browser_stream_ws(
         return await websocket.receive_text()
 
     try:
+        await websocket.accept()
         await run_browser_stream_session(
             send_json=send_json,
             is_connected=is_connected,
@@ -429,6 +452,8 @@ async def browser_stream_ws(
         if websocket.application_state == WebSocketState.CONNECTED:
             with contextlib.suppress(Exception):
                 await websocket.close()
+        if stream_session_id is not None and stream_connection_id is not None:
+            browser_agent_registry.detach_stream(stream_session_id, stream_connection_id)
 
 
 async def run_browser_stream_session(
@@ -516,8 +541,12 @@ async def run_browser_stream_session(
             if msg.get("type") == "stop":
                 break
             if sess is not None:
-                with contextlib.suppress(Exception):
-                    await _handle_client_event(sess, msg)
+                # Human input wins before it waits for an in-progress model write.
+                _CONTROL_OWNERS[profile] = "user"
+                browser_agent_registry.revoke_grants(profile=profile)
+                async with browser_agent_registry.write_lock(profile):
+                    with contextlib.suppress(Exception):
+                        await _handle_client_event(sess, msg)
     except TimeoutError:
         await send_json({"type": "error", "message": "timed out waiting for start"})
     except WebSocketDisconnect:

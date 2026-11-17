@@ -46,6 +46,7 @@ import { OctopEmptyMascot } from "../../../components/EmptyState";
 import PageShell from "../../../layouts/PageShell";
 import PeerOnlyRemoteAlert from "../../../components/PeerOnlyRemoteAlert";
 import BrowserAiPanel from "../../../components/BrowserAiPanel";
+import WebSkillFrame from "../../../components/WebSkillFrame";
 import {
   readAssistantPlacement,
   type AssistantPlacement,
@@ -82,6 +83,7 @@ import {
 import { useIsMobile } from "../../../hooks/useIsMobile";
 import { useLandscapeFullscreen } from "../../../hooks/useLandscapeFullscreen";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
+import { useWebSkillAgentSession } from "../WebSkillBrowser/useWebSkillAgentSession";
 import { resolveBrowserProfile } from "../../../utils/browserProfile";
 import styles from "./index.module.less";
 
@@ -130,6 +132,8 @@ const DEFAULT_REFRESH_INTERVAL = 500;
 const DEFAULT_START_URL = "https://cloud.tencent.com";
 const BROWSER_AI_PANEL_KEY = "octop:remote-browser:ai-panel-open";
 const BROWSER_AI_PLACEMENT_KEY = "octop:remote-browser:ai-placement";
+const WEBSKILL_AI_PANEL_KEY = "octop:webskill-browser:ai-panel-open";
+const WEBSKILL_AI_PLACEMENT_KEY = "octop:webskill-browser:ai-placement";
 
 function profileStorageKey(userId?: number): string {
   return userId == null
@@ -287,17 +291,29 @@ interface RemoteBrowserPageProps {
    * stream without clearing the session so it can resume when visible again.
    */
   isVisible?: boolean;
+  /** WebSkill server-enhanced host: restricted PageAgent + its own assistant. */
+  enhanced?: boolean;
 }
 
 export default function RemoteBrowserPage({
   embedded = false,
   isVisible = true,
+  enhanced = false,
 }: RemoteBrowserPageProps) {
   const { t } = useTranslation();
   const { modal, message: antMessage } = App.useApp();
   const isMobile = useIsMobile();
   const currentUser = useCurrentUser();
   const browserProfile = resolveBrowserProfile(currentUser?.id);
+  const panelStorageKey = enhanced
+    ? WEBSKILL_AI_PANEL_KEY
+    : BROWSER_AI_PANEL_KEY;
+  const {
+    sessionId: agentSessionId,
+    issueTicket: issueAgentTicket,
+    renewSession: renewAgentSession,
+    closeSession: closeAgentSession,
+  } = useWebSkillAgentSession(enhanced, currentUser?.id);
   const [searchParams] = useSearchParams();
   const threadFromUrl =
     searchParams.get("thread") ??
@@ -330,13 +346,17 @@ export default function RemoteBrowserPage({
   // time (so the choice survives page switches via localStorage).
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(() => {
     try {
-      return localStorage.getItem(BROWSER_AI_PANEL_KEY) === "true";
+      const stored = localStorage.getItem(panelStorageKey);
+      return enhanced ? stored !== "false" : stored === "true";
     } catch {
-      return false;
+      return enhanced;
     }
   });
   const [aiPlacement, setAiPlacement] = useState<AssistantPlacement>(() =>
-    readAssistantPlacement(BROWSER_AI_PLACEMENT_KEY, "right"),
+    readAssistantPlacement(
+      enhanced ? WEBSKILL_AI_PLACEMENT_KEY : BROWSER_AI_PLACEMENT_KEY,
+      "right",
+    ),
   );
   const assistantPlacement: AssistantPlacement = isMobile
     ? "bottom"
@@ -387,6 +407,7 @@ export default function RemoteBrowserPage({
 
   const {
     status,
+    sessionInfo,
     tabs: streamTabs,
     connect,
     disconnect,
@@ -450,6 +471,7 @@ export default function RemoteBrowserPage({
       setStreamActive(true);
     },
     onAfterConnect: (profileId) => attachProfile(profileId, []),
+    issueTicket: enhanced ? issueAgentTicket : undefined,
   });
 
   // Keep view session in sync with stream tab updates
@@ -672,6 +694,14 @@ export default function RemoteBrowserPage({
 
   const createSession = useCallback(async () => {
     if (!browserProfile) return;
+    if (enhanced && !window.isSecureContext) {
+      showApiError(
+        t("webskill.insecureDescription"),
+        t("webskill.insecureTitle"),
+        t,
+      );
+      return;
+    }
     setCreating(true);
     try {
       startStream(browserProfile, normalizeUrl(navUrl) || DEFAULT_START_URL);
@@ -680,10 +710,11 @@ export default function RemoteBrowserPage({
     } finally {
       setCreating(false);
     }
-  }, [browserProfile, navUrl, startStream, t]);
+  }, [browserProfile, enhanced, navUrl, startStream, t]);
 
   const closeSession = useCallback(() => {
     disconnect();
+    closeAgentSession();
     profileIdRef.current = null;
     setSession(null);
     setFrameReady(false);
@@ -694,7 +725,7 @@ export default function RemoteBrowserPage({
       /* ignore */
     }
     clearCanvas(canvasRef.current);
-  }, [currentUser?.id, disconnect]);
+  }, [closeAgentSession, currentUser?.id, disconnect]);
 
   const shutdownBrowser = useCallback(() => {
     modal.confirm({
@@ -767,22 +798,22 @@ export default function RemoteBrowserPage({
     setIsAiPanelOpen((prev) => {
       const next = !prev;
       try {
-        localStorage.setItem(BROWSER_AI_PANEL_KEY, String(next));
+        localStorage.setItem(panelStorageKey, String(next));
       } catch {
         /* ignore */
       }
       return next;
     });
-  }, []);
+  }, [panelStorageKey]);
 
   const handleAiPanelClose = useCallback(() => {
     setIsAiPanelOpen(false);
     try {
-      localStorage.setItem(BROWSER_AI_PANEL_KEY, "false");
+      localStorage.setItem(panelStorageKey, "false");
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [panelStorageKey]);
 
   // --- Skill recording guide ---
   const [browserRecording, setBrowserRecording] = useState(false);
@@ -1288,26 +1319,28 @@ export default function RemoteBrowserPage({
                           ? null
                           : t("remoteBrowser.ai.title", "AI 助手")}
                       </Button>
-                      <Tooltip
-                        title={t(
-                          "skillRecordGuide.buttonTip",
-                          "录制浏览器操作，生成可复用的技能脚本",
-                        )}
-                      >
-                        <Button
-                          size="small"
-                          icon={<Sparkles size={14} />}
-                          onClick={openSkillGuide}
-                          aria-label={t(
-                            "skillRecordGuide.buttonLabel",
-                            "技能录制",
+                      {!enhanced && (
+                        <Tooltip
+                          title={t(
+                            "skillRecordGuide.buttonTip",
+                            "录制浏览器操作，生成可复用的技能脚本",
                           )}
                         >
-                          {isMobile
-                            ? null
-                            : t("skillRecordGuide.buttonLabel", "技能录制")}
-                        </Button>
-                      </Tooltip>
+                          <Button
+                            size="small"
+                            icon={<Sparkles size={14} />}
+                            onClick={openSkillGuide}
+                            aria-label={t(
+                              "skillRecordGuide.buttonLabel",
+                              "技能录制",
+                            )}
+                          >
+                            {isMobile
+                              ? null
+                              : t("skillRecordGuide.buttonLabel", "技能录制")}
+                          </Button>
+                        </Tooltip>
+                      )}
                       <Tooltip title={t("remoteBrowser.stop", "关闭浏览器")}>
                         <Button
                           size="small"
@@ -1431,7 +1464,21 @@ export default function RemoteBrowserPage({
             )}
           </div>
 
-          {isAiPanelOpen && (
+          {isAiPanelOpen && enhanced ? (
+            <WebSkillFrame
+              sessionId={agentSessionId}
+              userId={currentUser?.id ?? 0}
+              browserProfile={browserProfile}
+              browserActive={Boolean(session)}
+              controlOwner={sessionInfo?.control_owner ?? "agent"}
+              hidden={!isVisible}
+              placement={assistantPlacement}
+              placementLocked={isMobile}
+              onPlacementChange={setAiPlacement}
+              onSessionExpired={renewAgentSession}
+              onClose={handleAiPanelClose}
+            />
+          ) : isAiPanelOpen ? (
             <BrowserAiPanel
               tabs={tabs}
               currentUrl={session?.url || navUrl}
@@ -1453,7 +1500,7 @@ export default function RemoteBrowserPage({
               browserStarting={creating}
               onStartBrowser={() => void createSession()}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </>

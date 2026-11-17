@@ -290,6 +290,7 @@
     "terminal": "终端 AI+",
     "remoteBrowser": "浏览器 AI+",
     "workbench": "工作台",
+    "webskillBrowser": "浏览器",
     "remoteDesktop": "远程桌面",
     "agent": "智能体",
     "skills": "技能",
@@ -7683,5 +7684,14 @@
     "nameRequired": "请先填写名称",
     "failed": "润色失败，请稍后重试",
     "emptyResult": "模型未返回结果"
+  },
+  "webskill": {
+    "insecureTitle": "当前环境无法运行 WebSkill",
+    "insecureDescription": "请通过 HTTPS 或 localhost 访问 Octop，并使用支持 OPFS 与 WebCrypto 的现代浏览器；普通远程 HTTP 不会被静默接受。",
+    "loading": "正在加载 WebSkill",
+    "startRequired": "启动浏览器后，WebSkill 助手即可使用。",
+    "takeControl": "接管",
+    "returnControl": "交还助手",
+    "handoffFailed": "切换浏览器控制权失败"
   }
 }

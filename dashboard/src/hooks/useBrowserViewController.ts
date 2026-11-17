@@ -36,6 +36,7 @@ type ConnectStreamFn = (
   options?: {
     sessionId?: string | null;
     bridgeConnectionId?: string | null;
+    issueTicket?: () => Promise<{ ticket: string }>;
   },
 ) => void;
 
@@ -56,6 +57,8 @@ interface UseBrowserViewControllerOptions {
   onAfterConnect?: (sessionId: string) => void;
   /** When set, screencast is relayed to the peer Octop via Bridge. */
   bridgeConnectionId?: string | null;
+  /** New server-enhanced surface obtains a ticket with session recovery. */
+  issueTicket?: () => Promise<{ ticket: string }>;
 }
 
 /**
@@ -80,6 +83,7 @@ export function useBrowserViewController({
   onBeforeConnect,
   onAfterConnect,
   bridgeConnectionId = null,
+  issueTicket,
 }: UseBrowserViewControllerOptions) {
   // Hold the caller-provided callbacks/flags in a ref so ``startStream`` keeps
   // a stable identity even when those inline functions are recreated each
@@ -92,6 +96,7 @@ export function useBrowserViewController({
     onBeforeConnect,
     onAfterConnect,
     bridgeConnectionId,
+    issueTicket,
   });
   cfgRef.current = {
     isMobile,
@@ -100,6 +105,7 @@ export function useBrowserViewController({
     onBeforeConnect,
     onAfterConnect,
     bridgeConnectionId,
+    issueTicket,
   };
 
   const startStream = useCallback(
@@ -111,6 +117,7 @@ export function useBrowserViewController({
         onBeforeConnect: before,
         onAfterConnect: after,
         bridgeConnectionId: bridgeId,
+        issueTicket: getTicketSession,
       } = cfgRef.current;
       const containerEl = containerRef.current;
       const cw = containerEl?.clientWidth ?? 0;
@@ -138,6 +145,7 @@ export function useBrowserViewController({
         {
           sessionId: sessionId || undefined,
           bridgeConnectionId: bridgeId || undefined,
+          issueTicket: getTicketSession,
         },
       );
       after?.(sessionId);

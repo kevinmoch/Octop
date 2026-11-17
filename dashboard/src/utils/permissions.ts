@@ -106,6 +106,7 @@ export const NAV_PERMISSIONS = {
   "knowledge-bases": PERM.knowledgeBasesPage,
   bridge: PERM.bridge,
   workbench: PERM.workbench,
+  "webskill-browser": PERM.browser,
   "remote-desktop": ["desktop", "mobile"],
   "remote-phone": PERM.mobile,
   acp: "admin",
@@ -299,6 +300,7 @@ export function pathPermissionKeys(pathname: string): PermissionKeys | null {
   ) {
     return ["desktop", "mobile"];
   }
+  if (pathname === "/browser") return PERM.browser;
   if (pathname === "/workbench/terminal" || pathname === "/terminal") {
     return PERM.terminal;
   }

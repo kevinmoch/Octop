@@ -99,6 +99,8 @@ build-frontend:
 	@echo "[build-frontend] Building dashboard (output: $(DASHBOARD_DEST))..."
 	# Render peaks above 2GB (Full GC, then OOM at 2048 on GitHub runners).
 	cd $(DASHBOARD_DIR) && NODE_ENV=production NODE_OPTIONS="--max-old-space-size=4096" npm run build
+	@echo "[build-frontend] Building isolated WebSkill host..."
+	cd $(DASHBOARD_DIR)/webskill && npm ci && npm run build
 	@echo "[build-frontend] Done."
 
 .PHONY: build-wheel

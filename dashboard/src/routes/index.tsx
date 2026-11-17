@@ -16,6 +16,9 @@ const TokenUsagePage = lazy(() => import("../pages/Control/TokenUsage"));
 
 // Lazy-loaded pages — Control
 const RemoteDesktopPage = lazy(() => import("../pages/Control/RemoteDesktop"));
+const WebSkillBrowserPage = lazy(
+  () => import("../pages/Control/WebSkillBrowser"),
+);
 
 // Lazy-loaded pages — Settings
 const ModelsPage = lazy(() => import("../pages/Settings/Models"));
@@ -70,6 +73,7 @@ export const pathToKey: Record<string, string> = {
   "/acp": "acp",
   "/channels": "channels",
   "/workbench": "workbench",
+  "/browser": "webskill-browser",
   "/workbench/terminal": "workbench",
   "/workbench/browser": "workbench",
   "/workbench/cloud": "workbench",
@@ -103,6 +107,7 @@ export const FULLSCREEN_PATHS = new Set([
   "/workbench/terminal",
   "/workbench/browser",
   "/workbench/cloud",
+  "/browser",
   "/chat",
   "/remote-desktop",
   "/remote-desktop/desktop",
@@ -180,6 +185,7 @@ export const routeConfigs: RouteConfig[] = [
   { path: "/workbench/terminal", element: null },
   { path: "/workbench/browser", element: null },
   { path: "/workbench/cloud", element: null },
+  { path: "/browser", element: <WebSkillBrowserPage /> },
   {
     path: "/terminal",
     element: <RedirectPreserveSearch to="/workbench/terminal" />,

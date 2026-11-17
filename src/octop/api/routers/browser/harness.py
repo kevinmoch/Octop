@@ -9,10 +9,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from octop.api.deps import current_user
+from octop.api.deps import require_permission
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -295,7 +295,9 @@ async def harness_sessions_payload(profile_name: str) -> dict[str, Any]:
 
 
 @router.get("/browser/harness-sessions")
-async def list_harness_sessions(user: Any = Depends(current_user)) -> dict[str, Any]:
+async def list_harness_sessions(
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
     """List the current user's live octop-browser profile."""
     return await harness_sessions_payload(user_browser_profile(user.id))
 
@@ -304,15 +306,27 @@ async def list_harness_sessions(user: Any = Depends(current_user)) -> dict[str, 
 async def handoff(
     session_id: str,
     body: HandoffBody,
-    user: Any = Depends(current_user),
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
 ) -> dict[str, Any]:
-    """Switch control of a browser session between the agent and the user.
+    """Switch control and enforce the user-write barrier for WebSkill.
 
-    The control owner is a coordination hint (the agent yields interactive
-    input to the user while they are in control). It is stored in-memory per
-    session and reflected in ``harness-sessions`` and the WS screencast so a
-    takeover survives dashboard reloads and reconnects.
+    User control rejects new model writes and revokes outstanding grants. The
+    ownership is stored per profile and survives dashboard reconnects.
     """
+    from octop.api.routers.browser.webskill import (  # noqa: PLC0415
+        _http_error,
+        check_request_origin,
+    )
+    from octop.infra.control.browser.webskill.sessions import (  # noqa: PLC0415
+        BrowserAgentError,
+    )
+
+    try:
+        check_request_origin(request)
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
     profile = user_browser_profile(user.id)
     if session_id not in {"", "auto"} and session_id != profile:
         logger.debug("handoff path %r ignored; using %r", session_id, profile)
@@ -320,6 +334,12 @@ async def handoff(
     if target not in ("agent", "user"):
         raise OctopError(ErrorCode.SLASH_BAD_ARGS, "target must be 'agent' or 'user'")
     _CONTROL_OWNERS[profile] = target
+    if target == "user":
+        from octop.infra.control.browser.webskill.sessions import (  # noqa: PLC0415
+            browser_agent_registry,
+        )
+
+        browser_agent_registry.revoke_grants(profile=profile)
 
     payload = await harness_sessions_payload(profile)
     session = next(
@@ -348,7 +368,7 @@ async def handoff(
     "/browser/shutdown",
     summary="Stop the local Chrome process for an octop-browser profile",
 )
-async def shutdown_browser(user: Any = Depends(current_user)) -> dict[str, Any]:
+async def shutdown_browser(user: Any = Depends(require_permission("browser"))) -> dict[str, Any]:
     """Terminate the current user's Octop-managed Chrome. Cookies stay on disk."""
     try:
         from octop_browser.tool_interface import browser_tool

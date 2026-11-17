@@ -33,9 +33,12 @@ class ASGIWebSocketSession:
     uvicorn in production.
     """
 
-    def __init__(self, app: Any, path: str) -> None:
+    def __init__(
+        self, app: Any, path: str, *, headers: list[tuple[bytes, bytes]] | None = None
+    ) -> None:
         self._app = app
         self._path = path
+        self._headers = headers
         self._from_app: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._to_app: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
@@ -51,7 +54,7 @@ class ASGIWebSocketSession:
             "raw_path": url.path.encode("ascii"),
             "query_string": url.query.encode("ascii"),
             "root_path": "",
-            "headers": [(b"host", b"testserver")],
+            "headers": [(b"host", b"testserver"), *(self._headers or [])],
             "client": ("testclient", 50000),
             "server": ("testserver", 80),
             "subprotocols": [],
@@ -132,9 +135,11 @@ class ASGIWebSocketSession:
 
 
 @asynccontextmanager
-async def ws_connect(app: Any, path: str) -> AsyncIterator[ASGIWebSocketSession]:
+async def ws_connect(
+    app: Any, path: str, *, headers: list[tuple[bytes, bytes]] | None = None
+) -> AsyncIterator[ASGIWebSocketSession]:
     """Open an in-process websocket session against *app* on the current loop."""
-    session = ASGIWebSocketSession(app, path)
+    session = ASGIWebSocketSession(app, path, headers=headers)
     try:
         await session.connect()
         yield session
