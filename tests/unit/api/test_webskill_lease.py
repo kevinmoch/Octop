@@ -134,3 +134,77 @@ def test_process_crash_releases_the_lease(tmp_path: Path) -> None:
             return
 
     asyncio.run(acquire())
+
+
+def _create_browser(profile: str, directory: str, barrier, results) -> None:
+    async def run() -> None:
+        import octop_browser.session as session_module
+        from octop_browser import BrowserSession
+        from octop_browser.profile import ProfileManager
+        from octop_browser.settings import settings
+
+        settings.profiles_dir = directory
+        started: float | None = None
+
+        class FakeClient:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            async def connect(self, _ws_url: str) -> None:
+                assert started is not None
+                await asyncio.sleep(0.02)
+                results.put((started, time.monotonic()))
+
+            async def enable_domain(self, _domain: str) -> None:
+                return
+
+            async def send(self, *_args, **_kwargs) -> dict:
+                return {}
+
+            async def close(self) -> None:
+                return
+
+        async def launch(_profile, *, headless: bool) -> None:
+            nonlocal started
+            started = time.monotonic()
+            await asyncio.sleep(0.2)
+
+        async def page_ws_url(_port: int, *, profile=None) -> str:
+            return "ws://fixture"
+
+        session_module.CDPClient = FakeClient
+        session_module.launch_or_attach = launch
+        session_module.get_page_ws_url = page_ws_url
+        barrier.wait(timeout=10)
+        browser = await BrowserSession.create(
+            profile=profile,
+            mode="headless",
+            profile_manager=ProfileManager(base_dir=Path(directory)),
+            command_gate=profile_command_gate(profile),
+        )
+        await browser.close()
+
+    asyncio.run(run())
+
+
+def test_two_processes_serialize_browser_session_connect(tmp_path: Path) -> None:
+    context = multiprocessing.get_context("spawn")
+    barrier = context.Barrier(2)
+    results = context.JoinableQueue()
+    processes = [
+        context.Process(
+            target=_create_browser,
+            args=("user-1", str(tmp_path), barrier, results),
+        )
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=15)
+        assert process.exitcode == 0
+
+    intervals = sorted(results.get(timeout=2) for _ in processes)
+    assert len(intervals) == 2
+    first, second = intervals
+    assert second[0] >= first[1] - 0.02

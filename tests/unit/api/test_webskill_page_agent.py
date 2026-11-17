@@ -754,10 +754,22 @@ async def test_unknown_frame_fails_with_scope_error(registry: BrowserAgentRegist
     assert str(error.value) == "This frame is outside the allowed perception scope."
 
 
-async def test_oopif_read_grant_click_and_detach(registry: BrowserAgentRegistry) -> None:
+async def test_oopif_read_grant_click_and_detach(
+    registry: BrowserAgentRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from octop.infra.control.browser.webskill import page_agent as page_agent_module
+
     browser = FrameBrowser()
     session = registry.create(1, "user-1")
     resolver = resolver_for(browser)
+    target_clients: list[object] = []
+    original_target_diff = page_agent_module.newly_opened_page_target
+
+    async def observe_target_diff(client: object, previous: set[str]) -> str | None:
+        target_clients.append(client)
+        return await original_target_diff(client, previous)
+
+    monkeypatch.setattr(page_agent_module, "newly_opened_page_target", observe_target_diff)
     perceived = await read_page(
         session,
         {
@@ -786,6 +798,7 @@ async def test_oopif_read_grant_click_and_detach(registry: BrowserAgentRegistry)
     assert browser.client.evaluation_context_ids
     assert set(browser.client.evaluation_context_ids) == {77}
     assert not browser.client.context_listeners.get("Runtime.executionContextCreated")
+    assert target_clients == [browser.client]
 
 
 async def test_oopif_navigation_invalidates_grant(registry: BrowserAgentRegistry) -> None:
@@ -928,3 +941,76 @@ async def test_frame_snapshot_and_identity_must_match(
         )
     assert error.value.code == "PERCEPTION_FAILED"
     assert "snapshot" in str(error.value)
+
+
+async def test_back_uses_model_target_instead_of_base_history(
+    registry: BrowserAgentRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from octop.infra.control.browser.webskill import page_agent as page_agent_module
+
+    browser = FrameBrowser()
+    browser.client.new_target_url = "https://example.test/child"
+    browser.go_back = AsyncMock()
+    scoped_back = AsyncMock(return_value=tool_result("back"))
+    monkeypatch.setattr(page_agent_module.navigate, "go_back", scoped_back)
+    session = registry.create(1, "user-1")
+    session.base_target_id = "target-1"
+    session.model_target = "target-2"
+    resolver = resolver_for(browser)
+    await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    request = {"ref": "@document", "action": "back"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    result = await execute_action(
+        session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    assert result["outcome"]["ok"] is True
+    scoped_back.assert_awaited_once()
+    browser.go_back.assert_not_awaited()
+
+
+async def test_attach_model_target_preserves_lease_timeout(
+    registry: BrowserAgentRegistry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from octop.infra.control.browser.webskill import targets as target_module
+
+    async def locked(*args, **kwargs):
+        raise BrowserAgentError("WRITE_LOCKED", "Another writer holds the browser lease")
+
+    monkeypatch.setattr(target_module, "attach_page_target", locked)
+    session = registry.create(1, "user-1")
+    session.base_target_id = "target-1"
+    session.model_target = "target-2"
+    with pytest.raises(BrowserAgentError) as error:
+        await target_module.attach_model_target(session, FakeBrowser())
+    assert error.value.code == "WRITE_LOCKED"
+
+
+async def test_oopif_cleanup_does_not_mask_primary_failures() -> None:
+    class FailingClient:
+        def off(self, _event: str, _listener: object) -> None:
+            raise RuntimeError("listener cleanup failed")
+
+        async def close(self) -> None:
+            raise RuntimeError("detach failed")
+
+    attached = OopifSession(
+        client=FailingClient(),
+        target_id="target",
+        session_id="session",
+        frame_key="frame",
+        execution_context_id=1,
+        url="https://example.test",
+        title="Example",
+        context_listener=object(),
+    )
+    await attached.close()
+    assert attached.closed is True

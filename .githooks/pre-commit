@@ -55,10 +55,11 @@ if ((${#STAGED_FILES[@]} > 0)); then
   fi
 fi
 
-echo "[pre-commit] dashboard npm run build"
+echo "[pre-commit] dashboard and WebSkill builds"
 (
   cd "$ROOT/dashboard"
   npm run build
+  npm --prefix webskill run build
 )
 
 echo "[pre-commit] all checks passed"

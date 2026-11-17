@@ -39,8 +39,9 @@ class OopifSession:
         if self.closed:
             return
         self.closed = True
-        self.client.off("Runtime.executionContextCreated", self.context_listener)
-        with contextlib.suppress(CDPSessionError):
+        with contextlib.suppress(Exception):
+            self.client.off("Runtime.executionContextCreated", self.context_listener)
+        with contextlib.suppress(Exception):
             await self.client.close()
 
 

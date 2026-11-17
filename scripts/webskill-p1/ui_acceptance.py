@@ -42,13 +42,14 @@ class CounterHandler(BaseHTTPRequestHandler):
         if self.path == "/count":
             self.respond(json.dumps({"count": self.server.clicks}), "application/json")
             return
-        if self.path == "/frame":
+        if self.path in {"/frame", "/frame?cross=1"}:
+            label = "Cross once" if self.path == "/frame?cross=1" else "Frame once"
             self.respond(
-                "<!doctype html><html><body><button onclick=\"fetch('/click', {method:'POST'})\">Frame once</button></body></html>"
+                f"<!doctype html><html><body><button onclick=\"fetch('/click', {{method:'POST'}})\">{label}</button></body></html>"
             )
             return
         self.respond(
-            "<!doctype html><html><body><button onclick=\"fetch('/click', {method:'POST'})\">Run once</button><iframe id=\"same-frame\" src=\"/frame\"></iframe></body></html>"
+            f"<!doctype html><html><body><button onclick=\"fetch('/click', {{method:'POST'}})\">Run once</button><iframe id=\"same-frame\" src=\"/frame\"></iframe><iframe id=\"cross-frame\" src=\"http://localhost:{self.server.server_port}/frame?cross=1\"></iframe></body></html>"
         )
 
     def do_POST(self) -> None:
@@ -311,6 +312,20 @@ async def run() -> dict[str, Any]:
                 await asyncio.sleep(0.05)
             assert counter.clicks == 2, f"Expected two page clicks, got {counter.clicks}"
             await frame.get_by_text("FRAME_DONE", exact=False).wait_for(timeout=90_000)
+
+            composer = frame.locator("textarea:visible").last
+            await composer.fill(
+                "Use the page tools to click the button named Cross once exactly once inside the iframe named cross-frame. After the click, reply exactly OOPIF_DONE."
+            )
+            await composer.press("Enter")
+            confirmation = frame.get_by_role("button", name="允许", exact=True)
+            await confirmation.wait_for(timeout=90_000)
+            await confirmation.click()
+            deadline = time.monotonic() + 15
+            while counter.clicks < 3 and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert counter.clicks == 3, f"Expected three page clicks, got {counter.clicks}"
+            await frame.get_by_text("OOPIF_DONE", exact=False).wait_for(timeout=90_000)
             certificate_errors = [
                 error
                 for error in errors
@@ -334,7 +349,8 @@ async def run() -> dict[str, Any]:
                 "expiredTicketRecoveredWithNewSession": len(set(created_session_ids)) == 2,
                 "expectedExpiredTicketResponses": len(expected_ticket_errors),
                 "confirmedRealClickCount": counter.clicks,
-                "confirmedSameOriginFrameClickCount": counter.clicks - 1,
+                "confirmedSameOriginFrameClickCount": 1,
+                "confirmedOopifClickCount": 1,
                 "pageErrors": unexpected_errors,
                 "environmentCertificateErrors": certificate_errors,
                 "webSocketQueryKeys": websocket_queries,
@@ -348,6 +364,12 @@ async def run() -> dict[str, Any]:
                 "pageErrors": errors,
                 "fixtureClickCount": counter.clicks,
                 "frames": [frame.url for frame in page.frames],
+                "createdSessionIds": created_session_ids,
+                "webSocketQueryKeys": websocket_queries,
+                "frameBodies": {
+                    frame.url: (await frame.locator("body").inner_text())[:1500]
+                    for frame in page.frames
+                },
                 "bodyText": (await page.locator("body").inner_text())[:2000],
             }
         finally:

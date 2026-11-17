@@ -263,23 +263,27 @@ async def test_ticket_stream_releases_unclaimed_session_registration(
     ("client_host", "accepted"),
     [("127.0.0.1", True), ("203.0.113.20", False)],
 )
+@pytest.mark.parametrize("protocol", ["http", "websocket"])
 async def test_origin_scheme_comes_only_from_a_trusted_proxy(
-    client_host: str, accepted: bool
+    client_host: str, accepted: bool, protocol: str
 ) -> None:
     from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
     async def endpoint(scope, receive, send) -> None:
-        from fastapi import Request
+        from fastapi import Request, WebSocket
 
-        webskill.check_request_origin(Request(scope))
+        if protocol == "websocket":
+            webskill.check_websocket_origin(WebSocket(scope, receive, send))
+        else:
+            webskill.check_request_origin(Request(scope))
 
     app = ProxyHeadersMiddleware(endpoint, trusted_hosts="127.0.0.1")
     scope = {
-        "type": "http",
+        "type": protocol,
         "asgi": {"version": "3.0"},
         "http_version": "1.1",
         "method": "POST",
-        "scheme": "http",
+        "scheme": "ws" if protocol == "websocket" else "http",
         "path": "/api/browser-agent/sessions",
         "raw_path": b"/api/browser-agent/sessions",
         "query_string": b"",

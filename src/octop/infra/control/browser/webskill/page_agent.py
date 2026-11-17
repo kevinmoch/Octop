@@ -481,7 +481,7 @@ async def execute_action(
                 else browser._internal.client
             )  # noqa: SLF001
             document = await document_identity(session, browser, client)
-            previous_target_ids = await page_target_ids(client)
+            previous_target_ids = await page_target_ids(browser._internal.client)  # noqa: SLF001
             registry.consume_grant(session, grant_token, document=document, request=request)
             if not write_gate():
                 raise BrowserAgentError(
@@ -500,6 +500,12 @@ async def execute_action(
                 await client.send("DOM.getDocument", {"depth": -1})
             else:
                 await assert_frame_identity_current(client, entry.frame)
+            if (
+                model_attachment is not None
+                and attached is None
+                and request.get("action") != "back"
+            ):
+                await client.send("DOM.getDocument", {"depth": -1})
             target = await _actual_target(browser, entry, document, client)
             if target.get("secret") is True:
                 return {
@@ -515,7 +521,7 @@ async def execute_action(
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
             action_cache = RefCache()
             try:
-                if action == "back" and attached is not None:
+                if action == "back" and model_attachment is not None:
                     result = await navigate.go_back(client, RefCache())
                 elif action == "back":
                     result = await browser.go_back()
@@ -591,7 +597,10 @@ async def execute_action(
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
                 outcome["documentUrl"] = current_url
-            new_target = await newly_opened_page_target(client, previous_target_ids)
+            new_target = await newly_opened_page_target(
+                browser._internal.client,
+                previous_target_ids,  # noqa: SLF001
+            )
             if new_target is not None:
                 session.model_target = new_target
                 session.document = None

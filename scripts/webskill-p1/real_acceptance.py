@@ -53,6 +53,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         elif self.path == "/child":
             body = """<!doctype html><html><body>
 <button id="child-action" onclick="window.childClicks=(window.childClicks||0)+1">Child action</button>
+<a href="/next">Child next</a>
 </body></html>"""
         elif self.path in {"/frame-next", "/frame-next?cross=1"}:
             body = """<!doctype html><html><body><h1>Next frame</h1>
@@ -123,7 +124,7 @@ async def perform_action(
             "grant": issued.json()["grant"],
         },
     )
-    assert executed["outcome"]["ok"] is True, executed
+    assert executed.get("outcome", {}).get("ok") is True, executed
     return executed
 
 
@@ -546,21 +547,9 @@ async def accept() -> dict[str, Any]:
                     },
                 )
                 assert frame_next["type"] == "perceive-result", frame_next
-                await perform_action(
-                    client, ws, headers, session_id, "oopif-back",
-                    "@document", "back",
+                assert frame_next["result"]["page"]["url"] == (
+                    f"http://localhost:{fixture.server_port}/frame-next?cross=1"
                 )
-                frame_back = await call(
-                    ws,
-                    {
-                        "type": "perceive",
-                        "requestId": "oopif-back-read",
-                        "scope": {
-                            "frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]
-                        },
-                    },
-                )
-                assert frame_back.get("result", {}).get("page", {}).get("url") == cross_url, frame_back
 
                 await browser.navigate(f"{fixture_url}next")
                 next_perceived = await call(
@@ -699,6 +688,44 @@ async def accept() -> dict[str, Any]:
                     target.get("name") == "Child action"
                     for target in child_perceived["targets"]
                 )
+                child_next = next(
+                    target["ref"] for target in child_perceived["targets"]
+                    if target.get("name") == "Child next"
+                )
+                await perform_action(
+                    client, ws, headers, session_id, "child-next",
+                    child_next, "click",
+                )
+                child_next_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "child-next-read",
+                        "scope": {"include": ["body"]},
+                    },
+                )
+                assert child_next_perceived["result"]["page"]["url"] == f"{fixture_url}next"
+                await perform_action(
+                    client, ws, headers, session_id, "model-target-back",
+                    "@document", "back",
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    child_after_back = await call(
+                        ws,
+                        {
+                            "type": "perceive",
+                            "requestId": "child-back-read",
+                            "scope": {"include": ["body"]},
+                        },
+                    )
+                    if child_after_back.get("result", {}).get("page", {}).get("url") == f"{fixture_url}child":
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("The model target did not navigate back")
+                assert browser_agent_registry.get(session_id, user_id).model_target == model_target
+                assert await browser_value(browser, "location.href") == f"{fixture_url}next"
 
                 wrong_origin = await client.post(
                     f"/api/browser-agent/sessions/{session_id}/tickets",
@@ -742,8 +769,9 @@ async def accept() -> dict[str, Any]:
                     "same-origin frame read/click and child-navigation grant invalidation",
                     "same-origin frame fill, select and scroll have real side effects",
                     "OOPIF attach, default execution context, scoped click and stale-grant rejection",
-                    "OOPIF fill, select, scroll and frame-scoped back have real side effects",
+                    "OOPIF fill, select and scroll have real side effects; back is document-scoped",
                     "target=_blank moves modelTarget into the new page without losing perception",
+                    "back after target=_blank changes only modelTarget history, not the base page",
                     "one-shot ticket over real HTTP/WS",
                     "confirmed grant and exactly one real mouse click",
                     "grant replay rejection without another side effect",
