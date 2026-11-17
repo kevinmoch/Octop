@@ -94,4 +94,36 @@ describe("OctopPageAgentTransport frame routing", () => {
     });
     transport.dispose();
   });
+
+  it("preserves the public write-lock error code", async () => {
+    class ErrorWebSocket extends FakeWebSocket {
+      send(raw: string) {
+        const request = JSON.parse(raw) as Record<string, unknown>;
+        queueMicrotask(
+          () =>
+            this.onmessage?.({
+              data: JSON.stringify({
+                type: "error",
+                code: "WRITE_LOCKED",
+                message: "Another writer holds the browser lease",
+                requestId: request.requestId,
+              }),
+            }),
+        );
+      }
+    }
+    vi.stubGlobal("WebSocket", ErrorWebSocket);
+    const bridge = {
+      call: vi.fn(async () => ({ ticket: "test-ticket" })),
+    } as unknown as OctopHostBridge;
+    const transport = new OctopPageAgentTransport(bridge);
+
+    const reply = await transport.send({
+      type: "perceive",
+      scope: { include: ["body"] },
+    });
+
+    expect(reply).toMatchObject({ type: "error", code: "WRITE_LOCKED" });
+    transport.dispose();
+  });
 });

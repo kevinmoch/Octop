@@ -908,6 +908,8 @@ async def accept() -> dict[str, Any]:
                     for target in workset_perceived["targets"]
                     if target.get("name") == "Child next"
                 )
+                document_before_overflow = live_session.document
+                refs_before_overflow = dict(live_session.refs)
                 overflow = await perform_action(
                     client,
                     ws,
@@ -920,6 +922,8 @@ async def accept() -> dict[str, Any]:
                 assert "workset limit" in overflow["outcome"]["reason"], overflow
                 assert live_session.model_target == model_target
                 assert len(live_session.model_targets) == 2
+                assert live_session.document is document_before_overflow
+                assert live_session.refs == refs_before_overflow
 
                 wrong_origin = await client.post(
                     f"/api/browser-agent/sessions/{session_id}/tickets",

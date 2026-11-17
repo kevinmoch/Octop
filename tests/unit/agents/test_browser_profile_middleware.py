@@ -36,6 +36,8 @@ async def test_browser_profile_is_forced_from_current_user(monkeypatch) -> None:
         "profile": "user-42",
     }
     assert tool_interface._command_gate_factory is browser_profile.profile_command_gate
+    assert tool_interface._write_gate_factory is not None
+    assert tool_interface._write_gate_factory("user-42") is True
 
 
 @pytest.mark.asyncio

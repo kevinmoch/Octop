@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from octop.api.deps import current_user, require_permission
+from octop.infra.control.browser.webskill.ownership import control_owner_for
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -68,6 +69,15 @@ async def send_record_request(request: dict[str, Any]) -> dict[str, Any]:
     return await send_request(request)
 
 
+def _require_agent_control(profile: str) -> None:
+    if control_owner_for(profile) == "user":
+        raise OctopError(
+            ErrorCode.FORBIDDEN,
+            "User control is active; return control before browser writes",
+            status=409,
+        )
+
+
 async def run_replay_recording(
     recording_id: str,
     *,
@@ -84,6 +94,7 @@ async def run_replay_recording(
         ) from exc
     from octop.api.routers.browser.harness import resolve_harness_session
 
+    _require_agent_control(profile)
     session = await resolve_harness_session(profile)
     if session is None or getattr(session._internal, "_command_gate", None) is None:  # noqa: SLF001
         raise OctopError(
@@ -93,6 +104,7 @@ async def run_replay_recording(
         )
 
     async def execute(action: str, **kwargs: Any) -> Any:
+        _require_agent_control(profile)
         kwargs.pop("profile", None)
         return await getattr(session, action)(**kwargs)
 
@@ -170,12 +182,14 @@ async def record_start(
     body: RecordStartBody,
     user: Any = Depends(current_user),
 ) -> dict[str, Any]:
+    profile = user_browser_profile(user.id)
+    _require_agent_control(profile)
     daemon = await ensure_record_daemon()
     _raise_if_not_ok(daemon, status=503)
     data = await send_record_request(
         {
             "command": "start",
-            "profile": user_browser_profile(user.id),
+            "profile": profile,
             "name": body.name,
             "privacy": body.privacy or "mask-sensitive",
             "screenshots": "off",

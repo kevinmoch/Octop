@@ -48,6 +48,9 @@ async def test_command_gate_uses_the_real_lease(tmp_path: Path, monkeypatch) -> 
 
 
 async def test_lease_timeout_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    import asyncio
+    from contextvars import Context
+
     import pytest
     from octop_browser import lease as lease_module
 
@@ -60,11 +63,14 @@ async def test_lease_timeout_fails_closed(tmp_path: Path, monkeypatch) -> None:
     async def advance_time(_seconds: float) -> None:
         now[0] += 11.0
 
+    async def compete() -> None:
+        async with profile_lease("user-1"):
+            pass
+
     monkeypatch.setattr(lease_module.asyncio, "sleep", advance_time)
     async with profile_lease("user-1"):
         with pytest.raises(BrowserAgentError) as error:
-            async with profile_lease("user-1"):
-                pass
+            await Context().run(asyncio.create_task, compete())
     assert error.value.code == "WRITE_LOCKED"
 
 

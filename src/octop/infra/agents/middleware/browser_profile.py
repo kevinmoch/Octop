@@ -11,7 +11,10 @@ from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
-from octop_browser.tool_interface import configure_browser_command_gate
+from octop_browser.tool_interface import (
+    configure_browser_command_gate,
+    configure_browser_write_gate,
+)
 
 from octop.infra.control.browser.bundled import browser_enabled
 from octop.infra.control.browser.webskill.lease import profile_command_gate
@@ -72,6 +75,7 @@ def _bind_browser_profile(request: ToolCallRequest) -> ToolCallRequest | ToolMes
             status="error",
         )
     configure_browser_command_gate(profile_command_gate)
+    configure_browser_write_gate(lambda name: control_owner_for(name) != "user")
     return request.override(tool_call={**tool_call, "args": args})
 
 

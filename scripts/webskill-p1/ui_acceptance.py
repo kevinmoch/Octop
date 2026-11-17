@@ -267,16 +267,6 @@ async def run() -> dict[str, Any]:
                                 "browserContextId": browser_context_id,
                             },
                         )
-                if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1":
-                    cdp = await page.context.new_cdp_session(page)
-                    await cdp.send(
-                        "Browser.setPermission",
-                        {
-                            "permission": {"name": "local-network-access"},
-                            "setting": "denied",
-                            "origin": BASE_URL,
-                        },
-                    )
                 denied_states = await page.evaluate("""async () => {
                     const states = {};
                     for (const name of ['local-network', 'loopback-network']) {

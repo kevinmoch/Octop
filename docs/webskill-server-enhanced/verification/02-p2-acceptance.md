@@ -73,16 +73,26 @@
 - 同一 profile 的观看端共享 `ProfileFrameHub`，限制最多 4 个订阅，最后一个订阅关闭后取消采集并清除缓存。单测验证共享帧、上限与回收；真实双 WS 验收确认两个观看端均有帧且只有一个采集 hub。
 - 全量回归定位到旧 `test_browser_stream_frames` 将共享的 `asyncio.sleep` 替换为不让出事件循环的假函数，导致新抓图任务忙循环。测试已改为真实调度，按实际发送帧数停止，并允许采集端最多一个在途尾部帧；抓图与 hub 专项共 3 项通过。
 - 最新真实证据为 `.artifacts/webskill-p1/0b75b34fe0/result.json`。真实 UI 三击链路已在本次 writer/hub 改动后重新执行并通过，证据为 `.artifacts/webskill-p1/ui/ui-result.json`。
-- **LNA 未通过**：在隔离局域网 HTTPS Origin + TLS 模型桩下，分别使用权限拒绝和现有 Permissions-Policy 拒绝配置，模型端点仍收到 1 次真实 POST；两处均因模型端点收到 1 次真实 POST 而失败，不能据此宣称 LNA 拒绝或生产支持。脚本保留在 `ui_acceptance.py`，供修正浏览器/策略前提后复验。
+- **首次 LNA 验收未通过**：在隔离局域网 HTTPS Origin + TLS 模型桩下，权限拒绝和 Permissions-Policy 拒绝均仍发送了 1 次真实 POST。该失败触发了下述应用层失败关闭整改，不作为环境噪声忽略。
+
+### P2-5 评审整改（2026-11-17，本地 candidate）
+
+- `c1a8202` 让同一异步上下文中的同一路径 lease 可重入，`switch_to_target` 的 activate、HTTP target 查询、旧 client 关闭和新 client 连接处于同一外层事务；`c359041` 补充独立 Context 不重入的隔离验证。library 全量为 **261 passed, 9 skipped**。
+- FrameHub 捕获异常后保留任务并继续后续采集，已有订阅可恢复；首订阅失败会清理空 hub。抓图不再固定首个观看端的 session，而是每次按 profile 解析当前 session。FrameHub/stream 专项为 **6 passed**。
+- target 工作集溢出时保留旧 document、refs 和 grant 上下文，只追加诊断原因；`WRITE_LOCKED` 通过公共 WS 错误映射保持为 `WRITE_LOCKED`，不再降级为通用工具失败。
+- 接管写拦截覆盖 browser_use、已配置宿主 gate 的直接 browser_tool、Replay 的每个动作及录制启动；录制停止仍允许用于资源清理。独立 daemon 进程仍没有跨进程 owner 状态，本项不宣称跨进程接管已完成。
+- LNA 在创建模型客户端前按源/目标地址空间查询 `local-network` 或 `loopback-network`，`denied` 时以既有 `LLM_REQUEST_FAILED` 失败关闭且不调用 fetch；不查询旧 `local-network-access`。权限拒绝与 Permissions-Policy 拒绝的真实 Chromium 复验均为 `modelRequests=0`，证据分别为 `.artifacts/webskill-p1/ui/ui-result-lna-permission.json` 和 `ui-result-lna-policy.json`。
+- 整改后的真实 Chromium/HTTP/WS/daemon 证据为 `.artifacts/webskill-p1/9c8c7c30bb/result.json`；普通真实 UI 三击链路也已重新执行通过。上述 LNA 证据使用隔离自签 TLS，不替代生产受信 TLS 验收。
 
 ## 6. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
-- `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`transport.test.ts` 1 项覆盖 SDK frame 下钻与聚合；`model.test.ts` 3 项模型边界测试继续通过，前端合计 13 项。TypeScript、ESLint 和 Prettier 检查通过。
+- `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`transport.test.ts` 2 项覆盖 SDK frame 下钻/聚合与 `WRITE_LOCKED` 透传；`model.test.ts` 4 项模型边界测试（含 LNA 拒绝时不调用 fetch）继续通过，前端合计 15 项。TypeScript、ESLint 和 Prettier 检查通过。
 - 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace 和主题切换均通过；主页面、同源 frame、OOPIF 各一次真实单击，`pageErrors` 为空。最新证据为 `.artifacts/webskill-p1/ui/ui-result.json`，`confirmedRealClickCount=3`、`confirmedSameOriginFrameClickCount=1`、`confirmedOopifClickCount=1`，WS query 仅有 width/height/ticket。
 - P2-0 首项及生命周期补强后的全量 `make all PYTEST_JOBS=4` 均为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。生命周期真实 UI 在全量结束后复验通过，首次模型超时未产生页面脚本错误。
 - P2-4 本轮全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5925 passed, 45 skipped**；Ruff、1315 个文件的格式检查和 mypy（686 个源码文件）均通过。其后新增 lease timeout/Windows 偏移测试纳入上述 71 项专项，并由最终提交钩子再次覆盖。
-- P2-5 最终全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5939 passed, 45 skipped**（370.44 秒）；Ruff、1318 个文件的格式检查和 mypy（688 个源码文件）均通过。浏览器专项为 **98 passed**，真实 UI 三击链路在全量启动后独立复验通过。
+- P2-5 初次收尾全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5939 passed, 45 skipped**（370.44 秒）；Ruff、1318 个文件的格式检查和 mypy（688 个源码文件）均通过。
+- P2-5 评审整改后全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5945 passed, 45 skipped**（342.38 秒）；Ruff、1318 个文件的格式检查和 mypy（688 个源码文件）均通过。浏览器专项 **104 passed**、前端 **15 passed**、library **261 passed, 9 skipped**；真实 daemon/页面、普通 UI 与两种 LNA 拒绝场景均有独立证据。
 
 实际执行命令：
 
@@ -107,19 +117,19 @@ UV_NO_SYNC=1 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" uv ru
   tests/unit/api/test_browser_frame_hub.py \
   tests/unit/agents/test_browser_profile_middleware.py \
   tests/integration/test_browser_record_replay_api.py -q
-# 98 passed
+# 104 passed
 
 make build-frontend
 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JOBS=4
 ```
 
-真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。
+真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。LNA 场景设置 `WEBSKILL_P1_LNA_DENY=1`，分别使用 `Browser.setPermission` 的 granular 权限拒绝或 `WEBSKILL_P1_LNA_POLICY=1`，并保留各自 artifact。
 
 ## 7. 尚未开放
 
-- 跨进程接管状态、动作级事务锁和共享写入容量验收尚未完成；已有 daemon/ReplayRunner/gate 接线不能据此通过 AC-15、AC-40、AC-51、AC-60。
+- 跨进程接管状态、其他完整动作事务和共享写入容量验收尚未完成；`switch_to_target` 已有事务 lease，但已有 daemon/ReplayRunner/gate 接线不能据此通过 AC-15、AC-40、AC-51、AC-60。
 - 工作集和抓图 hub 只有本地候选证据；后台 viewTarget 连续 60 秒出帧、容量/p95 和 Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
 - OOPIF 内再嵌套 frame 的下钻与聚合仍未开放；当前真实 UI 证据只覆盖一层 OOPIF。
-- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
+- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977`、`c1a8202`、`c359041` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
 - P3 的逐步授权回放、技能执行和文档产物。
-- 本轮 LNA 实测失败，且使用的是隔离自签 TLS 而非生产受信 TLS；这两项均不能标为通过。
+- LNA 两种拒绝场景已在隔离自签 TLS 下通过；生产受信 TLS 及真实用户授权/拒绝矩阵仍需独立验收，不能将当前证据扩大为所有浏览器和网络拓扑均已通过。

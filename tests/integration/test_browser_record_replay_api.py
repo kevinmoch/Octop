@@ -107,6 +107,22 @@ async def test_record_replay_start_returns_503_when_daemon_fails(env: Any) -> No
     assert body["error"]["details"]["recordReplay"]["error"] == "Daemon did not start"
 
 
+async def test_record_replay_start_rejects_user_takeover(env: Any, monkeypatch: Any) -> None:
+    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+
+    client, _srv, auth = env
+    monkeypatch.setitem(_CONTROL_OWNERS, "user-1", "user")
+    with patch(
+        "octop.api.routers.browser.record_replay.ensure_record_daemon",
+        new=AsyncMock(),
+    ) as mock_ensure:
+        r = await client.post("/api/browser/record-replay/start", headers=auth, json={})
+
+    assert r.status_code == 409
+    assert r.json()["error"]["code"] == "FORBIDDEN"
+    mock_ensure.assert_not_awaited()
+
+
 async def test_record_replay_stop_generates_steps(env: Any) -> None:
     client, _srv, auth = env
     owned = SimpleNamespace(read_manifest=lambda _rid: SimpleNamespace(profile="user-1"))
@@ -284,6 +300,55 @@ async def test_replay_executor_uses_the_gated_browser_session(tmp_path, monkeypa
 
     assert report["status"] == "passed", report.get("error") or report["steps"]
     assert calls == ["https://example.test"]
+
+
+async def test_replay_stops_when_user_takes_control(tmp_path, monkeypatch) -> None:
+    from octop_browser.models import ActionMetrics, ToolResult
+    from octop_browser.record.models import RecordingManifest, SemanticStep, StepsDocument
+    from octop_browser.record.settings import RecordReplaySettings
+    from octop_browser.record.store import RecordingStore
+
+    from octop.api.routers.browser import record_replay
+    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+
+    calls: list[str] = []
+    monkeypatch.setitem(_CONTROL_OWNERS, "user-1", "agent")
+
+    async def navigate(url: str) -> ToolResult:
+        calls.append(url)
+        _CONTROL_OWNERS["user-1"] = "user"
+        return ToolResult(
+            success=True,
+            content="ok",
+            metrics=ActionMetrics(
+                action="navigate", duration_ms=0, dom_nodes_scanned=0, estimated_tokens=0
+            ),
+        )
+
+    session = SimpleNamespace(_internal=SimpleNamespace(_command_gate=object()), navigate=navigate)
+    monkeypatch.setattr(
+        "octop.api.routers.browser.harness.resolve_harness_session",
+        AsyncMock(return_value=session),
+    )
+    store = RecordingStore(RecordReplaySettings(base_dir=tmp_path))
+    store.create(RecordingManifest(recordingId="rec_takeover", createdAt="now"))
+    store.write_steps(
+        "rec_takeover",
+        StepsDocument(
+            recordingId="rec_takeover",
+            steps=[
+                SemanticStep(id="step_001", kind="open", url="https://example.test/1"),
+                SemanticStep(id="step_002", kind="open", url="https://example.test/2"),
+            ],
+        ),
+    )
+    monkeypatch.setattr("octop_browser.record.replay.RecordingStore", lambda: store)
+
+    report = await record_replay.run_replay_recording("rec_takeover", profile="user-1", inputs={})
+
+    assert report["status"] == "failed"
+    assert "User control is active" in report["error"]
+    assert calls == ["https://example.test/1"]
 
 
 async def test_replay_rejects_a_session_without_write_coordination(

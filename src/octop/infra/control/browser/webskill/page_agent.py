@@ -55,6 +55,7 @@ def public_error_code(code: str) -> str:
         "DOCUMENT_REQUIRED": "PAGE_ACTION_STALE_REF",
         "PAGE_TAB_EXPIRED": "PAGE_TAB_EXPIRED",
         "PAGE_TAB_UNKNOWN": "PAGE_TAB_UNKNOWN",
+        "WRITE_LOCKED": "WRITE_LOCKED",
         "WRITE_BLOCKED": "PAGE_ACTION_OUT_OF_SCOPE",
         "ACTION_UNSUPPORTED": "PAGE_ACTION_OUT_OF_SCOPE",
         "ACTION_INVALID": "PAGE_ACTION_OUT_OF_SCOPE",
@@ -608,14 +609,15 @@ async def execute_action(
                 previous_target_ids,  # noqa: SLF001
             )
             if new_target is not None:
-                if not admit_model_target(session, new_target):
+                if admit_model_target(session, new_target):
+                    session.document = None
+                    session.refs.clear()
+                    registry.revoke_grants(session_id=session.id)
+                else:
                     outcome["reason"] = (
                         "The new page exceeds the model target workset limit; "
                         "it was not added to the model workset"
                     )
-                session.document = None
-                session.refs.clear()
-                registry.revoke_grants(session_id=session.id)
                 outcome["navigated"] = True
             return {"type": "execute-result", "outcome": outcome}
         finally:

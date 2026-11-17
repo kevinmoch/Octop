@@ -106,6 +106,11 @@ async def _capture_jpeg(sess: Any) -> str | None:
         return None
 
 
+async def _capture_profile_jpeg(profile: str) -> str | None:
+    sess = await resolve_harness_session(profile, create=False)
+    return await _capture_jpeg(sess) if sess is not None else None
+
+
 async def _send_json(ws: WebSocket, payload: dict[str, Any]) -> None:
     if ws.application_state == WebSocketState.CONNECTED:
         await ws.send_text(json.dumps(payload))
@@ -164,7 +169,7 @@ async def _stream_loop(
     capture_context = (
         contextlib.nullcontext(None)
         if listen_only
-        else capture_subscription(profile, lambda: _capture_jpeg(sess))
+        else capture_subscription(profile, lambda: _capture_profile_jpeg(profile))
     )
     async with capture_context as subscription:
         while is_connected():

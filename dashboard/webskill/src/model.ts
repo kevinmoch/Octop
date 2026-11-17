@@ -8,6 +8,70 @@ import { createLlmClient } from "@webskill/sdk/browser";
 import type { RuntimeConfig, RuntimeConfigStore } from "@webskill/chatbot";
 export type RuntimeLlmEntry = RuntimeConfig["llm"]["entries"][number];
 
+type AddressSpace = "public" | "local" | "loopback";
+type LnaPermission = "local-network" | "loopback-network";
+
+function addressSpace(hostname: string): AddressSpace {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1")
+    return "loopback";
+  const octets = host.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d+$/.test(part))) {
+    const values = octets.map(Number);
+    if (values[0] === 127) return "loopback";
+    if (
+      values[0] === 10 ||
+      (values[0] === 172 && values[1] >= 16 && values[1] <= 31) ||
+      (values[0] === 192 && values[1] === 168) ||
+      (values[0] === 169 && values[1] === 254)
+    )
+      return "local";
+  }
+  if (host.endsWith(".local") || /^f[cd]/.test(host) || /^fe[89ab]/.test(host))
+    return "local";
+  return "public";
+}
+
+function requiredLnaPermission(
+  entry: RuntimeLlmEntry,
+  source: URL,
+): LnaPermission | null {
+  if (entry.provider === "chrome-builtin") return null;
+  try {
+    const target = addressSpace(new URL(entry.baseUrl ?? "").hostname);
+    const origin = addressSpace(source.hostname);
+    if (target === "loopback" && origin !== "loopback")
+      return "loopback-network";
+    if (target === "local" && origin === "public") return "local-network";
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function assertLnaAllowed(entry: RuntimeLlmEntry): Promise<void> {
+  const permission = requiredLnaPermission(
+    entry,
+    new URL(window.location.href),
+  );
+  if (!permission || !navigator.permissions?.query) return;
+  let state: PermissionState;
+  try {
+    const status = await navigator.permissions.query({
+      name: permission as PermissionName,
+    });
+    state = status.state;
+  } catch {
+    return;
+  }
+  if (state === "denied") {
+    throw new WebSkillError(
+      "LLM_REQUEST_FAILED",
+      `Browser ${permission} permission is denied. Allow local network access in the site settings before using this model.`,
+    );
+  }
+}
+
 export function isLoopbackNoAuthEndpoint(entry: RuntimeLlmEntry): boolean {
   if (
     entry.provider !== "openai-compatible" ||
@@ -16,13 +80,8 @@ export function isLoopbackNoAuthEndpoint(entry: RuntimeLlmEntry): boolean {
     return false;
   try {
     const url = new URL(entry.baseUrl ?? "");
-    const hostname = url.hostname.toLowerCase();
     return (
-      url.protocol === "http:" &&
-      (hostname === "localhost" ||
-        hostname.endsWith(".localhost") ||
-        hostname === "[::1]" ||
-        /^127(?:\.\d{1,3}){3}$/.test(hostname))
+      url.protocol === "http:" && addressSpace(url.hostname) === "loopback"
     );
   } catch {
     return false;
@@ -90,8 +149,11 @@ export function createHostLlmClient(
   store: RuntimeConfigStore,
   noAuth: LocalNoAuthRegistry,
 ): LlmClient {
-  const client = async () =>
-    createLlmClient(resolveEntry(await store.load(), noAuth));
+  const client = async () => {
+    const entry = resolveEntry(await store.load(), noAuth);
+    await assertLnaAllowed(entry);
+    return createLlmClient(entry);
+  };
   return {
     complete: async (input: LlmCompleteInput) =>
       (await client()).complete(input),

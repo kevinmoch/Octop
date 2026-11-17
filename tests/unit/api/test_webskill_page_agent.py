@@ -640,6 +640,7 @@ async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegist
     ("source", "expected"),
     [
         ("UNKNOWN_IMPLEMENTATION_ERROR", "TOOL_EXECUTION_FAILED"),
+        ("WRITE_LOCKED", "WRITE_LOCKED"),
         ("WRITE_BLOCKED", "PAGE_ACTION_OUT_OF_SCOPE"),
     ],
 )

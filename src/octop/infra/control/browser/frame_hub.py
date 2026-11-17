@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 
 from .webskill.sessions import BrowserAgentError
+
+logger = logging.getLogger(__name__)
 
 MAX_STREAM_SUBSCRIBERS_PER_PROFILE = 4
 
@@ -19,6 +22,10 @@ class CaptureSubscription:
 
     async def next_frame(self) -> str | None:
         async with self.hub.condition:
+            if self.closed:
+                return None
+            if self.hub.task is None:
+                self.hub.start_locked()
             if self.last_sequence == self.hub.sequence:
                 with suppress(TimeoutError):
                     await asyncio.wait_for(self.hub.condition.wait(), timeout=0.5)
@@ -49,6 +56,9 @@ class ProfileFrameHub:
         self.subscriber_count = 0
         self.task: asyncio.Task[None] | None = None
 
+    def start_locked(self) -> None:
+        self.task = asyncio.create_task(self._run())
+
     async def subscribe(self) -> CaptureSubscription:
         async with self.condition:
             if self.subscriber_count >= MAX_STREAM_SUBSCRIBERS_PER_PROFILE:
@@ -57,20 +67,32 @@ class ProfileFrameHub:
                 )
             self.subscriber_count += 1
             if self.task is None:
-                self.task = asyncio.create_task(self._run())
+                self.start_locked()
             return CaptureSubscription(self)
 
     async def _run(self) -> None:
-        while True:
-            frame = await self.capture()
+        try:
+            while True:
+                try:
+                    frame = await self.capture()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.debug("Browser frame capture failed", exc_info=True)
+                    frame = None
+                async with self.condition:
+                    if self.subscriber_count == 0:
+                        return
+                    if frame is not None:
+                        self.last_frame = frame
+                        self.sequence += 1
+                        self.condition.notify_all()
+                await asyncio.sleep(self.interval)
+        finally:
             async with self.condition:
-                if self.subscriber_count == 0:
-                    return
-                if frame is not None:
-                    self.last_frame = frame
-                    self.sequence += 1
-                    self.condition.notify_all()
-            await asyncio.sleep(self.interval)
+                if self.task is asyncio.current_task():
+                    self.task = None
+                self.condition.notify_all()
 
     async def release(self, subscription: CaptureSubscription) -> None:
         async with self.condition:
@@ -102,7 +124,12 @@ def capture_subscription(
 
     @asynccontextmanager
     async def subscription() -> AsyncIterator[CaptureSubscription]:
-        active = await hub.subscribe()
+        try:
+            active = await hub.subscribe()
+        except BaseException:
+            if hub.subscriber_count == 0 and hub.task is None and _HUBS.get(profile) is hub:
+                _HUBS.pop(profile, None)
+            raise
         try:
             yield active
         finally:

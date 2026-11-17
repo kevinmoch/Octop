@@ -24,13 +24,15 @@ async def test_frames_refresh_independently_of_session_metadata(
         if message["type"] == "frame":
             sent_frames += 1
 
+    browser = object()
     snapshot = AsyncMock()
     send_json = AsyncMock(side_effect=record_send)
     monkeypatch.setattr(stream, "_send_session_snapshot", snapshot)
     monkeypatch.setattr(stream, "_capture_jpeg", capture)
+    monkeypatch.setattr(stream, "resolve_harness_session", AsyncMock(return_value=browser))
     monkeypatch.setattr(stream, "_SESSION_INTERVAL_S", 60.0)
     await stream._stream_loop(
-        send_json, lambda: sent_frames < 15, object(), "test", listen_only=False
+        send_json, lambda: sent_frames < 15, browser, "test", listen_only=False
     )
     assert sent_frames == 15
     assert frames in {15, 16}

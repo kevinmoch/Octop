@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// @vitest-environment-options {"url":"https://10.168.1.248:18443/browser"}
 import { beforeEach, describe, expect, it, vi } from "vitest";
 type ConfigStore = Parameters<typeof createHostLlmClient>[0];
 type Config = Awaited<ReturnType<ConfigStore["load"]>>;
@@ -91,5 +92,35 @@ describe("WebSkill local no-auth host boundary", () => {
     expect(JSON.stringify(await store.load())).not.toContain(
       "octop-local-no-auth",
     );
+  });
+
+  it("denies a loopback model request before fetch when LNA is blocked", async () => {
+    const config = {
+      llm: {
+        entries: [model("https://127.0.0.1:1234/v1", "test-key")],
+        defaultId: "local-model",
+      },
+    } as Config;
+    const store: ConfigStore = {
+      load: async () => config,
+      save: async () => {},
+      reset: async () => {},
+      subscribe: () => () => {},
+    };
+    const query = vi.fn().mockResolvedValue({ state: "denied" });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("navigator", { permissions: { query } });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createHostLlmClient(store, new LocalNoAuthRegistry(1)).complete({
+        messages: [{ role: "user", content: [{ type: "text", text: "test" }] }],
+      }),
+    ).rejects.toMatchObject({
+      code: "LLM_REQUEST_FAILED",
+      message: expect.stringContaining("loopback-network permission is denied"),
+    });
+    expect(query).toHaveBeenCalledWith({ name: "loopback-network" });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
