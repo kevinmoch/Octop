@@ -152,4 +152,40 @@ describe("useWebSkillAgentSession", () => {
     expect(createSession).toHaveBeenCalledTimes(2);
     expect(result.current.sessionId).toBe("fresh");
   });
+
+  it.each(["close", "unmount"] as const)(
+    "deletes a late-created session after %s",
+    async (mode) => {
+      let finishCreate:
+        | ((value: ReturnType<typeof session>) => void)
+        | undefined;
+      createSession.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishCreate = resolve;
+          }),
+      );
+      const { result, unmount } = renderHook(() =>
+        useWebSkillAgentSession(true, 1),
+      );
+      const pending = result.current.issueTicket();
+      await vi.waitFor(() => {
+        expect(createSession).toHaveBeenCalledTimes(1);
+        expect(finishCreate).toBeTypeOf("function");
+      });
+      const rejected = expect(pending).rejects.toThrow(
+        "closed before creation completed",
+      );
+
+      if (mode === "close") act(() => result.current.closeSession());
+      else unmount();
+      await act(async () => {
+        finishCreate?.(session("late"));
+        await rejected;
+      });
+
+      expect(deleteSession).toHaveBeenCalledWith("late");
+      if (mode === "close") expect(result.current.sessionId).toBeNull();
+    },
+  );
 });

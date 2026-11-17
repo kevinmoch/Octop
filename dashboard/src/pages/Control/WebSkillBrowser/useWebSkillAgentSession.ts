@@ -11,6 +11,7 @@ export function useWebSkillAgentSession(
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
   const creatingRef = useRef<Promise<string> | null>(null);
+  const generationRef = useRef(0);
 
   const ensureSession = useCallback(
     async (expiredSessionId?: string): Promise<string | null> => {
@@ -19,6 +20,8 @@ export function useWebSkillAgentSession(
         const current = sessionRef.current;
         if (current && current !== expiredSessionId) return current;
         if (current === expiredSessionId) {
+          generationRef.current += 1;
+          creatingRef.current = null;
           sessionRef.current = null;
           setSessionId(null);
         }
@@ -26,16 +29,26 @@ export function useWebSkillAgentSession(
       if (sessionRef.current) return sessionRef.current;
       if (!userId) throw new Error("Octop user identity is not ready");
       if (!creatingRef.current) {
-        creatingRef.current = browserAgentApi
+        const generation = generationRef.current;
+        const creation = browserAgentApi
           .createSession()
-          .then((created) => {
+          .then(async (created) => {
+            if (generation !== generationRef.current) {
+              await browserAgentApi
+                .deleteSession(created.sessionId)
+                .catch(() => undefined);
+              throw new Error(
+                "The WebSkill session was closed before creation completed",
+              );
+            }
             sessionRef.current = created.sessionId;
             setSessionId(created.sessionId);
             return created.sessionId;
           })
           .finally(() => {
-            creatingRef.current = null;
+            if (creatingRef.current === creation) creatingRef.current = null;
           });
+        creatingRef.current = creation;
       }
       return creatingRef.current;
     },
@@ -63,6 +76,8 @@ export function useWebSkillAgentSession(
   );
 
   const closeSession = useCallback(() => {
+    generationRef.current += 1;
+    creatingRef.current = null;
     const id = sessionRef.current;
     sessionRef.current = null;
     setSessionId(null);
@@ -72,7 +87,10 @@ export function useWebSkillAgentSession(
 
   useEffect(
     () => () => {
+      generationRef.current += 1;
+      creatingRef.current = null;
       const id = sessionRef.current;
+      sessionRef.current = null;
       if (enabled && id)
         void browserAgentApi.deleteSession(id).catch(() => undefined);
     },

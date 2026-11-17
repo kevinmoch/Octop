@@ -9,18 +9,25 @@
 - 同一旧会话的并发换建复用现有 `creatingRef` Promise，不引入第二套锁；恢复完成后到达的旧 404 不会再创建第三个会话。
 - iframe 的 `onSessionExpired` 携带发起请求时的 `data.sessionId`，宿主按该 ID 判断是否换建，不把新会话 ticket 返回给旧 iframe。
 
+### P2-0-a/b 生命周期补强（2026-11-17）
+
+- `WebSkillFrame.test.tsx` 使用真实 hook 与组件消息链模拟：旧 iframe 发出 ticket 请求，宿主已换建新会话后旧请求才返回 404；断言旧 ID 被传入回调，但不产生第三个会话。
+- hook 增加 generation。关闭或卸载时在途 create 不得重新写入缓存；迟到创建的会话会尝试删除，删除失败仍由 idle TTL 兜底。旧 Promise 的 finally 不会误清新一代创建 Promise。
+- 生命周期分支为 `feature/webskill-p2-lifecycle-cleanup`，P2-0 已先合入 `webskill-integration`。
+
 ## 2. 已通过的验证
 
-- `useWebSkillAgentSession.test.ts` 共 6 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略。
-- `model.test.ts` 3 项模型边界测试继续通过，前端合计 9 项；TypeScript、ESLint 和 Prettier 检查通过。
+- `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
+- `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`model.test.ts` 3 项模型边界测试继续通过，前端合计 12 项。TypeScript、ESLint 和 Prettier 检查通过。
 - 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace、主题切换和一次真实单击均通过；`pageErrors` 为空。证据为 `.artifacts/webskill-p1/ui/ui-result.json`，由同一套真实 UI 验收脚本生成。
-- 全量 `make all PYTEST_JOBS=4` 为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。
+- P2-0 首项及生命周期补强后的全量 `make all PYTEST_JOBS=4` 均为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。生命周期真实 UI 在全量结束后复验通过，首次模型超时未产生页面脚本错误。
 
 实际执行命令：
 
 ```bash
 cd /Users/mochunhui/Git/Octop/dashboard
 npx vitest run \
+  src/components/WebSkillFrame.test.tsx \
   src/pages/Control/WebSkillBrowser/useWebSkillAgentSession.test.ts \
   src/pages/Control/WebSkillBrowser/model.test.ts
 npx tsc -b
