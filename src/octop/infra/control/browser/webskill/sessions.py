@@ -43,6 +43,7 @@ class DocumentIdentity:
 class PageRef:
     backend_node_id: int
     document_key: str
+    frame: str = "self"
 
 
 @dataclass
@@ -64,7 +65,7 @@ class BrowserAgentSession:
             "sessionId": self.id,
             "active": self.active,
             "capabilities": {
-                "frames": False,
+                "frames": True,
                 "oopif": False,
                 "imageCapture": False,
                 "targetWorkset": False,
@@ -283,6 +284,12 @@ class BrowserAgentRegistry:
             raise BrowserAgentError(
                 "DOCUMENT_CHANGED", "The document changed before the grant was issued"
             )
+        digest = action_digest(request)
+        entry = (
+            PageRef(0, document.key)
+            if request["ref"] == DOCUMENT_REF
+            else self.resolve_ref(session, str(request["ref"]), document)
+        )
         self.revoke_grants(profile=session.profile)
         token = secrets.token_urlsafe(32)
         self._grants[_digest(token)] = Grant(
@@ -291,9 +298,9 @@ class BrowserAgentRegistry:
             profile=session.profile,
             document_key=document.key,
             target_id=document.target_id,
-            frame="self",
+            frame=entry.frame,
             action=str(request["action"]),
-            payload_digest=action_digest(request),
+            payload_digest=digest,
             expires_at=time.monotonic() + GRANT_TTL_SECONDS,
         )
         return token
@@ -317,10 +324,15 @@ class BrowserAgentRegistry:
             or grant.profile != session.profile
         ):
             raise BrowserAgentError("GRANT_MISMATCH", "The action grant belongs to another session")
+        entry = (
+            PageRef(0, document.key)
+            if request.get("ref") == DOCUMENT_REF
+            else self.resolve_ref(session, str(request.get("ref") or ""), document)
+        )
         if (
             grant.document_key != document.key
             or grant.target_id != document.target_id
-            or grant.frame != "self"
+            or grant.frame != entry.frame
         ):
             raise BrowserAgentError(
                 "PAGE_ACTION_STALE_REF", "The action grant belongs to an expired document"
@@ -331,10 +343,12 @@ class BrowserAgentRegistry:
             )
         return grant
 
-    def issue_ref(self, session: BrowserAgentSession, backend_node_id: int) -> str:
+    def issue_ref(
+        self, session: BrowserAgentSession, backend_node_id: int, frame: str = "self"
+    ) -> str:
         ref = f"ws_{secrets.token_hex(12)}"
         session.refs[ref] = PageRef(
-            backend_node_id, session.document.key if session.document else ""
+            backend_node_id, session.document.key if session.document else "", frame
         )
         return ref
 

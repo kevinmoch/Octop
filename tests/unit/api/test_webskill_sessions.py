@@ -9,6 +9,7 @@ from octop.infra.control.browser.webskill.sessions import (
     BrowserAgentError,
     BrowserAgentRegistry,
     DocumentIdentity,
+    PageRef,
 )
 
 
@@ -19,6 +20,7 @@ def document(key: str = "document-1", target: str = "target-1") -> DocumentIdent
 def perceived_session(registry: BrowserAgentRegistry, user_id: int = 1):
     session = registry.create(user_id, f"user-{user_id}")
     session.document = document()
+    session.refs["ws_test"] = PageRef(100, session.document.key)
     return session
 
 

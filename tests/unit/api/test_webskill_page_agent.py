@@ -146,6 +146,95 @@ class FakeBrowser:
         return tool_result("clicked")
 
 
+class FrameClient(FakeClient):
+    def __init__(self, clicks: list[dict[str, Any]]) -> None:
+        super().__init__(clicks)
+        self.frame_loader_id = "frame-loader-1"
+
+    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if method == "Page.getFrameTree":
+            return {
+                "frameTree": {
+                    "frame": {"id": "main-frame", "loaderId": self.loader_id},
+                    "childFrames": [{"frame": {"id": "frame-1", "loaderId": self.frame_loader_id}}],
+                }
+            }
+        if method == "DOM.getFrameOwner":
+            if params == {"frameId": "frame-1"}:
+                return {"backendNodeId": 500}
+            return {}
+        if method == "DOM.getDocument":
+            return {
+                "root": {
+                    "nodeId": 1,
+                    "backendNodeId": 1,
+                    "nodeName": "#document",
+                    "children": [
+                        {
+                            "nodeId": self.node_id,
+                            "backendNodeId": self.backend_node_id,
+                            "nodeName": "BUTTON",
+                            "children": [{"nodeName": "#text", "nodeValue": "Run once"}],
+                        },
+                        {
+                            "nodeId": 50,
+                            "backendNodeId": 500,
+                            "nodeName": "IFRAME",
+                            "attributes": ["id", "same-frame", "src", "/frame"],
+                            "contentDocument": {
+                                "nodeId": 51,
+                                "backendNodeId": 501,
+                                "nodeName": "#document",
+                                "children": [
+                                    {
+                                        "nodeId": 60,
+                                        "backendNodeId": 600,
+                                        "nodeName": "BUTTON",
+                                        "children": [
+                                            {"nodeName": "#text", "nodeValue": "Frame action"}
+                                        ],
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "nodeId": 70,
+                            "backendNodeId": 700,
+                            "nodeName": "IFRAME",
+                            "attributes": [
+                                "id",
+                                "cross-frame",
+                                "src",
+                                "https://cross.example.test/frame",
+                            ],
+                        },
+                    ],
+                }
+            }
+        if method == "DOM.resolveNode" and params == {"backendNodeId": 600}:
+            return {"object": {"objectId": "frame-button-object"}}
+        if (
+            method == "Runtime.callFunctionOn"
+            and params
+            and params.get("objectId") == "frame-button-object"
+        ):
+            return {
+                "result": {"value": {"role": "button", "name": "Frame action", "secret": False}}
+            }
+        if method == "DOM.requestNode" and params == {"objectId": "frame-button-object"}:
+            return {"nodeId": 60}
+        if method == "DOM.getBoxModel" and params and params.get("nodeId") == 60:
+            return {"model": {"content": [0, 0, 100, 0, 100, 100, 0, 100]}}
+        return await super().send(method, params)
+
+
+class FrameBrowser(FakeBrowser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.client = FrameClient(self.clicks)
+        self._internal = SimpleNamespace(client=self.client, ref_cache=self.ref_cache)
+
+
 @pytest.fixture
 def registry() -> BrowserAgentRegistry:
     return BrowserAgentRegistry()
@@ -323,3 +412,113 @@ async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegist
 )
 def test_error_code_whitelist(source: str, expected: str) -> None:
     assert public_error_code(source) == expected
+
+
+async def test_same_origin_frame_read_grant_and_single_click(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    main = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    assert len(main["targets"]) == 1
+    main_ref = main["targets"][0]["ref"]
+    nested = main["result"]["nestedFrames"]
+    assert nested == [
+        {
+            "url": "https://example.test/frame",
+            "hint": "same-frame",
+            "frame": "iframe#same-frame",
+        },
+        {
+            "url": "https://cross.example.test/frame",
+            "hint": "cross-frame",
+            "frame": "iframe#cross-frame",
+        },
+    ]
+
+    child = await read_page(
+        session,
+        {
+            "type": "perceive",
+            "scope": {"frames": [{"frame": ["iframe#same-frame"], "include": ["body"]}]},
+        },
+        resolver=resolver,
+        registry=registry,
+    )
+    assert child["result"]["page"]["url"] == "https://example.test/frame"
+    assert child["targets"][0]["name"] == "Frame action"
+    frame_ref = child["targets"][0]["ref"]
+    assert session.refs[frame_ref].frame == "frame-1:frame-loader-1"
+    assert main_ref in session.refs
+
+    request = {"ref": frame_ref, "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    executed = await execute_action(
+        session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    assert executed["outcome"]["ok"] is True
+    assert executed["outcome"]["target"]["name"] == "Frame action"
+    assert len(browser.clicks) == 1
+
+
+async def test_child_frame_navigation_invalidates_ref_and_grant(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {
+            "type": "perceive",
+            "scope": {"frames": [{"frame": ["iframe#same-frame"], "include": ["body"]}]},
+        },
+        resolver=resolver,
+        registry=registry,
+    )
+    request = {"ref": perceived["targets"][0]["ref"], "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    browser.client.frame_loader_id = "frame-loader-2"
+
+    with pytest.raises(BrowserAgentError) as error:
+        await execute_action(
+            session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+        )
+    assert error.value.code == "PAGE_ACTION_STALE_REF"
+    with pytest.raises(BrowserAgentError) as grant_error:
+        await issue_action_grant(
+            session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+        )
+    assert grant_error.value.code == "PAGE_ACTION_STALE_REF"
+    assert not browser.clicks
+
+
+async def test_unknown_and_cross_origin_frames_fail_with_scope_error(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    for path in ("iframe#missing", "iframe#cross-frame"):
+        with pytest.raises(BrowserAgentError) as error:
+            await read_page(
+                session,
+                {
+                    "type": "perceive",
+                    "scope": {"frames": [{"frame": [path], "include": ["body"]}]},
+                },
+                resolver=resolver,
+                registry=registry,
+            )
+        assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
+        assert str(error.value) == "This frame is outside the allowed perception scope."

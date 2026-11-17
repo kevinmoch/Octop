@@ -49,11 +49,18 @@ class FixtureHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/next":
             body = "<!doctype html><html><body><h1>Next document</h1></body></html>"
+        elif self.path == "/frame-next":
+            body = "<!doctype html><html><body><h1>Next frame</h1></body></html>"
+        elif self.path == "/frame":
+            body = """<!doctype html><html><body>
+<button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
+</body></html>"""
         else:
             body = """<!doctype html><html><head><title>P1 fixture</title></head><body>
 <button id="run" onclick="window.clickCount=(window.clickCount||0)+1">Run once</button>
 <input type="password" aria-label="Secret input">
 <div data-webskill-private><button>Private child</button></div>
+<iframe id="same-frame" src="/frame"></iframe>
 </body></html>"""
         payload = body.encode()
         self.send_response(200)
@@ -178,6 +185,101 @@ async def accept() -> dict[str, Any]:
                 assert replay["code"] == "PAGE_ACTION_STALE_REF", replay
                 assert await browser_value(browser, "window.clickCount || 0") == 1
 
+                nested = perceived["result"].get("nestedFrames", [])
+                assert [frame["frame"] for frame in nested] == ["iframe#same-frame"]
+                frame_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "frame-read",
+                        "scope": {
+                            "frames": [
+                                {"frame": ["iframe#same-frame"], "include": ["body"]}
+                            ]
+                        },
+                    },
+                )
+                assert frame_perceived["type"] == "perceive-result", frame_perceived
+                assert frame_perceived["targets"][0]["name"] == "Frame action"
+                frame_request = {
+                    "ref": frame_perceived["targets"][0]["ref"],
+                    "action": "click",
+                }
+                frame_issued = await client.post(
+                    f"/api/browser-agent/sessions/{session_id}/grants",
+                    headers=headers,
+                    json={"request": frame_request},
+                )
+                assert frame_issued.status_code == 200, frame_issued.text
+                frame_grant = frame_issued.json()["grant"]
+                frame_executed = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "frame-click",
+                        "request": frame_request,
+                        "grant": frame_grant,
+                    },
+                )
+                assert frame_executed["outcome"]["ok"] is True, frame_executed
+                assert (
+                    await browser_value(
+                        browser,
+                        "document.getElementById('same-frame').contentWindow.frameClicks || 0",
+                    )
+                    == 1
+                )
+                frame_replay = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "frame-replay",
+                        "request": frame_request,
+                        "grant": frame_grant,
+                    },
+                )
+                assert frame_replay["code"] == "PAGE_ACTION_STALE_REF", frame_replay
+
+                stale_grant = (
+                    await client.post(
+                        f"/api/browser-agent/sessions/{session_id}/grants",
+                        headers=headers,
+                        json={"request": frame_request},
+                    )
+                ).json()["grant"]
+                await browser_value(
+                    browser,
+                    "document.getElementById('same-frame').contentWindow.location.assign('/frame-next')",
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    frame_path = await browser_value(
+                        browser,
+                        "document.getElementById('same-frame').contentWindow.location.pathname",
+                    )
+                    if frame_path == "/frame-next":
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("The child frame did not navigate")
+                stale_frame = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "stale-frame",
+                        "request": frame_request,
+                        "grant": stale_grant,
+                    },
+                )
+                assert stale_frame["code"] == "PAGE_ACTION_STALE_REF", stale_frame
+                assert (
+                    await browser_value(
+                        browser,
+                        "document.getElementById('same-frame').contentWindow.frameClicks || 0",
+                    )
+                    == 0
+                )
+
                 next_grant = (
                     await client.post(
                         f"/api/browser-agent/sessions/{session_id}/grants",
@@ -256,6 +358,7 @@ async def accept() -> dict[str, Any]:
                 "status": "passed",
                 "checks": [
                     "real Chromium main-document perception and sensitive-subtree filtering",
+                    "same-origin frame read/click and child-navigation grant invalidation",
                     "one-shot ticket over real HTTP/WS",
                     "confirmed grant and exactly one real mouse click",
                     "grant replay rejection without another side effect",

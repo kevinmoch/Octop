@@ -1,5 +1,8 @@
 import { WebSkillError } from "@webskill/sdk";
+import { createFrameRouter } from "@webskill/sdk/browser";
 import type {
+  FrameDelivery,
+  FrameRouter,
   PageAgentReply,
   PageAgentRequest,
   PageAgentTransport,
@@ -66,9 +69,53 @@ export class OctopPageAgentTransport implements PageAgentTransport {
   >();
   private disposed = false;
 
-  constructor(private readonly bridge: OctopHostBridge) {}
+  private readonly router: FrameRouter;
+
+  constructor(private readonly bridge: OctopHostBridge) {
+    this.router = createFrameRouter<string>({
+      dispatcher: {
+        mainFrame: () => "self",
+        send: (address, request) => this.sendWithFrame(address, request),
+        resolveNestedFrame: (nested, context) => {
+          const path = nested.frame;
+          if (!path || context.visited.includes(path)) return undefined;
+          return path;
+        },
+      },
+    });
+  }
 
   send(request: PageAgentRequest): Promise<PageAgentReply> {
+    if (request.type === "perceive") return this.router.perceive(request);
+    if (request.type === "capture-image")
+      return this.router.captureImage(request);
+    return this.router.execute(request);
+  }
+
+  private async sendWithFrame(
+    address: string,
+    request: PageAgentRequest,
+  ): Promise<FrameDelivery> {
+    if (address === "self" || request.type !== "perceive") {
+      return { reply: await this.sendDirect(request), documentUrl: "" };
+    }
+    const reply = await this.sendDirect({
+      ...request,
+      scope: {
+        frames: [{ frame: address.split(" >>> "), include: ["body"] }],
+      },
+    });
+    const page =
+      reply.type === "perceive-result" && isRecord(reply.result.page)
+        ? reply.result.page
+        : undefined;
+    return {
+      reply,
+      documentUrl: typeof page?.url === "string" ? page.url : "",
+    };
+  }
+
+  private async sendDirect(request: PageAgentRequest): Promise<PageAgentReply> {
     const operation = this.queue.then(() => this.sendOnce(request));
     this.queue = operation.then(
       () => undefined,
