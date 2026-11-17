@@ -1,6 +1,6 @@
 # P2 实施与真实验证记录
 
-> 状态：🟡 实施中；P2-0～P2-4 已完成本地候选验证，但共享写入全链路、依赖发布、LNA、容量和部署验收仍未收口，不表示 P2 全部能力或生产支持已开放。
+> 状态：🟡 实施中；P2-0～P2-6 已有本地候选证据，但依赖发布、受信 TLS、嵌套 OOPIF 和部署验收仍未收口，不表示 P2 全部能力或生产支持已开放。
 
 ## 1. P2-0 会话恢复竞态修复（2026-11-17）
 
@@ -84,6 +84,15 @@
 - LNA 在创建模型客户端前按源/目标地址空间查询 `local-network` 或 `loopback-network`，`denied` 时以既有 `LLM_REQUEST_FAILED` 失败关闭且不调用 fetch；不查询旧 `local-network-access`。权限拒绝与 Permissions-Policy 拒绝的真实 Chromium 复验均为 `modelRequests=0`，证据分别为 `.artifacts/webskill-p1/ui/ui-result-lna-permission.json` 和 `ui-result-lna-policy.json`。
 - 整改后的真实 Chromium/HTTP/WS/daemon 证据为 `.artifacts/webskill-p1/9c8c7c30bb/result.json`；普通真实 UI 三击链路也已重新执行通过。上述 LNA 证据使用隔离自签 TLS，不替代生产受信 TLS 验收。
 
+### P2-6 跨进程接管、动作事务与持续推流（2026-11-17，本地 candidate）
+
+- `1504919` 增加按 profile 的原子 owner 状态文件，内容与锁元数据分离；record daemon 启动前及后续命令 gate 均读取状态，用户接管时返回/抛出 `WRITE_BLOCKED`。停止录制和 `close_session` 作为清理操作放行。
+- PageAgent 动作和 Dashboard 人工输入同时使用进程内锁与 OS lease，browser_tool 的单次调用（含重连后的重试）也使用外层事务。新增测试证明等待 lease 的模型动作在接管后不产生点击；已执行动作不回滚。
+- 真实独立 daemon 在人工接管后拒绝录制启动。完整证据为 `.artifacts/webskill-p1/4bcc25d69b/result.json`，覆盖 AC-14/15/40/51/60 的本地候选路径；依赖发布与目标部署复验仍是生产前置。
+- AC-45 使用集成 WS/FrameHub 连续执行完整 60 秒，4 个观看端各收到 404 个真实帧，viewTarget 保持 `hidden`。最大帧间隔约 0.162 秒，p95 为 0.153～0.161 秒，均低于 P0 的 1.5 秒上限；额外观看端关闭后订阅数恢复为 2，全部关闭后 hub 回收。证据为 `.artifacts/webskill-p1/4bcc25d69b/stream.json`，不含图像、token 或输入值。
+- 本批专项为 **106 passed**，library 全量为 **265 passed, 9 skipped**。该结果覆盖 AC-32/34/45 的本地四观看端场景，不代表多副本或 Kubernetes 容量结论。
+- P2-6 最终全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5947 passed, 45 skipped**（316.17 秒）；Ruff、1319 个文件的格式检查和 mypy（688 个源码文件）均通过。
+
 ## 6. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
@@ -111,25 +120,26 @@ UV_NO_SYNC=1 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" uv ru
   tests/unit/api/test_webskill_page_agent.py \
   tests/unit/api/test_webskill_http.py \
   tests/unit/api/test_webskill_lease.py \
+  tests/unit/api/test_webskill_ownership.py \
   tests/unit/api/test_browser_stream_mouse.py \
   tests/unit/api/test_browser_stream_keyboard.py \
   tests/unit/api/test_browser_stream_frames.py \
   tests/unit/api/test_browser_frame_hub.py \
   tests/unit/agents/test_browser_profile_middleware.py \
   tests/integration/test_browser_record_replay_api.py -q
-# 104 passed
+# 106 passed
 
 make build-frontend
 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JOBS=4
 ```
 
-真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。LNA 场景设置 `WEBSKILL_P1_LNA_DENY=1`，分别使用 `Browser.setPermission` 的 granular 权限拒绝或 `WEBSKILL_P1_LNA_POLICY=1`，并保留各自 artifact。
+真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。LNA 场景设置 `WEBSKILL_P1_LNA_DENY=1`，分别使用 `Browser.setPermission` 的 granular 权限拒绝或 `WEBSKILL_P1_LNA_POLICY=1`，并保留各自 artifact。完整 AC-45 执行包含在 `real_acceptance.py` 中，每次实际计时 60 秒。
 
 ## 7. 尚未开放
 
-- 跨进程接管状态、其他完整动作事务和共享写入容量验收尚未完成；`switch_to_target` 已有事务 lease，但已有 daemon/ReplayRunner/gate 接线不能据此通过 AC-15、AC-40、AC-51、AC-60。
-- 工作集和抓图 hub 只有本地候选证据；后台 viewTarget 连续 60 秒出帧、容量/p95 和 Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
+- 跨进程接管、动作事务及 AC-32/34/45 已有本地候选证据；锁等待、更完整运行指标和目标负载仍需在实际部署中复验，不能据此宣称 AC-14/15/40/51/60 已获生产准入。
+- Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
 - OOPIF 内再嵌套 frame 的下钻与聚合仍未开放；当前真实 UI 证据只覆盖一层 OOPIF。
-- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977`、`c1a8202`、`c359041` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
+- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977`、`c1a8202`、`c359041`、`1504919` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
 - P3 的逐步授权回放、技能执行和文档产物。
 - LNA 两种拒绝场景已在隔离自签 TLS 下通过；生产受信 TLS 及真实用户授权/拒绝矩阵仍需独立验收，不能将当前证据扩大为所有浏览器和网络拓扑均已通过。

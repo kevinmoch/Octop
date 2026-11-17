@@ -45,7 +45,6 @@ from starlette.websockets import WebSocketState
 from octop import __version__
 from octop.api.deps import resolve_user_from_token
 from octop.api.routers.browser.harness import (
-    _CONTROL_OWNERS,
     control_owner_for,
     harness_list_tabs,
     harness_page_url,
@@ -53,6 +52,8 @@ from octop.api.routers.browser.harness import (
 )
 from octop.api.routers.browser.webskill import check_websocket_origin
 from octop.infra.control.browser.frame_hub import capture_subscription
+from octop.infra.control.browser.webskill.lease import profile_lease
+from octop.infra.control.browser.webskill.ownership import set_control_owner
 from octop.infra.control.browser.webskill.sessions import browser_agent_registry
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
@@ -561,9 +562,13 @@ async def run_browser_stream_session(
                 break
             if sess is not None:
                 # Human input wins before it waits for an in-progress model write.
-                _CONTROL_OWNERS[profile] = "user"
+                if control_owner_for(profile) != "user":
+                    await asyncio.to_thread(set_control_owner, profile, "user")
                 browser_agent_registry.revoke_grants(profile=profile)
-                async with browser_agent_registry.write_lock(profile):
+                async with (
+                    browser_agent_registry.write_lock(profile),
+                    profile_lease(profile),
+                ):
                     with contextlib.suppress(Exception):
                         await _handle_client_event(sess, msg)
     except TimeoutError:

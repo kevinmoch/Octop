@@ -15,7 +15,8 @@ from pydantic import BaseModel
 from octop.api.deps import require_permission
 from octop.infra.control.browser.webskill.lease import profile_command_gate
 from octop.infra.control.browser.webskill.ownership import (
-    _CONTROL_OWNERS as _CONTROL_OWNERS,
+    clear_control_owner,
+    set_control_owner,
 )
 from octop.infra.control.browser.webskill.ownership import (
     control_owner_for as control_owner_for,
@@ -331,7 +332,7 @@ async def handoff(
     target = body.target
     if target not in ("agent", "user"):
         raise OctopError(ErrorCode.SLASH_BAD_ARGS, "target must be 'agent' or 'user'")
-    _CONTROL_OWNERS[profile] = target
+    await asyncio.to_thread(set_control_owner, profile, target)
     if target == "user":
         from octop.infra.control.browser.webskill.sessions import (  # noqa: PLC0415
             browser_agent_registry,
@@ -380,7 +381,7 @@ async def shutdown_browser(user: Any = Depends(require_permission("browser"))) -
     hint = user_browser_profile(user.id)
 
     result = await browser_tool(action="close_session", profile=hint, kill=True)
-    _CONTROL_OWNERS.pop(hint, None)
+    await asyncio.to_thread(clear_control_owner, hint)
     if not result.success:
         raise OctopError(
             ErrorCode.INTERNAL_ERROR,

@@ -20,6 +20,7 @@ from .frames import (
     projection_document,
     select_frame_route,
 )
+from .lease import profile_lease
 from .oopif import OopifSession, attach_oopif_expected, attach_oopif_route
 from .sessions import (
     DOCUMENT_REF,
@@ -478,7 +479,15 @@ async def execute_action(
     write_gate: WriteGate,
 ) -> dict[str, Any]:
     browser = await resolve_browser(session, resolver)
-    async with registry.write_lock(session.profile):
+    async with (
+        registry.write_lock(session.profile),
+        profile_lease(session.profile),
+    ):
+        if not write_gate():
+            raise BrowserAgentError(
+                "WRITE_BLOCKED",
+                "The action was not executed because user control took precedence",
+            )
         model_attachment = await attach_model_target(session, browser)
         attached: OopifSession | None = None
         try:

@@ -410,7 +410,10 @@ class ScopedFrameClient:
 
 
 @pytest.fixture
-def registry() -> BrowserAgentRegistry:
+def registry(tmp_path, monkeypatch: pytest.MonkeyPatch) -> BrowserAgentRegistry:
+    from octop_browser.settings import settings as browser_settings
+
+    monkeypatch.setattr(browser_settings, "profiles_dir", str(tmp_path))
     return BrowserAgentRegistry()
 
 
@@ -537,6 +540,52 @@ async def test_document_change_and_takeover_prevent_side_effects(
             session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
         )
     assert error.value.code == "PAGE_ACTION_STALE_REF"
+    assert not browser.clicks
+
+
+async def test_waiting_model_action_is_rejected_after_takeover(
+    registry: BrowserAgentRegistry,
+) -> None:
+    import asyncio
+    from contextvars import Context
+
+    from octop.infra.control.browser.webskill.lease import profile_lease
+
+    browser = FakeBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    request = {"ref": perceived["targets"][0]["ref"], "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    allowed = True
+
+    def write_gate() -> bool:
+        return allowed
+
+    async with profile_lease("user-1"):
+        pending = Context().run(
+            asyncio.create_task,
+            execute_action(
+                session,
+                request,
+                grant,
+                registry=registry,
+                resolver=resolver,
+                write_gate=write_gate,
+            ),
+        )
+        await asyncio.sleep(0)
+        allowed = False
+    with pytest.raises(BrowserAgentError) as error:
+        await pending
+    assert error.value.code == "WRITE_BLOCKED"
     assert not browser.clicks
 
 

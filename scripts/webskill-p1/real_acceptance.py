@@ -7,6 +7,7 @@ import contextlib
 import hashlib
 import io
 import json
+import math
 import os
 import socket
 import sys
@@ -74,6 +75,8 @@ class FixtureHandler(BaseHTTPRequestHandler):
 <select aria-label="Result count"><option value="10">Ten</option><option value="20">Twenty</option></select>
 <input type="password" aria-label="Secret input">
 <div data-webskill-private><button>Private child</button></div>
+<span id="live-clock" aria-hidden="true">0</span>
+<script>window.liveTick=0;setInterval(()=>{{window.liveTick+=1;document.getElementById('live-clock').textContent=String(window.liveTick)}},250)</script>
 <div role="button" tabindex="0" aria-label="Main scroll area" style="display:block;height:400px;overflow:auto"><div style="height:1500px">Scrollable document</div></div>
 <iframe id="same-frame" src="/frame" style="width:800px;height:450px"></iframe>
 <iframe id="cross-frame" src="http://localhost:{self.server.server_port}/frame?cross=1" style="width:800px;height:450px"></iframe>
@@ -707,27 +710,117 @@ async def accept() -> dict[str, Any]:
                     websockets.connect(stream_url, origin=origin) as stream,
                     websockets.connect(second_stream_url, origin=origin) as second_stream,
                 ):
-                    for connection in (stream, second_stream):
-                        await connection.send(
-                            json.dumps({"type": "start", "url": "", "width": 800, "height": 600})
-                        )
-
-                    async def next_frame(connection: Any) -> None:
-                        while True:
-                            event = json.loads(
-                                await asyncio.wait_for(connection.recv(), timeout=10)
+                    connections = [stream, second_stream]
+                    async with contextlib.AsyncExitStack() as extra_streams:
+                        for _ in range(2):
+                            ticket = (
+                                await client.post(
+                                    f"/api/browser-agent/sessions/{session_id}/tickets",
+                                    headers=headers,
+                                )
+                            ).json()["ticket"]
+                            url = f"ws://127.0.0.1:{port}/api/browser-stream/ws?{urlencode({'ticket': ticket})}"
+                            connections.append(
+                                await extra_streams.enter_async_context(
+                                    websockets.connect(url, origin=origin)
+                                )
                             )
-                            if event.get("type") == "frame" and event.get("data"):
-                                return
+                        for connection in connections:
+                            await connection.send(
+                                json.dumps(
+                                    {"type": "start", "url": "", "width": 800, "height": 600}
+                                )
+                            )
 
-                    await next_frame(stream)
-                    await next_frame(second_stream)
-                    from octop.infra.control.browser.frame_hub import _HUBS
+                        from octop.infra.control.browser.frame_hub import _HUBS
 
-                    hub = _HUBS.get(profile)
-                    assert hub is not None
+                        deadline = time.monotonic() + 5
+                        while time.monotonic() < deadline:
+                            hub = _HUBS.get(profile)
+                            if hub is not None and hub.subscriber_count == 4:
+                                break
+                            await asyncio.sleep(0.05)
+                        assert hub is not None and hub.subscriber_count == 4
+
+                        current_target = browser._internal._profile.load_target()  # noqa: SLF001
+                        assert isinstance(current_target, str) and current_target
+                        background = await browser._internal.client.send(  # noqa: SLF001
+                            "Target.createTarget", {"url": f"{fixture_url}child"}
+                        )
+                        background_target = str(background["targetId"])
+                        await browser._internal.client.send(  # noqa: SLF001
+                            "Target.activateTarget", {"targetId": background_target}
+                        )
+                        try:
+                            assert await browser_value(browser, "document.visibilityState") == "hidden"
+
+                            async def observe_frames(connection: Any) -> dict[str, Any]:
+                                started = time.monotonic()
+                                previous = started
+                                frames = 0
+                                gaps: list[float] = []
+                                hashes: set[str] = set()
+                                while time.monotonic() - started < 60:
+                                    event = json.loads(
+                                        await asyncio.wait_for(connection.recv(), timeout=2)
+                                    )
+                                    if event.get("type") != "frame" or not event.get("data"):
+                                        continue
+                                    now = time.monotonic()
+                                    gaps.append(max(0.0, now - previous))
+                                    previous = now
+                                    frames += 1
+                                    hashes.add(hashlib.sha256(event["data"].encode()).hexdigest())
+                                elapsed = time.monotonic() - started
+                                ordered = sorted(gaps)
+                                return {
+                                    "elapsedSeconds": elapsed,
+                                    "frames": frames,
+                                    "uniquePayloads": len(hashes),
+                                    "maxFrameGapSeconds": max(gaps),
+                                    "p50FrameGapSeconds": ordered[
+                                        max(0, math.ceil(len(ordered) * 0.5) - 1)
+                                    ],
+                                    "p95FrameGapSeconds": ordered[
+                                        max(0, math.ceil(len(ordered) * 0.95) - 1)
+                                    ],
+                                }
+
+                            reports = await asyncio.gather(
+                                *(observe_frames(connection) for connection in connections)
+                            )
+                            assert await browser_value(browser, "document.visibilityState") == "hidden"
+                        finally:
+                            await browser._internal.client.send(  # noqa: SLF001
+                                "Target.closeTarget", {"targetId": background_target}
+                            )
+                            await browser._internal.client.send(  # noqa: SLF001
+                                "Target.activateTarget", {"targetId": current_target}
+                            )
+                        for report in reports:
+                            assert report["elapsedSeconds"] >= 60, report
+                            assert report["frames"] >= 2, report
+                            assert report["uniquePayloads"] >= 2, report
+                            assert report["maxFrameGapSeconds"] <= 1.5, report
+                            assert report["p95FrameGapSeconds"] <= 1.5, report
+                        (OUT / "stream.json").write_text(
+                            json.dumps(
+                                {
+                                    "status": "passed",
+                                    "durationSeconds": 60,
+                                    "maxFrameGapLimitSeconds": 1.5,
+                                    "maxSubscribers": 4,
+                                    "viewTargetVisibility": "hidden",
+                                    "viewers": reports,
+                                },
+                                indent=2,
+                            ),
+                            encoding="utf-8",
+                        )
+                    deadline = time.monotonic() + 5
+                    while hub.subscriber_count != 2 and time.monotonic() < deadline:
+                        await asyncio.sleep(0.05)
                     assert hub.subscriber_count == 2
-                    assert hub.sequence > 0
                     await stream.send(json.dumps({"type": "navigate", "url": f"{fixture_url}next"}))
                     deadline = time.monotonic() + 15
                     while time.monotonic() < deadline:
@@ -762,6 +855,17 @@ async def accept() -> dict[str, Any]:
                 )
                 assert denied["type"] == "error", denied
                 assert after_navigation == {"url": f"{fixture_url}next", "count": None}
+
+                from octop_browser.record.daemon import ensure_daemon, send_request
+
+                daemon_ready = await ensure_daemon()
+                assert daemon_ready.get("ok") is True, daemon_ready
+                daemon_denied = await send_request(
+                    {"command": "start", "profile": profile}
+                )
+                assert daemon_denied.get("ok") is False, daemon_denied
+                assert daemon_denied.get("code") == "WRITE_BLOCKED", daemon_denied
+                await send_request({"command": "shutdown"})
 
                 returned = await client.post(
                     f"/api/browser/sessions/{profile}/handoff",
@@ -977,11 +1081,14 @@ async def accept() -> dict[str, Any]:
                     "confirmed grant and exactly one real mouse click",
                     "grant replay rejection without another side effect",
                     "human navigation takes control and stale action cannot run",
+                    "the real record daemon rejects recording during user control",
+                    "four viewers share one capture for 60 seconds with a hidden viewTarget",
                     "Origin, browser permission and cross-user isolation",
                     "session deletion preserves the running Chrome",
                     "real audit rows contain no grant token",
                 ],
                 "evidence": str(OUT / "result.json"),
+                "streamEvidence": str(OUT / "stream.json"),
             }
     finally:
         uv.should_exit = True

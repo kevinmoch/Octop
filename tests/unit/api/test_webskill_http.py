@@ -166,8 +166,11 @@ def test_origin_is_a_normalized_exact_tuple(origin: str, accepted: bool) -> None
 
 
 async def test_handoff_rejects_cross_site_and_fetch_metadata_requests(
-    tmp_path, isolated_registry: BrowserAgentRegistry
+    tmp_path, isolated_registry: BrowserAgentRegistry, monkeypatch
 ) -> None:
+    from octop_browser.settings import settings as browser_settings
+
+    monkeypatch.setattr(browser_settings, "profiles_dir", tmp_path)
     async with octop_client(tmp_path) as (client, _server):
         await bootstrap_admin(client, tmp_path)
         auth = await auth_header(client)
