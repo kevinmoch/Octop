@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from octop.api.deps import current_user
+from octop.api.deps import current_user, require_permission
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -82,7 +82,21 @@ async def run_replay_recording(
             "octop-browser record/replay is not installed",
             status=503,
         ) from exc
-    return await ReplayRunner().run(recording_id, profile=profile, inputs=inputs)
+    from octop.api.routers.browser.harness import resolve_harness_session
+
+    session = await resolve_harness_session(profile)
+    if session is None or getattr(session._internal, "_command_gate", None) is None:  # noqa: SLF001
+        raise OctopError(
+            ErrorCode.INTERNAL_ERROR,
+            "Browser session has no profile write coordination",
+            status=503,
+        )
+
+    async def execute(action: str, **kwargs: Any) -> Any:
+        kwargs.pop("profile", None)
+        return await getattr(session, action)(**kwargs)
+
+    return await ReplayRunner(executor=execute).run(recording_id, profile=profile, inputs=inputs)
 
 
 def _latest_recording_id(profile: str) -> str | None:
@@ -312,7 +326,7 @@ async def get_skill_content(
 @router.post("/browser/record-replay/replay")
 async def replay_recording(
     body: ReplayBody,
-    user: Any = Depends(current_user),
+    user: Any = Depends(require_permission("browser")),
 ) -> dict[str, Any]:
     profile = user_browser_profile(user.id)
     _require_owned_recording(body.recording_id, profile)

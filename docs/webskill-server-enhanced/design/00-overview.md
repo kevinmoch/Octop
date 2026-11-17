@@ -108,7 +108,7 @@ PageAgent ────────────► modelTarget
 
 BrowserSession、Dashboard 原始输入、harness、record daemon 和 ReplayRunner 都使用 profile 级锁/lease。record daemon 已是第二进程，跨进程 lease 属于 P2，不得推迟到生产阶段。
 
-当前候选实现已提供 OS 文件锁、`CDPClient` command gate 及 Octop BrowserSession 创建/重试注入，并验证两个进程的互斥与崩溃释放。launch/attach 和初始 WebSocket connect 也由外层 gate 覆盖；外层在 `enable_domain` 前释放，避免与每命令 gate 嵌套取锁。两个 spawn 进程执行真实 `BrowserSession.create` 时，以计时驱动桩验证 launch/connect 区间不重叠。record daemon、ReplayRunner 和跨进程接管状态尚未完成统一接入；不能把现有 gate 当作 AC-15、AC-40、AC-51、AC-60 已全部通过。
+当前候选实现已提供 OS 文件锁、`CDPClient` command gate 及 Octop BrowserSession 创建/重试注入，并验证两个进程的互斥与崩溃释放。launch/attach 和初始 WebSocket connect 也由外层 gate 覆盖；外层在 `enable_domain` 前释放，避免与每命令 gate 嵌套取锁。两个 spawn 进程执行真实 `BrowserSession.create` 时，以计时驱动桩验证 launch/connect 区间不重叠。record daemon 的所有 CDPClient 使用同一 gate；ReplayRunner 接受注入执行器，Octop 绑定到已验证带 gate 的会话。跨进程接管状态、完整动作事务和部署矩阵仍未完成；不能把现有 gate 当作 AC-15、AC-40、AC-51、AC-60 已全部通过。
 
 ## 5. 技能生成、录制转换与两类执行
 

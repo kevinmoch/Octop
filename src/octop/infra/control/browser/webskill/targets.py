@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .oopif import OopifSession, attach_page_target
-from .sessions import BrowserAgentError, BrowserAgentSession
+from .sessions import MAX_MODEL_TARGETS, BrowserAgentError, BrowserAgentSession
 
 
 async def attach_model_target(session: BrowserAgentSession, browser: Any) -> OopifSession | None:
@@ -34,6 +34,17 @@ async def page_target_ids(client: Any) -> set[str]:
         and info.get("type") == "page"
         and isinstance(info.get("targetId"), str)
     }
+
+
+def admit_model_target(session: BrowserAgentSession, target_id: str) -> bool:
+    if target_id in session.model_targets:
+        session.model_target = target_id
+        return True
+    if len(session.model_targets) >= MAX_MODEL_TARGETS:
+        return False
+    session.model_targets.add(target_id)
+    session.model_target = target_id
+    return True
 
 
 async def newly_opened_page_target(client: Any, previous: set[str]) -> str | None:

@@ -11,27 +11,27 @@ from octop.api.routers.browser import stream
 async def test_frames_refresh_independently_of_session_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = 10.0
     frames = 0
+    sent_frames = 0
 
     async def capture(_sess: object) -> str:
-        nonlocal now, frames
+        nonlocal frames
         frames += 1
-        now += 0.01
         return "jpeg"
 
-    async def sleep(delay: float) -> None:
-        nonlocal now
-        now += delay
+    def record_send(message: dict[str, str]) -> None:
+        nonlocal sent_frames
+        if message["type"] == "frame":
+            sent_frames += 1
 
     snapshot = AsyncMock()
-    send_json = AsyncMock()
+    send_json = AsyncMock(side_effect=record_send)
     monkeypatch.setattr(stream, "_send_session_snapshot", snapshot)
     monkeypatch.setattr(stream, "_capture_jpeg", capture)
-    monkeypatch.setattr(stream.time, "monotonic", lambda: now)
-    monkeypatch.setattr(stream.asyncio, "sleep", sleep)
-    await stream._stream_loop(send_json, lambda: frames < 15, object(), "test", listen_only=False)
-    assert frames == 15
-    assert sum(call.args[0]["type"] == "frame" for call in send_json.await_args_list) == 15
-    assert snapshot.await_count == 2
-    assert now - 10.0 == pytest.approx(15 / 12)
+    monkeypatch.setattr(stream, "_SESSION_INTERVAL_S", 60.0)
+    await stream._stream_loop(
+        send_json, lambda: sent_frames < 15, object(), "test", listen_only=False
+    )
+    assert sent_frames == 15
+    assert frames in {15, 16}
+    assert snapshot.await_count == 1

@@ -52,6 +52,7 @@ from octop.api.routers.browser.harness import (
     resolve_harness_session,
 )
 from octop.api.routers.browser.webskill import check_websocket_origin
+from octop.infra.control.browser.frame_hub import capture_subscription
 from octop.infra.control.browser.webskill.sessions import browser_agent_registry
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
@@ -160,18 +161,24 @@ async def _stream_loop(
     await send_json({"type": "status", "status": "streaming"})
 
     next_snapshot = 0.0
-    while is_connected():
-        started = time.monotonic()
-        if started >= next_snapshot:
-            await _send_session_snapshot(send_json, profile, sess=sess)
-            next_snapshot = started + _SESSION_INTERVAL_S
+    capture_context = (
+        contextlib.nullcontext(None)
+        if listen_only
+        else capture_subscription(profile, lambda: _capture_jpeg(sess))
+    )
+    async with capture_context as subscription:
+        while is_connected():
+            started = time.monotonic()
+            if started >= next_snapshot:
+                await _send_session_snapshot(send_json, profile, sess=sess)
+                next_snapshot = started + _SESSION_INTERVAL_S
 
-        if not listen_only:
-            frame = await _capture_jpeg(sess)
-            if frame:
-                await send_json({"type": "frame", "data": frame})
+            if subscription is not None:
+                frame = await subscription.next_frame()
+                if frame:
+                    await send_json({"type": "frame", "data": frame})
 
-        await asyncio.sleep(max(0, _FRAME_INTERVAL_S - (time.monotonic() - started)))
+            await asyncio.sleep(max(0, _FRAME_INTERVAL_S - (time.monotonic() - started)))
 
 
 async def _listen_state_loop(

@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import re
+import ssl
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,44 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / ".artifacts" / "webskill-p1" / "ui"
 OUT.mkdir(parents=True, exist_ok=True)
 BASE_URL = os.environ.get("WEBSKILL_P1_UI_URL", "http://127.0.0.1:18088")
+
+
+class TlsModelServer(ThreadingHTTPServer):
+    model_calls = 0
+
+
+class ModelHandler(BaseHTTPRequestHandler):
+    def log_message(self, format: str, *args: Any) -> None:
+        return
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_POST(self) -> None:
+        self.server.model_calls += 1
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "UNEXPECTED_MODEL_CALL"}],
+                        }
+                    }
+                ]
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 class CounterServer(ThreadingHTTPServer):
@@ -49,7 +88,7 @@ class CounterHandler(BaseHTTPRequestHandler):
             )
             return
         self.respond(
-            f"<!doctype html><html><body><button onclick=\"fetch('/click', {{method:'POST'}})\">Run once</button><iframe id=\"same-frame\" src=\"/frame\"></iframe><iframe id=\"cross-frame\" src=\"http://localhost:{self.server.server_port}/frame?cross=1\"></iframe></body></html>"
+            f'<!doctype html><html><body><button onclick="fetch(\'/click\', {{method:\'POST\'}})">Run once</button><iframe id="same-frame" src="/frame"></iframe><iframe id="cross-frame" src="http://localhost:{self.server.server_port}/frame?cross=1"></iframe></body></html>'
         )
 
     def do_POST(self) -> None:
@@ -86,6 +125,22 @@ async def run() -> dict[str, Any]:
     counter = CounterServer(("127.0.0.1", 0), CounterHandler)
     threading.Thread(target=counter.serve_forever, daemon=True).start()
     fixture_url = f"http://127.0.0.1:{counter.server_port}/"
+    model_cert = os.environ.get("WEBSKILL_P1_MODEL_CERTFILE")
+    model_key = os.environ.get("WEBSKILL_P1_MODEL_KEYFILE")
+    if bool(model_cert) != bool(model_key):
+        raise RuntimeError("The TLS model fixture requires both a certificate and a key")
+    model_server: TlsModelServer | None = None
+    if model_cert and model_key:
+        model_server = TlsModelServer(("127.0.0.1", 0), ModelHandler)
+        tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls_context.load_cert_chain(model_cert, model_key)
+        model_server.socket = tls_context.wrap_socket(model_server.socket, server_side=True)
+        threading.Thread(target=model_server.serve_forever, daemon=True).start()
+    model_url = (
+        f"https://127.0.0.1:{model_server.server_port}/v1"
+        if model_server is not None
+        else os.environ.get("WEBSKILL_P1_MODEL_URL", "http://127.0.0.1:1234/v1")
+    )
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(executable_path=find_chrome(), headless=True)
         page = await browser.new_page(
@@ -178,11 +233,14 @@ async def run() -> dict[str, Any]:
             fields = dialog.locator("input")
             await fields.nth(0).fill("Local Qwen")
             await fields.nth(1).fill("qwen3.5:9b")
-            await fields.nth(2).fill("http://127.0.0.1:1234/v1")
+            await fields.nth(2).fill(model_url)
+            if model_server is not None:
+                await frame.get_by_test_id("console-model-apikey-input").fill("tls-fixture-key")
             await frame.get_by_test_id("console-edit-dialog-model-save").click()
             await frame.get_by_role("button", name="助手", exact=True).click()
-            await frame.locator(".local-model summary").click()
-            await frame.locator('.local-model input[type="checkbox"]').check()
+            if model_server is None:
+                await frame.locator(".local-model summary").click()
+                await frame.locator('.local-model input[type="checkbox"]').check()
             if os.environ.get("WEBSKILL_P1_LNA_DENY") == "1":
                 permission_states = await page.evaluate("""async () => {
                     const states = {};
@@ -196,10 +254,18 @@ async def run() -> dict[str, Any]:
                     return {"status": "unsupported", "permissionStates": permission_states}
                 if os.environ.get("WEBSKILL_P1_LNA_POLICY") != "1":
                     cdp = await page.context.new_cdp_session(page)
+                    target = await cdp.send("Target.getTargetInfo")
+                    browser_context_id = target.get("targetInfo", {}).get("browserContextId")
+                    assert isinstance(browser_context_id, str) and browser_context_id
                     for name in permission_states:
                         await cdp.send(
                             "Browser.setPermission",
-                            {"permission": {"name": name}, "setting": "denied", "origin": BASE_URL},
+                            {
+                                "permission": {"name": name},
+                                "setting": "denied",
+                                "origin": BASE_URL,
+                                "browserContextId": browser_context_id,
+                            },
                         )
                 if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1":
                     cdp = await page.context.new_cdp_session(page)
@@ -234,11 +300,14 @@ async def run() -> dict[str, Any]:
                 alert_text = await alert.inner_text()
                 assert "LLM_REQUEST_FAILED" in alert_text, alert_text
                 assert await frame.get_by_text("P1_MODEL_OK", exact=True).count() == 0
+                if model_server is not None:
+                    assert model_server.model_calls == 0, model_server.model_calls
                 return {
                     "status": "passed",
                     "lnaDenied": True,
                     "permissionStates": denied_states,
                     "structuredErrorVisible": True,
+                    "modelRequests": model_server.model_calls if model_server is not None else None,
                 }
             composer = frame.locator("textarea:visible").last
             await composer.fill("Reply with exactly P1_MODEL_OK. Do not use any tools.")
@@ -374,6 +443,9 @@ async def run() -> dict[str, Any]:
             }
         finally:
             await browser.close()
+            if model_server is not None:
+                model_server.shutdown()
+                model_server.server_close()
             counter.shutdown()
             counter.server_close()
 

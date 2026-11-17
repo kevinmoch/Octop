@@ -15,6 +15,7 @@ GRANT_TTL_SECONDS = 10.0
 UNCLAIMED_SESSION_TTL_SECONDS = 120.0
 MAX_SESSIONS_PER_USER = 8
 MAX_TICKETS_PER_SESSION = 4
+MAX_MODEL_TARGETS = 8
 SUPPORTED_ACTIONS = frozenset({"click", "fill", "select", "scroll", "back"})
 DOCUMENT_REF = "@document"
 
@@ -55,6 +56,7 @@ class BrowserAgentSession:
     active: bool = True
     model_target: str | None = None
     base_target_id: str | None = None
+    model_targets: set[str] = field(default_factory=set)
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
     connection_id: str | None = None
@@ -169,6 +171,7 @@ class BrowserAgentRegistry:
         )
         if disconnected is not None:
             disconnected.model_target = None
+            disconnected.model_targets.clear()
             disconnected.document = None
             disconnected.refs.clear()
             return disconnected

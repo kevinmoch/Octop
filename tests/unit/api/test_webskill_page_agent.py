@@ -1014,3 +1014,19 @@ async def test_oopif_cleanup_does_not_mask_primary_failures() -> None:
     )
     await attached.close()
     assert attached.closed is True
+
+
+def test_target_workset_limit_does_not_move_the_model_pointer(
+    registry: BrowserAgentRegistry,
+) -> None:
+    from octop.infra.control.browser.webskill.sessions import MAX_MODEL_TARGETS
+    from octop.infra.control.browser.webskill.targets import admit_model_target
+
+    session = registry.create(1, "user-1")
+    session.model_target = "target-0"
+    session.base_target_id = "target-0"
+    session.model_targets = {f"target-{index}" for index in range(MAX_MODEL_TARGETS)}
+
+    assert admit_model_target(session, "target-overflow") is False
+    assert session.model_target == "target-0"
+    assert "target-overflow" not in session.model_targets

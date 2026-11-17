@@ -64,6 +64,17 @@
 - 整改后明确选择的专项命令为 **77 passed**，证据为 `.artifacts/webskill-p1/ae93583fd0/result.json` 与 `.artifacts/webskill-p1/ui/ui-result.json`。
 - 整改代码的最终全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5933 passed, 45 skipped**，Ruff、格式和 mypy（686 个源码文件）均通过。该结果不替代依赖发布、共享写入全链路或部署准入。
 
+### P2-5 写入协调与资源收尾（2026-11-17，本地 candidate）
+
+- `862e977` 将唯一 OS lease 实现下沉到 octop-browser，Octop 保留异常翻译且锁路径不变。library 全量为 **257 passed, 9 skipped**。真实 record daemon 在另一进程持锁时等待，释放后正常启动、停止并关闭。
+- daemon 主客户端和后续发现 target 的客户端均使用同一 profile gate。browser_tool 支持宿主配置 gate 工厂，首次创建和断线重建都覆盖；已存在但未协调的会话明确失败。BrowserProfileMiddleware 在接管时阻止 harness 写动作，包括 `eval_js`，不再只改变 UI 状态。
+- ReplayRunner 支持可选执行器；Octop 注入已验证带 gate 的 BrowserSession，移除路由用 profile 参数，缺 gate 时明确 503，不回退默认 browser_tool。回放路由要求 `browser` 权限。该接口工作不代表 P3 的逐步 grant、回放状态机或技能执行已开放。
+- target 工作集记录当前任务的已授权页面，断线重用时清空。触顶时不移动 modelTarget、不扩大权限，同时保留真实动作成功及诊断原因，不伪称已回滚新页面。
+- 同一 profile 的观看端共享 `ProfileFrameHub`，限制最多 4 个订阅，最后一个订阅关闭后取消采集并清除缓存。单测验证共享帧、上限与回收；真实双 WS 验收确认两个观看端均有帧且只有一个采集 hub。
+- 全量回归定位到旧 `test_browser_stream_frames` 将共享的 `asyncio.sleep` 替换为不让出事件循环的假函数，导致新抓图任务忙循环。测试已改为真实调度，按实际发送帧数停止，并允许采集端最多一个在途尾部帧；抓图与 hub 专项共 3 项通过。
+- 最新真实证据为 `.artifacts/webskill-p1/0b75b34fe0/result.json`。真实 UI 三击链路已在本次 writer/hub 改动后重新执行并通过，证据为 `.artifacts/webskill-p1/ui/ui-result.json`。
+- **LNA 未通过**：在隔离局域网 HTTPS Origin + TLS 模型桩下，分别使用权限拒绝和现有 Permissions-Policy 拒绝配置，模型端点仍收到 1 次真实 POST；两处均因模型端点收到 1 次真实 POST 而失败，不能据此宣称 LNA 拒绝或生产支持。脚本保留在 `ui_acceptance.py`，供修正浏览器/策略前提后复验。
+
 ## 6. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
@@ -71,6 +82,7 @@
 - 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace 和主题切换均通过；主页面、同源 frame、OOPIF 各一次真实单击，`pageErrors` 为空。最新证据为 `.artifacts/webskill-p1/ui/ui-result.json`，`confirmedRealClickCount=3`、`confirmedSameOriginFrameClickCount=1`、`confirmedOopifClickCount=1`，WS query 仅有 width/height/ticket。
 - P2-0 首项及生命周期补强后的全量 `make all PYTEST_JOBS=4` 均为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。生命周期真实 UI 在全量结束后复验通过，首次模型超时未产生页面脚本错误。
 - P2-4 本轮全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5925 passed, 45 skipped**；Ruff、1315 个文件的格式检查和 mypy（686 个源码文件）均通过。其后新增 lease timeout/Windows 偏移测试纳入上述 71 项专项，并由最终提交钩子再次覆盖。
+- P2-5 最终全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5939 passed, 45 skipped**（370.44 秒）；Ruff、1318 个文件的格式检查和 mypy（688 个源码文件）均通过。浏览器专项为 **98 passed**，真实 UI 三击链路在全量启动后独立复验通过。
 
 实际执行命令：
 
@@ -90,8 +102,12 @@ UV_NO_SYNC=1 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" uv ru
   tests/unit/api/test_webskill_http.py \
   tests/unit/api/test_webskill_lease.py \
   tests/unit/api/test_browser_stream_mouse.py \
-  tests/unit/api/test_browser_stream_keyboard.py -q
-# 77 passed
+  tests/unit/api/test_browser_stream_keyboard.py \
+  tests/unit/api/test_browser_stream_frames.py \
+  tests/unit/api/test_browser_frame_hub.py \
+  tests/unit/agents/test_browser_profile_middleware.py \
+  tests/integration/test_browser_record_replay_api.py -q
+# 98 passed
 
 make build-frontend
 PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JOBS=4
@@ -101,9 +117,9 @@ PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JO
 
 ## 7. 尚未开放
 
-- record daemon、ReplayRunner、Dashboard 原始输入和 harness 的统一写入协调与跨进程接管尚未完成；已有 lease/gate 只覆盖明确注入的客户端，不能据此通过 AC-15、AC-40、AC-51、AC-60。
-- 工作集上限、后台 viewTarget 连续出帧、单采集多订阅、容量/p95 和 Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
+- 跨进程接管状态、动作级事务锁和共享写入容量验收尚未完成；已有 daemon/ReplayRunner/gate 接线不能据此通过 AC-15、AC-40、AC-51、AC-60。
+- 工作集和抓图 hub 只有本地候选证据；后台 viewTarget 连续 60 秒出帧、容量/p95 和 Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
 - OOPIF 内再嵌套 frame 的下钻与聚合仍未开放；当前真实 UI 证据只覆盖一层 OOPIF。
-- `e34bbdd`、`9b18040`、`927bfe3`、`389b775` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
-- P3 的录制回放、技能执行和文档产物。
-- LNA 真实用户拒绝与受信 TLS 环境仍未完成复验；本项不将这些边界标记为通过。
+- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
+- P3 的逐步授权回放、技能执行和文档产物。
+- 本轮 LNA 实测失败，且使用的是隔离自签 TLS 而非生产受信 TLS；这两项均不能标为通过。

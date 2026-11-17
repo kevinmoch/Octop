@@ -40,18 +40,17 @@ def _hold_lease(profile: str, directory: str, ready) -> None:
 
 
 async def test_command_gate_uses_the_real_lease(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "octop.infra.control.browser.webskill.lease.browser_settings.profiles_dir",
-        str(tmp_path),
-    )
+    from octop_browser.settings import settings
+
+    monkeypatch.setattr(settings, "profiles_dir", str(tmp_path))
     async with profile_command_gate("user-1")("DOM.getDocument", {}):
         assert (tmp_path / ".leases").is_dir()
 
 
 async def test_lease_timeout_fails_closed(tmp_path: Path, monkeypatch) -> None:
     import pytest
+    from octop_browser import lease as lease_module
 
-    from octop.infra.control.browser.webskill import lease as lease_module
     from octop.infra.control.browser.webskill.sessions import BrowserAgentError
 
     monkeypatch.setattr(lease_module.browser_settings, "profiles_dir", str(tmp_path))
@@ -72,7 +71,7 @@ async def test_lease_timeout_fails_closed(tmp_path: Path, monkeypatch) -> None:
 def test_windows_lock_and_unlock_use_the_same_byte(tmp_path: Path, monkeypatch) -> None:
     from types import SimpleNamespace
 
-    from octop.infra.control.browser.webskill import lease as lease_module
+    from octop_browser import lease as lease_module
 
     modes: list[int] = []
     offsets: list[int] = []

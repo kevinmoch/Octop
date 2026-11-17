@@ -230,3 +230,75 @@ async def test_record_skill_content_hides_other_user_recording(env: Any) -> None
             json={"recordingId": "rec_other"},
         )
     assert r.status_code == 404
+
+
+async def test_replay_executor_uses_the_gated_browser_session(tmp_path, monkeypatch) -> None:
+    from octop_browser.models import ActionMetrics, ToolResult
+    from octop_browser.record.models import (
+        RecordingManifest,
+        SemanticStep,
+        StepsDocument,
+    )
+    from octop_browser.record.settings import RecordReplaySettings
+    from octop_browser.record.store import RecordingStore
+
+    from octop.api.routers.browser import record_replay
+
+    calls: list[str] = []
+
+    async def navigate(url: str) -> ToolResult:
+        calls.append(url)
+        return ToolResult(
+            success=True,
+            content="ok",
+            metrics=ActionMetrics(
+                action="navigate",
+                duration_ms=0,
+                dom_nodes_scanned=0,
+                estimated_tokens=0,
+            ),
+        )
+
+    session = SimpleNamespace(_internal=SimpleNamespace(_command_gate=object()), navigate=navigate)
+    monkeypatch.setattr(
+        "octop.api.routers.browser.harness.resolve_harness_session",
+        AsyncMock(return_value=session),
+    )
+
+    async def unexpected_default(*args, **kwargs):
+        raise AssertionError("The default browser_tool must not be used")
+
+    monkeypatch.setattr("octop_browser.tool_interface.browser_tool", unexpected_default)
+    store = RecordingStore(RecordReplaySettings(base_dir=tmp_path))
+    store.create(RecordingManifest(recordingId="rec_gate", createdAt="now"))
+    store.write_steps(
+        "rec_gate",
+        StepsDocument(
+            recordingId="rec_gate",
+            steps=[SemanticStep(id="step_001", kind="open", url="https://example.test")],
+        ),
+    )
+    monkeypatch.setattr("octop_browser.record.replay.RecordingStore", lambda: store)
+
+    report = await record_replay.run_replay_recording("rec_gate", profile="user-1", inputs={})
+
+    assert report["status"] == "passed", report.get("error") or report["steps"]
+    assert calls == ["https://example.test"]
+
+
+async def test_replay_rejects_a_session_without_write_coordination(
+    monkeypatch,
+) -> None:
+    import pytest
+
+    from octop.api.routers.browser import record_replay
+    from octop.infra.errors import OctopError
+
+    session = SimpleNamespace(_internal=SimpleNamespace(_command_gate=None))
+    monkeypatch.setattr(
+        "octop.api.routers.browser.harness.resolve_harness_session",
+        AsyncMock(return_value=session),
+    )
+    with pytest.raises(OctopError) as error:
+        await record_replay.run_replay_recording("rec_missing_gate", profile="user-1", inputs={})
+    assert error.value.status == 503

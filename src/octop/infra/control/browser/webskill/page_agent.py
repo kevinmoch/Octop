@@ -29,7 +29,12 @@ from .sessions import (
     DocumentIdentity,
     PageRef,
 )
-from .targets import attach_model_target, newly_opened_page_target, page_target_ids
+from .targets import (
+    admit_model_target,
+    attach_model_target,
+    newly_opened_page_target,
+    page_target_ids,
+)
 
 SessionResolver = Callable[..., Awaitable[Any]]
 WriteGate = Callable[[], bool]
@@ -90,6 +95,7 @@ async def document_identity(
     elif session.base_target_id is None:
         session.base_target_id = session.model_target
     target = session.model_target
+    session.model_targets.add(target)
     client = cdp_client or browser._internal.client  # noqa: SLF001
     targets = await client.send("Target.getTargets")
     if not any(
@@ -602,7 +608,11 @@ async def execute_action(
                 previous_target_ids,  # noqa: SLF001
             )
             if new_target is not None:
-                session.model_target = new_target
+                if not admit_model_target(session, new_target):
+                    outcome["reason"] = (
+                        "The new page exceeds the model target workset limit; "
+                        "it was not added to the model workset"
+                    )
                 session.document = None
                 session.refs.clear()
                 registry.revoke_grants(session_id=session.id)

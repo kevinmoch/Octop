@@ -22,6 +22,9 @@ async def test_browser_profile_is_forced_from_current_user(monkeypatch) -> None:
         "get_config",
         lambda: {"configurable": {"user": "42"}},
     )
+    from octop_browser import tool_interface
+
+    monkeypatch.setattr(tool_interface, "_command_gate_factory", None)
     handler = AsyncMock(return_value=object())
     request = _request("browser_use", {"action": "navigate", "profile": "default"})
 
@@ -32,6 +35,7 @@ async def test_browser_profile_is_forced_from_current_user(monkeypatch) -> None:
         "action": "navigate",
         "profile": "user-42",
     }
+    assert tool_interface._command_gate_factory is browser_profile.profile_command_gate
 
 
 @pytest.mark.asyncio
@@ -94,3 +98,24 @@ async def test_browser_profile_blocks_placeholder_user_zero(monkeypatch) -> None
 
     handler.assert_not_awaited()
     assert getattr(result, "status", None) == "error"
+
+
+@pytest.mark.asyncio
+async def test_browser_profile_blocks_writes_during_user_takeover(monkeypatch) -> None:
+    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+
+    monkeypatch.setattr(browser_profile, "browser_enabled", lambda: True)
+    monkeypatch.setattr(
+        browser_profile,
+        "get_config",
+        lambda: {"configurable": {"user": "42"}},
+    )
+    monkeypatch.setitem(_CONTROL_OWNERS, "user-42", "user")
+    handler = AsyncMock(return_value=object())
+    request = _request("browser_use", {"action": "eval_js", "expression": "1"})
+
+    result = await browser_profile.BrowserProfileMiddleware().awrap_tool_call(request, handler)
+
+    handler.assert_not_awaited()
+    assert getattr(result, "status", None) == "error"
+    assert "User control is active" in str(result.content)

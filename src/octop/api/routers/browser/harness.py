@@ -14,23 +14,18 @@ from pydantic import BaseModel
 
 from octop.api.deps import require_permission
 from octop.infra.control.browser.webskill.lease import profile_command_gate
+from octop.infra.control.browser.webskill.ownership import (
+    _CONTROL_OWNERS as _CONTROL_OWNERS,
+)
+from octop.infra.control.browser.webskill.ownership import (
+    control_owner_for as control_owner_for,
+)
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# In-memory control ownership per session (keyed by harness profile / session_id).
-# This is a UI/coordination hint: the agent pauses interactive input while the
-# user is in control. It is stored separately from the live session so a
-# takeover survives dashboard reloads and WS reconnects.
-_CONTROL_OWNERS: dict[str, str] = {}
-
-
-def control_owner_for(session_id: str) -> str:
-    """Return the current control owner for a session, defaulting to 'agent'."""
-    return _CONTROL_OWNERS.get(session_id, "agent")
 
 
 class HandoffBody(BaseModel):

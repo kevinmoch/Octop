@@ -11,8 +11,11 @@ from langchain_core.messages import ToolMessage
 from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from octop_browser.tool_interface import configure_browser_command_gate
 
 from octop.infra.control.browser.bundled import browser_enabled
+from octop.infra.control.browser.webskill.lease import profile_command_gate
+from octop.infra.control.browser.webskill.ownership import control_owner_for
 from octop.infra.utils.browser_media import parse_octop_user_id, user_browser_profile
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,23 @@ def _bind_browser_profile(request: ToolCallRequest) -> ToolCallRequest | ToolMes
 
     raw_args = tool_call.get("args")
     args = dict(raw_args) if isinstance(raw_args, dict) else {}
-    args["profile"] = user_browser_profile(user_id)
+    profile = user_browser_profile(user_id)
+    args["profile"] = profile
+    if control_owner_for(profile) == "user" and args.get("action") not in {
+        "dom_tree",
+        "list_tabs",
+        "screenshot",
+        "wait",
+    }:
+        return ToolMessage(
+            content=(
+                "browser_use blocked: User control is active. "
+                "Return control to the agent before browser writes."
+            ),
+            tool_call_id=str(tool_call.get("id") or ""),
+            status="error",
+        )
+    configure_browser_command_gate(profile_command_gate)
     return request.override(tool_call={**tool_call, "args": args})
 
 
