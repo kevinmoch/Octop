@@ -7,7 +7,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
-from octop_browser.actions import interact
+from octop_browser.actions import interact, navigate
 from octop_browser.dom.builder import DOMBuilder
 from octop_browser.dom.refs import RefCache
 from octop_browser.session import BrowserSession
@@ -20,6 +20,7 @@ from .frames import (
     projection_document,
     select_frame_route,
 )
+from .oopif import OopifSession, attach_oopif_expected, attach_oopif_route
 from .sessions import (
     DOCUMENT_REF,
     BrowserAgentError,
@@ -242,81 +243,134 @@ async def read_page(
         raise BrowserAgentError("PERCEPTION_FAILED", "The browser document is unavailable")
     routes = discover_frame_routes(root, before.url)
     route = select_frame_route(routes, scope)
-    selected_frame = await frame_identity(client, route)
-    projected_root = projection_document(root, route)
-    selected_url = route.url if route is not None and route.url else before.url
-    selected_title = before.title if route is None else ""
+    attached: OopifSession | None = None
     try:
-        dom = DOMBuilder(
-            dom=projected_root,
-            url=selected_url,
-            title=selected_title,
-            ref_cache=RefCache(),
-        ).build(level="structured")
-        raw_elements = json.loads(dom).get("elements", [])
-    except (json.JSONDecodeError, AttributeError) as error:
-        raise BrowserAgentError(
-            "PERCEPTION_FAILED", "The browser DOM response is invalid"
-        ) from error
-    if not isinstance(raw_elements, list):
-        raise BrowserAgentError("PERCEPTION_FAILED", "The browser DOM response is invalid")
-    excluded = _sensitive_subtrees(projected_root)
-    backend_ids = _node_index(root)
-    if any(element.get("framePath") for element in raw_elements if isinstance(element, dict)):
-        raise BrowserAgentError(
-            "PERCEPTION_SUBTREE_UNSUPPORTED",
-            "Frame projection exceeded its selected document",
-        )
-    elements = [
-        element
-        for element in raw_elements
-        if isinstance(element, dict)
-        and isinstance(element.get("node_id"), int)
-        and element.get("node_id") not in excluded
-    ]
-    if len(elements) > MAX_P1_NODES:
-        raise BrowserAgentError(
-            "PERCEPTION_FAILED",
-            f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
-        )
-    after = await document_identity(session, browser)
-    if before.key != after.key or selected_frame != await frame_identity(client, route):
-        raise BrowserAgentError(
-            "PERCEPTION_FAILED", "The document or frame changed while it was being perceived"
-        )
-    if route is None or session.document is None or session.document.key != after.key:
-        session.refs.clear()
-    else:
-        frame_id = selected_frame.partition(":")[0]
-        for ref, entry in list(session.refs.items()):
-            if entry.frame.partition(":")[0] == frame_id:
-                session.refs.pop(ref, None)
-    session.document = after
-    nodes: list[dict[str, Any]] = []
-    targets: list[dict[str, Any]] = []
-    for element in elements:
-        backend_node_id = backend_ids.get(element["node_id"])
-        if backend_node_id is None:
+        if route is not None and route.document is None:
+            attached = await attach_oopif_route(client, route, before.target_id)
+            selected_client = attached.client
+            selected_frame = attached.frame_key
+            selected_url = attached.url
+            selected_title = attached.title
+            raw = await selected_client.send("DOM.getDocument", {"depth": -1})
+            root = raw.get("root", {})
+            if not isinstance(root, dict):
+                raise BrowserAgentError("PERCEPTION_FAILED", "The OOPIF document is unavailable")
+            projected_root = projection_document(root, None)
+            backend_ids = _node_index(root)
+            nested: list[dict[str, str]] = []
+        else:
+            selected_client = client
+            selected_frame = await frame_identity(client, route)
+            if route is not None:
+                refreshed = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+                refreshed_root = refreshed.get("root", {})
+                if not isinstance(refreshed_root, dict):
+                    raise BrowserAgentError(
+                        "PERCEPTION_FAILED", "The frame snapshot is unavailable"
+                    )
+                refreshed_routes = discover_frame_routes(refreshed_root, before.url)
+                refreshed_route = select_frame_route(refreshed_routes, scope)
+                if (
+                    refreshed_route is None
+                    or refreshed_route.path != route.path
+                    or refreshed_route.owner_backend_node_id != route.owner_backend_node_id
+                    or await frame_identity(client, refreshed_route) != selected_frame
+                ):
+                    raise BrowserAgentError(
+                        "PERCEPTION_FAILED", "The frame changed while its snapshot was being bound"
+                    )
+                root = refreshed_root
+                route = refreshed_route
+                routes = refreshed_routes
+            projected_root = projection_document(root, route)
+            backend_ids = _node_index(root)
+            nested = nested_frame_refs(routes, route.path if route is not None else ())
+            selected_url = route.url if route is not None and route.url else before.url
+            selected_title = before.title if route is None else ""
+        try:
+            dom = DOMBuilder(
+                dom=projected_root,
+                url=selected_url,
+                title=selected_title,
+                ref_cache=RefCache(),
+            ).build(level="structured")
+            raw_elements = json.loads(dom).get("elements", [])
+        except (json.JSONDecodeError, AttributeError) as error:
             raise BrowserAgentError(
-                "PERCEPTION_FAILED", "Could not bind a visible control to its backend node identity"
+                "PERCEPTION_FAILED", "The browser DOM response is invalid"
+            ) from error
+        if not isinstance(raw_elements, list):
+            raise BrowserAgentError("PERCEPTION_FAILED", "The browser DOM response is invalid")
+        excluded = _sensitive_subtrees(projected_root)
+        if any(element.get("framePath") for element in raw_elements if isinstance(element, dict)):
+            raise BrowserAgentError(
+                "PERCEPTION_SUBTREE_UNSUPPORTED",
+                "Frame projection exceeded its selected document",
             )
-        ref = registry.issue_ref(session, backend_node_id, selected_frame)
-        nodes.append(_node(element, ref))
-        targets.append(_target(element, ref))
-    nested = nested_frame_refs(routes, route.path if route is not None else ())
-    return {
-        "type": "perceive-result",
-        "result": {
-            "nodes": nodes,
-            "page": {
-                "url": selected_url,
-                **({"title": selected_title} if selected_title else {}),
+        elements = [
+            element
+            for element in raw_elements
+            if isinstance(element, dict)
+            and isinstance(element.get("node_id"), int)
+            and element.get("node_id") not in excluded
+        ]
+        if len(elements) > MAX_P1_NODES:
+            raise BrowserAgentError(
+                "PERCEPTION_FAILED",
+                f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
+            )
+        after = await document_identity(session, browser)
+        if before.key != after.key:
+            raise BrowserAgentError(
+                "PERCEPTION_FAILED", "The document changed while it was being perceived"
+            )
+        if attached is not None:
+            tree = await attached.client.send("Page.getFrameTree")
+            loader = str(tree.get("frameTree", {}).get("frame", {}).get("loaderId") or "")
+            if f"oopif:{attached.target_id}:{loader}" != selected_frame:
+                raise BrowserAgentError(
+                    "PERCEPTION_FAILED", "The OOPIF document changed while it was being perceived"
+                )
+        elif selected_frame != await frame_identity(client, route):
+            raise BrowserAgentError(
+                "PERCEPTION_FAILED", "The frame changed while it was being perceived"
+            )
+        if route is None or session.document is None or session.document.key != after.key:
+            session.refs.clear()
+        else:
+            frame_id = "oopif" if attached is not None else selected_frame.partition(":")[0]
+            for ref, entry in list(session.refs.items()):
+                if entry.frame.partition(":")[0] == frame_id:
+                    session.refs.pop(ref, None)
+        session.document = after
+        nodes: list[dict[str, Any]] = []
+        targets: list[dict[str, Any]] = []
+        for element in elements:
+            backend_node_id = backend_ids.get(element["node_id"])
+            if backend_node_id is None:
+                raise BrowserAgentError(
+                    "PERCEPTION_FAILED",
+                    "Could not bind a visible control to its backend node identity",
+                )
+            ref = registry.issue_ref(session, backend_node_id, selected_frame)
+            nodes.append(_node(element, ref))
+            targets.append(_target(element, ref))
+        return {
+            "type": "perceive-result",
+            "result": {
+                "nodes": nodes,
+                "page": {
+                    "url": selected_url,
+                    **({"title": selected_title} if selected_title else {}),
+                },
+                **({"nestedFrames": nested} if nested else {}),
             },
-            **({"nestedFrames": nested} if nested else {}),
-        },
-        "targets": targets,
-        "document": after.public(),
-    }
+            "targets": targets,
+            "document": after.public(),
+        }
+    finally:
+        if attached is not None:
+            await attached.close()
 
 
 async def issue_action_grant(
@@ -335,22 +389,25 @@ async def issue_action_grant(
     document = await document_identity(session, browser)
     if request.get("ref") != DOCUMENT_REF:
         entry = registry.resolve_ref(session, str(request.get("ref") or ""), document)
-        await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
+        if entry.frame.startswith("oopif:"):
+            attached = await attach_oopif_expected(browser._internal.client, entry.frame)  # noqa: SLF001
+            await attached.close()
+        else:
+            await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
     return registry.issue_grant(session, document=document, request=request)
 
 
 async def _actual_target(
-    browser: BrowserSession, entry: PageRef, document: DocumentIdentity
+    browser: BrowserSession, entry: PageRef, document: DocumentIdentity, client: Any = None
 ) -> dict[str, Any]:
     if entry.backend_node_id == 0:
         return {"role": "document", **({"name": document.title} if document.title else {})}
-    resolved = await browser._internal.client.send(  # noqa: SLF001
-        "DOM.resolveNode", {"backendNodeId": entry.backend_node_id}
-    )
+    cdp = client or browser._internal.client  # noqa: SLF001
+    resolved = await cdp.send("DOM.resolveNode", {"backendNodeId": entry.backend_node_id})
     object_id = resolved.get("object", {}).get("objectId")
     if not isinstance(object_id, str):
         raise BrowserAgentError("PAGE_ACTION_STALE_REF", "The element reference no longer resolves")
-    described = await browser._internal.client.send(  # noqa: SLF001
+    described = await cdp.send(
         "Runtime.callFunctionOn",
         {
             "objectId": object_id,
@@ -401,87 +458,101 @@ async def execute_action(
             if ref == DOCUMENT_REF
             else registry.resolve_ref(session, ref, document)
         )
-        await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
-        target = await _actual_target(browser, entry, document)
-        if target.get("secret") is True:
-            return {
-                "type": "execute-result",
-                "outcome": {
-                    "ok": False,
-                    "target": target,
-                    "secret": True,
-                    "reason": "Sensitive controls are outside the P1 action scope",
-                },
-            }
-        action = request["action"]
-        temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
+        attached: OopifSession | None = None
         try:
-            if action == "back":
-                result = await browser.go_back()
+            if entry.frame.startswith("oopif:"):
+                attached = await attach_oopif_expected(browser._internal.client, entry.frame)  # noqa: SLF001
+                client = attached.client
+                await client.send("DOM.getDocument", {"depth": -1})
             else:
-                resolved = await browser._internal.client.send(  # noqa: SLF001
-                    "DOM.resolveNode", {"backendNodeId": entry.backend_node_id}
-                )
-                object_id = resolved.get("object", {}).get("objectId")
-                if not isinstance(object_id, str):
-                    raise BrowserAgentError(
-                        "PAGE_ACTION_STALE_REF", "The element no longer resolves"
-                    )
-                node = await browser._internal.client.send(  # noqa: SLF001
-                    "DOM.requestNode", {"objectId": object_id}
-                )
-                node_id = node.get("nodeId")
-                if not isinstance(node_id, int) or node_id == 0:
-                    raise BrowserAgentError(
-                        "PAGE_ACTION_STALE_REF",
-                        "The element no longer exists in the current document",
-                    )
-                action_cache = RefCache()
-                action_cache.store(temporary_ref, node_id)
+                await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
                 client = browser._internal.client  # noqa: SLF001
-                if action == "click":
-                    result = await interact.click(client, action_cache, ref=temporary_ref)
-                elif action == "fill":
-                    result = await interact.fill_text(
-                        client, action_cache, text=request["value"], ref=temporary_ref
-                    )
-                elif action == "select":
-                    result = await interact.select_value(
-                        client, action_cache, value=request["value"], ref=temporary_ref
-                    )
-                elif action == "scroll":
-                    result = await interact.scroll(client, action_cache, direction=request["value"])
+            target = await _actual_target(browser, entry, document, client)
+            if target.get("secret") is True:
+                return {
+                    "type": "execute-result",
+                    "outcome": {
+                        "ok": False,
+                        "target": target,
+                        "secret": True,
+                        "reason": "Sensitive controls are outside the action scope",
+                    },
+                }
+            action = request["action"]
+            temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
+            try:
+                if action == "back" and attached is not None:
+                    result = await navigate.go_back(client, RefCache())
+                elif action == "back":
+                    result = await browser.go_back()
                 else:
-                    return {
-                        "type": "execute-result",
-                        "outcome": {
-                            "ok": False,
-                            "target": target,
-                            "reason": "The action is not supported by this host",
-                        },
-                    }
-        except BrowserAgentError:
-            raise
-        except Exception as error:
-            return {
-                "type": "execute-result",
-                "outcome": {"ok": False, "target": target, "reason": str(error)[:500]},
-            }
-        if not result.success:
-            return {
-                "type": "execute-result",
-                "outcome": {
-                    "ok": False,
-                    "target": target,
-                    "reason": result.error or "The browser action failed",
-                },
-            }
-        current = await browser._internal.client.send(  # noqa: SLF001
-            "Runtime.evaluate", {"expression": "location.href", "returnByValue": True}
-        )
-        current_url = str(current.get("result", {}).get("value") or "")
-        outcome: dict[str, Any] = {"ok": True, "target": target}
-        if current_url and current_url != document.url:
-            outcome["navigated"] = True
-            outcome["documentUrl"] = current_url
-        return {"type": "execute-result", "outcome": outcome}
+                    resolved = await client.send(
+                        "DOM.resolveNode", {"backendNodeId": entry.backend_node_id}
+                    )
+                    object_id = resolved.get("object", {}).get("objectId")
+                    if not isinstance(object_id, str):
+                        raise BrowserAgentError(
+                            "PAGE_ACTION_STALE_REF", "The element no longer resolves"
+                        )
+                    node = await client.send("DOM.requestNode", {"objectId": object_id})
+                    node_id = node.get("nodeId")
+                    if not isinstance(node_id, int) or node_id == 0:
+                        raise BrowserAgentError(
+                            "PAGE_ACTION_STALE_REF",
+                            "The element no longer exists in the current document",
+                        )
+                    action_cache = RefCache()
+                    action_cache.store(temporary_ref, node_id)
+                    if action == "click":
+                        result = await interact.click(client, action_cache, ref=temporary_ref)
+                    elif action == "fill":
+                        result = await interact.fill_text(
+                            client, action_cache, text=request["value"], ref=temporary_ref
+                        )
+                    elif action == "select":
+                        result = await interact.select_value(
+                            client, action_cache, value=request["value"], ref=temporary_ref
+                        )
+                    elif action == "scroll":
+                        result = await interact.scroll(
+                            client, action_cache, direction=request["value"]
+                        )
+                    else:
+                        return {
+                            "type": "execute-result",
+                            "outcome": {
+                                "ok": False,
+                                "target": target,
+                                "reason": "The action is not supported by this host",
+                            },
+                        }
+            except BrowserAgentError:
+                raise
+            except Exception as error:
+                return {
+                    "type": "execute-result",
+                    "outcome": {"ok": False, "target": target, "reason": str(error)[:500]},
+                }
+            if not result.success:
+                return {
+                    "type": "execute-result",
+                    "outcome": {
+                        "ok": False,
+                        "target": target,
+                        "reason": result.error or "The browser action failed",
+                    },
+                }
+            evaluation: dict[str, Any] = {"expression": "location.href", "returnByValue": True}
+            if attached is not None:
+                evaluation["contextId"] = attached.execution_context_id
+            current = await client.send("Runtime.evaluate", evaluation)
+            current_url = str(current.get("result", {}).get("value") or "")
+            outcome: dict[str, Any] = {"ok": True, "target": target}
+            action_url = attached.url if attached is not None else document.url
+            if current_url and current_url != action_url:
+                outcome["navigated"] = True
+                outcome["documentUrl"] = current_url
+            return {"type": "execute-result", "outcome": outcome}
+        finally:
+            if attached is not None:
+                await attached.close()

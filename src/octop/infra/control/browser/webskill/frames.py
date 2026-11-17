@@ -80,7 +80,8 @@ def discover_frame_routes(root: dict[str, Any], page_url: str) -> list[FrameRout
                 visit(route.document, path)
         for shadow in node.get("shadowRoots", []):
             if isinstance(shadow, dict):
-                visit(shadow, parent_path)
+                shadow_path = (*parent_path, f"shadow({_selector(node, children)})")
+                visit(shadow, shadow_path)
 
     visit(root, ())
     return routes
@@ -113,7 +114,7 @@ def select_frame_route(routes: list[FrameRoute], scope: object) -> FrameRoute | 
     if path in {(), ("self",)}:
         return None
     route = next((candidate for candidate in routes if candidate.path == path), None)
-    if route is None or route.document is None:
+    if route is None:
         raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
     return route
 

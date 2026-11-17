@@ -49,18 +49,19 @@ class FixtureHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/next":
             body = "<!doctype html><html><body><h1>Next document</h1></body></html>"
-        elif self.path == "/frame-next":
+        elif self.path in {"/frame-next", "/frame-next?cross=1"}:
             body = "<!doctype html><html><body><h1>Next frame</h1></body></html>"
-        elif self.path == "/frame":
+        elif self.path in {"/frame", "/frame?cross=1"}:
             body = """<!doctype html><html><body>
 <button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
 </body></html>"""
         else:
-            body = """<!doctype html><html><head><title>P1 fixture</title></head><body>
+            body = f"""<!doctype html><html><head><title>P1 fixture</title></head><body>
 <button id="run" onclick="window.clickCount=(window.clickCount||0)+1">Run once</button>
 <input type="password" aria-label="Secret input">
 <div data-webskill-private><button>Private child</button></div>
 <iframe id="same-frame" src="/frame"></iframe>
+<iframe id="cross-frame" src="http://localhost:{self.server.server_port}/frame?cross=1"></iframe>
 </body></html>"""
         payload = body.encode()
         self.send_response(200)
@@ -88,6 +89,24 @@ async def browser_value(browser: BrowserSession, expression: str) -> Any:
         "Runtime.evaluate", {"expression": expression, "returnByValue": True}
     )
     return result.get("result", {}).get("value")
+
+
+async def oopif_value(browser: BrowserSession, frame_key: str, expression: str) -> Any:
+    from octop.infra.control.browser.webskill.oopif import attach_oopif_expected
+
+    attached = await attach_oopif_expected(browser._internal.client, frame_key)  # noqa: SLF001
+    try:
+        result = await attached.client.send(
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "contextId": attached.execution_context_id,
+                "returnByValue": True,
+            },
+        )
+        return result.get("result", {}).get("value")
+    finally:
+        await attached.close()
 
 
 async def accept() -> dict[str, Any]:
@@ -186,16 +205,17 @@ async def accept() -> dict[str, Any]:
                 assert await browser_value(browser, "window.clickCount || 0") == 1
 
                 nested = perceived["result"].get("nestedFrames", [])
-                assert [frame["frame"] for frame in nested] == ["iframe#same-frame"]
+                assert [frame["frame"] for frame in nested] == [
+                    "iframe#same-frame",
+                    "iframe#cross-frame",
+                ]
                 frame_perceived = await call(
                     ws,
                     {
                         "type": "perceive",
                         "requestId": "frame-read",
                         "scope": {
-                            "frames": [
-                                {"frame": ["iframe#same-frame"], "include": ["body"]}
-                            ]
+                            "frames": [{"frame": ["iframe#same-frame"], "include": ["body"]}]
                         },
                     },
                 )
@@ -280,6 +300,91 @@ async def accept() -> dict[str, Any]:
                     == 0
                 )
 
+                cross_url = f"http://localhost:{fixture.server_port}/frame?cross=1"
+                oopif_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "oopif-read",
+                        "scope": {
+                            "frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]
+                        },
+                    },
+                )
+                assert oopif_perceived["type"] == "perceive-result", oopif_perceived
+                assert oopif_perceived["result"]["page"]["url"] == cross_url
+                oopif_ref = oopif_perceived["targets"][0]["ref"]
+                from octop.infra.control.browser.webskill.sessions import (
+                    browser_agent_registry,
+                )
+
+                frame_key = browser_agent_registry.get(session_id, user_id).refs[oopif_ref].frame
+                assert frame_key.startswith("oopif:")
+                oopif_request = {"ref": oopif_ref, "action": "click"}
+                oopif_issued = await client.post(
+                    f"/api/browser-agent/sessions/{session_id}/grants",
+                    headers=headers,
+                    json={"request": oopif_request},
+                )
+                assert oopif_issued.status_code == 200, oopif_issued.text
+                oopif_grant = oopif_issued.json()["grant"]
+                oopif_executed = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "oopif-click",
+                        "request": oopif_request,
+                        "grant": oopif_grant,
+                    },
+                )
+                assert oopif_executed["outcome"]["ok"] is True, oopif_executed
+                assert await oopif_value(browser, frame_key, "window.frameClicks || 0") == 1
+                oopif_replay = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "oopif-replay",
+                        "request": oopif_request,
+                        "grant": oopif_grant,
+                    },
+                )
+                assert oopif_replay["code"] == "PAGE_ACTION_STALE_REF", oopif_replay
+                assert await oopif_value(browser, frame_key, "window.frameClicks || 0") == 1
+
+                stale_oopif_grant = (
+                    await client.post(
+                        f"/api/browser-agent/sessions/{session_id}/grants",
+                        headers=headers,
+                        json={"request": oopif_request},
+                    )
+                ).json()["grant"]
+                await browser_value(
+                    browser,
+                    f"document.getElementById('cross-frame').setAttribute('src', 'http://localhost:{fixture.server_port}/frame-next?cross=1')",
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    targets = await browser._internal.client.send("Target.getTargets")  # noqa: SLF001
+                    if any(
+                        target.get("type") == "iframe"
+                        and str(target.get("url") or "").endswith("/frame-next?cross=1")
+                        for target in targets.get("targetInfos", [])
+                    ):
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("The OOPIF document did not navigate")
+                stale_oopif = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "stale-oopif",
+                        "request": oopif_request,
+                        "grant": stale_oopif_grant,
+                    },
+                )
+                assert stale_oopif["code"] == "PAGE_ACTION_STALE_REF", stale_oopif
+
                 next_grant = (
                     await client.post(
                         f"/api/browser-agent/sessions/{session_id}/grants",
@@ -359,6 +464,7 @@ async def accept() -> dict[str, Any]:
                 "checks": [
                     "real Chromium main-document perception and sensitive-subtree filtering",
                     "same-origin frame read/click and child-navigation grant invalidation",
+                    "OOPIF attach, default execution context, scoped click and stale-grant rejection",
                     "one-shot ticket over real HTTP/WS",
                     "confirmed grant and exactly one real mouse click",
                     "grant replay rejection without another side effect",

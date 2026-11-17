@@ -42,8 +42,13 @@ class CounterHandler(BaseHTTPRequestHandler):
         if self.path == "/count":
             self.respond(json.dumps({"count": self.server.clicks}), "application/json")
             return
+        if self.path == "/frame":
+            self.respond(
+                "<!doctype html><html><body><button onclick=\"fetch('/click', {method:'POST'})\">Frame once</button></body></html>"
+            )
+            return
         self.respond(
-            "<!doctype html><html><body><button onclick=\"fetch('/click', {method:'POST'})\">Run once</button></body></html>"
+            "<!doctype html><html><body><button onclick=\"fetch('/click', {method:'POST'})\">Run once</button><iframe id=\"same-frame\" src=\"/frame\"></iframe></body></html>"
         )
 
     def do_POST(self) -> None:
@@ -292,6 +297,20 @@ async def run() -> dict[str, Any]:
                 await asyncio.sleep(0.05)
             assert counter.clicks == 1, f"Expected one page click, got {counter.clicks}"
             await frame.get_by_text("CLICK_DONE", exact=False).wait_for(timeout=90_000)
+
+            composer = frame.locator("textarea:visible").last
+            await composer.fill(
+                "Use the page tools to click the button named Frame once exactly once inside the iframe named same-frame. After the click, reply exactly FRAME_DONE."
+            )
+            await composer.press("Enter")
+            confirmation = frame.get_by_role("button", name="允许", exact=True)
+            await confirmation.wait_for(timeout=90_000)
+            await confirmation.click()
+            deadline = time.monotonic() + 15
+            while counter.clicks < 2 and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            assert counter.clicks == 2, f"Expected two page clicks, got {counter.clicks}"
+            await frame.get_by_text("FRAME_DONE", exact=False).wait_for(timeout=90_000)
             certificate_errors = [
                 error
                 for error in errors
@@ -315,6 +334,7 @@ async def run() -> dict[str, Any]:
                 "expiredTicketRecoveredWithNewSession": len(set(created_session_ids)) == 2,
                 "expectedExpiredTicketResponses": len(expected_ticket_errors),
                 "confirmedRealClickCount": counter.clicks,
+                "confirmedSameOriginFrameClickCount": counter.clicks - 1,
                 "pageErrors": unexpected_errors,
                 "environmentCertificateErrors": certificate_errors,
                 "webSocketQueryKeys": websocket_queries,

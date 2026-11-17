@@ -7,9 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from octop_browser.cdp.client import CDPSessionError
 from octop_browser.dom.refs import RefCache
 from octop_browser.models import ActionMetrics, ToolResult
 
+from octop.infra.control.browser.webskill.frames import FrameRoute, discover_frame_routes
+from octop.infra.control.browser.webskill.oopif import OopifSession, attach_oopif_route
 from octop.infra.control.browser.webskill.page_agent import (
     execute_action,
     issue_action_grant,
@@ -37,8 +40,64 @@ class FakeClient:
         self.url = "https://example.test/form"
         self.backend_node_id = 100
         self.node_id = 20
+        self.context_listeners: dict[str, list[Any]] = {}
+        self.evaluation_context_ids: list[int] = []
+        self.detached: list[str] = []
 
-    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def with_session(self, session_id: str):
+        return ScopedFrameClient(self, session_id)
+
+    def on(self, event: str, callback: Any) -> None:
+        self.context_listeners.setdefault(event, []).append(callback)
+
+    def off(self, event: str, callback: Any) -> None:
+        listeners = self.context_listeners.get(event, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if method in {"Page.enable", "DOM.enable", "Input.enable"}:
+            return {}
+        if method == "Runtime.enable":
+            for callback in self.context_listeners.get("Runtime.executionContextCreated", []):
+                callback(
+                    {
+                        "sessionId": session_id,
+                        "context": {"id": 77, "auxData": {"isDefault": True}},
+                    }
+                )
+            return {}
+        if method == "Target.attachToTarget":
+            return {"sessionId": "cross-session-1"}
+        if method == "Target.getTargets":
+            return {
+                "targetInfos": [
+                    {
+                        "targetId": "cross-target-1",
+                        "parentId": "target-1",
+                        "type": "iframe",
+                        "url": "https://cross.example.test/frame",
+                    },
+                    {
+                        "targetId": "cross-target-2",
+                        "parentId": "target-2",
+                        "type": "iframe",
+                        "url": "https://cross.example.test/frame",
+                    },
+                ]
+            }
+        if method == "Target.detachFromTarget":
+            if params and isinstance(params.get("sessionId"), str):
+                self.detached.append(params["sessionId"])
+            return {}
+        if session_id is not None and params and "contextId" in params:
+            self.evaluation_context_ids.append(int(params["contextId"]))
         if method == "Page.getFrameTree":
             return {"frameTree": {"frame": {"loaderId": self.loader_id}}}
         if method == "Runtime.evaluate":
@@ -151,7 +210,13 @@ class FrameClient(FakeClient):
         super().__init__(clicks)
         self.frame_loader_id = "frame-loader-1"
 
-    async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
         if method == "Page.getFrameTree":
             return {
                 "frameTree": {
@@ -225,7 +290,7 @@ class FrameClient(FakeClient):
             return {"nodeId": 60}
         if method == "DOM.getBoxModel" and params and params.get("nodeId") == 60:
             return {"model": {"content": [0, 0, 100, 0, 100, 100, 0, 100]}}
-        return await super().send(method, params)
+        return await super().send(method, params, session_id=session_id)
 
 
 class FrameBrowser(FakeBrowser):
@@ -233,6 +298,79 @@ class FrameBrowser(FakeBrowser):
         super().__init__()
         self.client = FrameClient(self.clicks)
         self._internal = SimpleNamespace(client=self.client, ref_cache=self.ref_cache)
+
+
+class TimingFrameClient(FrameClient):
+    def __init__(self, clicks: list[dict[str, Any]]) -> None:
+        super().__init__(clicks)
+        self.identity_calls = 0
+
+    async def send(self, method, params=None, *, session_id=None):
+        if method == "Page.getFrameTree":
+            self.identity_calls += 1
+            if self.identity_calls == 3:
+                self.frame_loader_id = "frame-loader-2"
+        return await super().send(method, params, session_id=session_id)
+
+
+class ScopedFrameClient:
+    def __init__(self, parent: FrameClient, session_id: str) -> None:
+        self.parent = parent
+        self.session_id = session_id
+
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        if method == "Page.getFrameTree":
+            return {
+                "frameTree": {"frame": {"id": "frame-1", "loaderId": self.parent.frame_loader_id}}
+            }
+        if method == "DOM.getDocument":
+            return {
+                "root": {
+                    "nodeId": 51,
+                    "backendNodeId": 501,
+                    "nodeName": "#document",
+                    "children": [
+                        {
+                            "nodeId": 60,
+                            "backendNodeId": 600,
+                            "nodeName": "BUTTON",
+                            "children": [{"nodeName": "#text", "nodeValue": "Frame action"}],
+                        }
+                    ],
+                }
+            }
+        if method == "Runtime.evaluate":
+            if params and "contextId" in params:
+                self.parent.evaluation_context_ids.append(int(params["contextId"]))
+            if params and params.get("expression") == "location.href":
+                return {"result": {"value": "https://cross.example.test/frame"}}
+            return {
+                "result": {
+                    "value": {
+                        "url": "https://cross.example.test/frame",
+                        "title": "Cross frame",
+                    }
+                }
+            }
+        return await self.parent.send(method, params, session_id=self.session_id)
+
+    async def enable_domain(self, domain: str, *, session_id: str | None = None) -> None:
+        await self.parent.send(f"{domain}.enable", session_id=self.session_id)
+
+    def on(self, event: str, callback: Any) -> None:
+        self.parent.on(event, callback)
+
+    def off(self, event: str, callback: Any) -> None:
+        self.parent.off(event, callback)
+
+    async def close(self) -> None:
+        await self.parent.send("Target.detachFromTarget", {"sessionId": self.session_id})
 
 
 @pytest.fixture
@@ -503,22 +641,189 @@ async def test_child_frame_navigation_invalidates_ref_and_grant(
     assert not browser.clicks
 
 
-async def test_unknown_and_cross_origin_frames_fail_with_scope_error(
-    registry: BrowserAgentRegistry,
-) -> None:
+async def test_unknown_frame_fails_with_scope_error(registry: BrowserAgentRegistry) -> None:
     browser = FrameBrowser()
     session = registry.create(1, "user-1")
     resolver = resolver_for(browser)
-    for path in ("iframe#missing", "iframe#cross-frame"):
-        with pytest.raises(BrowserAgentError) as error:
-            await read_page(
-                session,
-                {
-                    "type": "perceive",
-                    "scope": {"frames": [{"frame": [path], "include": ["body"]}]},
-                },
-                resolver=resolver,
-                registry=registry,
-            )
-        assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
-        assert str(error.value) == "This frame is outside the allowed perception scope."
+    with pytest.raises(BrowserAgentError) as error:
+        await read_page(
+            session,
+            {
+                "type": "perceive",
+                "scope": {"frames": [{"frame": ["iframe#missing"], "include": ["body"]}]},
+            },
+            resolver=resolver,
+            registry=registry,
+        )
+    assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
+    assert str(error.value) == "This frame is outside the allowed perception scope."
+
+
+async def test_oopif_read_grant_click_and_detach(registry: BrowserAgentRegistry) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {
+            "type": "perceive",
+            "scope": {"frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]},
+        },
+        resolver=resolver,
+        registry=registry,
+    )
+    assert perceived["type"] == "perceive-result"
+    assert perceived["result"]["page"]["url"] == "https://cross.example.test/frame"
+    frame_ref = perceived["targets"][0]["ref"]
+    assert session.refs[frame_ref].frame == "oopif:cross-target-1:frame-loader-1"
+
+    request = {"ref": frame_ref, "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    executed = await execute_action(
+        session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    assert executed["outcome"]["ok"] is True
+    assert executed["outcome"]["target"]["name"] == "Frame action"
+    assert len(browser.clicks) == 1
+    assert browser.client.detached == ["cross-session-1"] * 3
+    assert browser.client.evaluation_context_ids
+    assert set(browser.client.evaluation_context_ids) == {77}
+    assert not browser.client.context_listeners.get("Runtime.executionContextCreated")
+
+
+async def test_oopif_navigation_invalidates_grant(registry: BrowserAgentRegistry) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {
+            "type": "perceive",
+            "scope": {"frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]},
+        },
+        resolver=resolver,
+        registry=registry,
+    )
+    request = {"ref": perceived["targets"][0]["ref"], "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    browser.client.frame_loader_id = "frame-loader-2"
+
+    with pytest.raises(BrowserAgentError) as error:
+        await execute_action(
+            session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+        )
+    assert error.value.code == "PAGE_ACTION_STALE_REF"
+    assert not browser.clicks
+
+
+async def test_oopif_target_requires_parent_and_exact_query(
+    registry: BrowserAgentRegistry,
+) -> None:
+    del registry
+    browser = FrameBrowser()
+    route = FrameRoute(
+        path=("iframe#cross-frame",),
+        url="https://cross.example.test/frame",
+        hint="cross-frame",
+        owner_backend_node_id=700,
+        document=None,
+    )
+    attached = await attach_oopif_route(browser.client, route, "target-1")
+    assert attached.target_id == "cross-target-1"
+    await attached.close()
+
+    other_query = FrameRoute(
+        path=route.path,
+        url="https://cross.example.test/frame?query=other",
+        hint=route.hint,
+        owner_backend_node_id=route.owner_backend_node_id,
+        document=None,
+    )
+    with pytest.raises(BrowserAgentError) as error:
+        await attach_oopif_route(browser.client, other_query, "target-1")
+    assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
+
+
+async def test_oopif_close_removes_listener_and_suppresses_detach_error(
+    registry: BrowserAgentRegistry,
+) -> None:
+    del registry
+    browser = FrameBrowser()
+    route = FrameRoute(
+        path=("iframe#cross-frame",),
+        url="https://cross.example.test/frame",
+        hint="cross-frame",
+        owner_backend_node_id=700,
+        document=None,
+    )
+    attached: OopifSession = await attach_oopif_route(browser.client, route, "target-1")
+
+    async def fail_close() -> None:
+        raise CDPSessionError("The target is already closed")
+
+    attached.client.close = fail_close
+    await attached.close()
+    assert attached.closed is True
+    assert not browser.client.context_listeners.get("Runtime.executionContextCreated")
+
+
+def test_shadow_frame_paths_include_the_host_and_stay_unique() -> None:
+    root = {
+        "nodeId": 1,
+        "backendNodeId": 1,
+        "nodeName": "#document",
+        "children": [
+            {
+                "nodeId": host_id,
+                "backendNodeId": host_id,
+                "nodeName": "DIV",
+                "attributes": ["id", f"host-{host_id}"],
+                "shadowRoots": [
+                    {
+                        "nodeId": host_id + 100,
+                        "backendNodeId": host_id + 100,
+                        "nodeName": "#document",
+                        "children": [
+                            {
+                                "nodeId": host_id + 200,
+                                "backendNodeId": host_id + 200,
+                                "nodeName": "IFRAME",
+                                "attributes": ["src", "/frame"],
+                            }
+                        ],
+                    }
+                ],
+            }
+            for host_id in (10, 20)
+        ],
+    }
+    routes = discover_frame_routes(root, "https://example.test/")
+    assert [route.label for route in routes] == [
+        "shadow(div#host-10) >>> iframe:nth-of-type(1)",
+        "shadow(div#host-20) >>> iframe:nth-of-type(1)",
+    ]
+
+
+async def test_frame_snapshot_and_identity_must_match(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    browser.client = TimingFrameClient(browser.clicks)
+    browser._internal = SimpleNamespace(client=browser.client, ref_cache=browser.ref_cache)
+    session = registry.create(1, "user-1")
+    with pytest.raises(BrowserAgentError) as error:
+        await read_page(
+            session,
+            {
+                "type": "perceive",
+                "scope": {"frames": [{"frame": ["iframe#same-frame"], "include": ["body"]}]},
+            },
+            resolver=resolver_for(browser),
+            registry=registry,
+        )
+    assert error.value.code == "PERCEPTION_FAILED"
+    assert "snapshot" in str(error.value)
