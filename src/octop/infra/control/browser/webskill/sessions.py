@@ -54,6 +54,7 @@ class BrowserAgentSession:
     last_activity_at: float = field(default_factory=time.monotonic)
     active: bool = True
     model_target: str | None = None
+    base_target_id: str | None = None
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
     connection_id: str | None = None

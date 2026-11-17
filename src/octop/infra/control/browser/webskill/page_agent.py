@@ -29,6 +29,7 @@ from .sessions import (
     DocumentIdentity,
     PageRef,
 )
+from .targets import attach_model_target, newly_opened_page_target, page_target_ids
 
 SessionResolver = Callable[..., Awaitable[Any]]
 WriteGate = Callable[[], bool]
@@ -80,16 +81,24 @@ async def _current_target(browser: BrowserSession) -> str:
 async def document_identity(
     session: BrowserAgentSession,
     browser: BrowserSession,
+    cdp_client: Any = None,
 ) -> DocumentIdentity:
-    current = await _current_target(browser)
     if session.model_target is None:
+        current = await _current_target(browser)
         session.model_target = current
-    elif current != session.model_target:
+        session.base_target_id = current
+    elif session.base_target_id is None:
+        session.base_target_id = session.model_target
+    target = session.model_target
+    client = cdp_client or browser._internal.client  # noqa: SLF001
+    targets = await client.send("Target.getTargets")
+    if not any(
+        isinstance(info, dict) and info.get("type") == "page" and info.get("targetId") == target
+        for info in targets.get("targetInfos", [])
+    ):
         raise BrowserAgentError(
-            "PAGE_TAB_EXPIRED",
-            "The model target is no longer bound to the visible target; rebind explicitly instead of following a user tab switch",
+            "PAGE_TAB_EXPIRED", "The model target was closed; select a target explicitly"
         )
-    client = browser._internal.client  # noqa: SLF001
     tree = await client.send("Page.getFrameTree")
     page = await client.send(
         "Runtime.evaluate",
@@ -106,11 +115,11 @@ async def document_identity(
         raise BrowserAgentError("PERCEPTION_FAILED", "The current document identity is unavailable")
     return DocumentIdentity(
         key=json.dumps(
-            [session.user_id, session.profile, current, loader, url],
+            [session.user_id, session.profile, target, loader, url],
             separators=(",", ":"),
             ensure_ascii=False,
         ),
-        target_id=current,
+        target_id=target,
         loader_id=loader,
         url=url,
         title=str(info.get("title") or ""),
@@ -235,16 +244,23 @@ async def read_page(
     if isinstance(capture, dict) and capture.get("images") is True:
         raise BrowserAgentError("PERCEPTION_FAILED", "Image capture is not available in P1")
     browser = await resolve_browser(session, resolver)
-    before = await document_identity(session, browser)
-    client = browser._internal.client  # noqa: SLF001
-    raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
-    root = raw.get("root", {})
-    if not isinstance(root, dict):
-        raise BrowserAgentError("PERCEPTION_FAILED", "The browser document is unavailable")
-    routes = discover_frame_routes(root, before.url)
-    route = select_frame_route(routes, scope)
+    model_attachment = await attach_model_target(session, browser)
     attached: OopifSession | None = None
     try:
+        before = await document_identity(
+            session,
+            browser,
+            model_attachment.client if model_attachment is not None else None,
+        )
+        client = (
+            model_attachment.client if model_attachment is not None else browser._internal.client
+        )  # noqa: SLF001
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = raw.get("root", {})
+        if not isinstance(root, dict):
+            raise BrowserAgentError("PERCEPTION_FAILED", "The browser document is unavailable")
+        routes = discover_frame_routes(root, before.url)
+        route = select_frame_route(routes, scope)
         if route is not None and route.document is None:
             attached = await attach_oopif_route(client, route, before.target_id)
             selected_client = attached.client
@@ -319,7 +335,7 @@ async def read_page(
                 "PERCEPTION_FAILED",
                 f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
             )
-        after = await document_identity(session, browser)
+        after = await document_identity(session, browser, client)
         if before.key != after.key:
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "The document changed while it was being perceived"
@@ -371,6 +387,8 @@ async def read_page(
     finally:
         if attached is not None:
             await attached.close()
+        if model_attachment is not None:
+            await model_attachment.close()
 
 
 async def issue_action_grant(
@@ -386,15 +404,23 @@ async def issue_action_grant(
             "WRITE_BLOCKED", "User control is active; no new model write is allowed"
         )
     browser = await resolve_browser(session, resolver)
-    document = await document_identity(session, browser)
-    if request.get("ref") != DOCUMENT_REF:
-        entry = registry.resolve_ref(session, str(request.get("ref") or ""), document)
-        if entry.frame.startswith("oopif:"):
-            attached = await attach_oopif_expected(browser._internal.client, entry.frame)  # noqa: SLF001
-            await attached.close()
-        else:
-            await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
-    return registry.issue_grant(session, document=document, request=request)
+    model_attachment = await attach_model_target(session, browser)
+    try:
+        client = (
+            model_attachment.client if model_attachment is not None else browser._internal.client
+        )  # noqa: SLF001
+        document = await document_identity(session, browser, client)
+        if request.get("ref") != DOCUMENT_REF:
+            entry = registry.resolve_ref(session, str(request.get("ref") or ""), document)
+            if entry.frame.startswith("oopif:"):
+                attached = await attach_oopif_expected(client, entry.frame)
+                await attached.close()
+            else:
+                await assert_frame_identity_current(client, entry.frame)
+        return registry.issue_grant(session, document=document, request=request)
+    finally:
+        if model_attachment is not None:
+            await model_attachment.close()
 
 
 async def _actual_target(
@@ -446,27 +472,34 @@ async def execute_action(
 ) -> dict[str, Any]:
     browser = await resolve_browser(session, resolver)
     async with registry.write_lock(session.profile):
-        document = await document_identity(session, browser)
-        registry.consume_grant(session, grant_token, document=document, request=request)
-        if not write_gate():
-            raise BrowserAgentError(
-                "WRITE_BLOCKED", "The action was not executed because user control took precedence"
-            )
-        ref = str(request.get("ref") or "")
-        entry = (
-            PageRef(0, document.key)
-            if ref == DOCUMENT_REF
-            else registry.resolve_ref(session, ref, document)
-        )
+        model_attachment = await attach_model_target(session, browser)
         attached: OopifSession | None = None
         try:
+            client = (
+                model_attachment.client
+                if model_attachment is not None
+                else browser._internal.client
+            )  # noqa: SLF001
+            document = await document_identity(session, browser, client)
+            previous_target_ids = await page_target_ids(client)
+            registry.consume_grant(session, grant_token, document=document, request=request)
+            if not write_gate():
+                raise BrowserAgentError(
+                    "WRITE_BLOCKED",
+                    "The action was not executed because user control took precedence",
+                )
+            ref = str(request.get("ref") or "")
+            entry = (
+                PageRef(0, document.key)
+                if ref == DOCUMENT_REF
+                else registry.resolve_ref(session, ref, document)
+            )
             if entry.frame.startswith("oopif:"):
-                attached = await attach_oopif_expected(browser._internal.client, entry.frame)  # noqa: SLF001
+                attached = await attach_oopif_expected(client, entry.frame)
                 client = attached.client
                 await client.send("DOM.getDocument", {"depth": -1})
             else:
-                await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
-                client = browser._internal.client  # noqa: SLF001
+                await assert_frame_identity_current(client, entry.frame)
             target = await _actual_target(browser, entry, document, client)
             if target.get("secret") is True:
                 return {
@@ -480,6 +513,7 @@ async def execute_action(
                 }
             action = request["action"]
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
+            action_cache = RefCache()
             try:
                 if action == "back" and attached is not None:
                     result = await navigate.go_back(client, RefCache())
@@ -501,6 +535,8 @@ async def execute_action(
                             "PAGE_ACTION_STALE_REF",
                             "The element no longer exists in the current document",
                         )
+                    if action in {"click", "fill", "scroll"}:
+                        await client.send("DOM.scrollIntoViewIfNeeded", {"nodeId": node_id})
                     action_cache = RefCache()
                     action_cache.store(temporary_ref, node_id)
                     if action == "click":
@@ -515,7 +551,10 @@ async def execute_action(
                         )
                     elif action == "scroll":
                         result = await interact.scroll(
-                            client, action_cache, direction=request["value"]
+                            client,
+                            action_cache,
+                            direction=request["value"],
+                            ref=temporary_ref,
                         )
                     else:
                         return {
@@ -552,7 +591,16 @@ async def execute_action(
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
                 outcome["documentUrl"] = current_url
+            new_target = await newly_opened_page_target(client, previous_target_ids)
+            if new_target is not None:
+                session.model_target = new_target
+                session.document = None
+                session.refs.clear()
+                registry.revoke_grants(session_id=session.id)
+                outcome["navigated"] = True
             return {"type": "execute-result", "outcome": outcome}
         finally:
             if attached is not None:
                 await attached.close()
+            if model_attachment is not None:
+                await model_attachment.close()

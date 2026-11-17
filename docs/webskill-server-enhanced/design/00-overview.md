@@ -40,11 +40,12 @@ PageAgent ────────────► modelTarget
 
 ### 3.1 octop-browser 会话
 
-新增独立 `BrowserTargetSession` 和 registry，避免当前 `switch_to_target` 的重连、activate 和整表清空影响用户视图。
+模型操作其他 target 时使用 `Target.attachToTarget(flatten=true)` 的 scoped session，不调用现有 `switch_to_target`，避免重连、activate 和整表清空影响用户视图。共享底层 CDP 连接通过 `session_id` 路由，attach 生命周期结束后 detach。
 
-- 每个 target 有独立 CDP 连接和 ref cache。
+- 每个模型目标有独立的 document/ref 绑定和默认 execution context，不污染 Octop 共享 `BrowserSession` 的 ref cache。
 - profile 级锁/lease 协调写入，但不共享“当前模型 target”状态到 UI。
 - target 的关闭、导航和 Chrome 崩溃都显式清理。
+- OOPIF 通过 iframe 的 `DOM.describeNode.frameId` 与 scoped target 的根 frame 绑定，同时核对 parent、target URL 与当前 URL（含 query）；不使用会停留在历史地址的 `src` 属性或全浏览器 URL 猜测。
 
 ### 3.2 文档身份
 
@@ -106,6 +107,8 @@ PageAgent ────────────► modelTarget
 ### 4.5 共享写入
 
 BrowserSession、Dashboard 原始输入、harness、record daemon 和 ReplayRunner 都使用 profile 级锁/lease。record daemon 已是第二进程，跨进程 lease 属于 P2，不得推迟到生产阶段。
+
+当前候选实现已提供 OS 文件锁、`CDPClient` command gate 及 Octop BrowserSession 创建/重试注入，并验证两个进程的互斥与崩溃释放。record daemon、ReplayRunner 和跨进程接管状态尚未完成统一接入；不能把现有 gate 当作 AC-15、AC-40、AC-51、AC-60 已全部通过。
 
 ## 5. 技能生成、录制转换与两类执行
 

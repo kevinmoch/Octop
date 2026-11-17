@@ -45,6 +45,14 @@ def _selector(node: dict[str, Any], siblings: list[dict[str, Any]]) -> str:
     return f"{tag}:nth-of-type({position})"
 
 
+def _shadow_selector(node: dict[str, Any]) -> str:
+    tag = str(node.get("nodeName") or "").lower()
+    element_id = _attributes(node).get("id", "")
+    if _SAFE_ID.fullmatch(element_id):
+        return f"{tag}#{element_id}"
+    return f"{tag}:backend-{node.get('backendNodeId')}"
+
+
 def discover_frame_routes(root: dict[str, Any], page_url: str) -> list[FrameRoute]:
     routes: list[FrameRoute] = []
 
@@ -80,7 +88,7 @@ def discover_frame_routes(root: dict[str, Any], page_url: str) -> list[FrameRout
                 visit(route.document, path)
         for shadow in node.get("shadowRoots", []):
             if isinstance(shadow, dict):
-                shadow_path = (*parent_path, f"shadow({_selector(node, children)})")
+                shadow_path = (*parent_path, f"shadow({_shadow_selector(node)})")
                 visit(shadow, shadow_path)
 
     visit(root, ())

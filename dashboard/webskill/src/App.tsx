@@ -107,7 +107,7 @@ export default function App({
             {copy(locale, "控制台", "Console")}
           </button>
         </nav>
-        <span className="host-stage">P1</span>
+        <span className="host-stage">P2 candidate</span>
       </header>
       {view === "chat" && activeModel && (
         <details className="local-model">
@@ -187,11 +187,11 @@ export default function App({
               backend={host.backend}
               runtimeConfig={host.runtimeConfig}
               hostCapabilities={{ downloadedFiles: false }}
-              initialPage={consolePage}
+              initialPage={
+                focusRunId !== undefined ? "runs.inspector" : consolePage
+              }
               onNavigate={setConsolePage}
-              {...(focusRunId !== undefined
-                ? { focusRunId, initialPage: "runs.inspector" as const }
-                : {})}
+              {...(focusRunId !== undefined ? { focusRunId } : {})}
             />
           </Suspense>
         )}
@@ -199,8 +199,8 @@ export default function App({
       <footer className="host-footer">
         {copy(
           locale,
-          "P1 仅支持主文档感知与受限动作；frame、多标签和产物投放将在后续阶段提供。",
-          "P1 supports main-document perception and restricted actions. Frames, multiple targets and document delivery are later-stage capabilities.",
+          "P2 正在验证 frame 和多标签；技能录制回放与文档产物尚未开放，当前不是生产支持版本。",
+          "P2 is validating frames and multiple targets. Skill recording, replay and document delivery are not open; this is not production support.",
         )}
       </footer>
     </div>

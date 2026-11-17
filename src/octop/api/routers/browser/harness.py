@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from octop.api.deps import require_permission
+from octop.infra.control.browser.webskill.lease import profile_command_gate
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -161,6 +162,7 @@ async def resolve_harness_session(
             mode=launch_mode,  # type: ignore[arg-type]
             settings=harness_settings,
             profile_manager=profile_manager,
+            command_gate=profile_command_gate(profile),
         )
     except Exception as exc:
         # Chrome exit 21 / ProcessSingleton usually means a stale lock or a
@@ -188,6 +190,7 @@ async def resolve_harness_session(
                     mode=launch_mode,  # type: ignore[arg-type]
                     settings=harness_settings,
                     profile_manager=profile_manager,
+                    command_gate=profile_command_gate(profile),
                 )
             except Exception as retry_exc:
                 raise OctopError(

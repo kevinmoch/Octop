@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from urllib.parse import urlencode
 
 import httpx
@@ -84,9 +86,19 @@ async def test_perceive_grant_execute_and_audit(
         assert server.services is not None
         audit = server.services.audit_repo.query(action="webskill.page.action")
         assert len(audit) == 2
+        rows = [json.loads(row.payload or "{}") for row in audit]
+        expected_document = hashlib.sha256(perceived["document"]["key"].encode("utf-8")).hexdigest()
+        expected_grant = hashlib.sha256(grant.encode("utf-8")).hexdigest()
+        for row in rows:
+            assert row["document"] == expected_document
+            assert row["documentTarget"] == "target-1"
+            assert row["grantDigest"] == expected_grant
+            assert row["ref"] == ref
         payloads = "\n".join(row.payload or "" for row in audit)
-        assert "grant" not in payloads
+        assert grant not in payloads
         assert ticket not in payloads
+        grants = server.services.audit_repo.query(action="webskill.grant.issued")
+        assert json.loads(grants[0].payload or "{}")["grantDigest"] == expected_grant
         deleted = await client.delete(
             f"/api/browser-agent/sessions/{session_id}", headers={**auth, **ORIGIN_HEADERS}
         )
@@ -245,3 +257,55 @@ async def test_ticket_stream_releases_unclaimed_session_registration(
         ) as ws:
             assert (await ws.receive_json())["status"] == "streaming"
         assert isolated_registry.get(session_id, 1).stream_connection_ids == set()
+
+
+@pytest.mark.parametrize(
+    ("client_host", "accepted"),
+    [("127.0.0.1", True), ("203.0.113.20", False)],
+)
+async def test_origin_scheme_comes_only_from_a_trusted_proxy(
+    client_host: str, accepted: bool
+) -> None:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+
+    async def endpoint(scope, receive, send) -> None:
+        from fastapi import Request
+
+        webskill.check_request_origin(Request(scope))
+
+    app = ProxyHeadersMiddleware(endpoint, trusted_hosts="127.0.0.1")
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/browser-agent/sessions",
+        "raw_path": b"/api/browser-agent/sessions",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"dashboard.example"),
+            (b"origin", b"https://dashboard.example"),
+            (b"x-forwarded-proto", b"https"),
+        ],
+        "client": (client_host, 12345),
+        "server": ("127.0.0.1", 8080),
+    }
+    if accepted:
+        await app(scope, None, None)
+    else:
+        with pytest.raises(webskill.BrowserAgentError) as error:
+            await app(scope, None, None)
+        assert error.value.code == "ORIGIN_INVALID"
+
+
+def test_legacy_stream_jwt_has_a_versioned_removal_gate() -> None:
+    import importlib
+
+    import octop
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(octop, "__version__", "1.1.0")
+        with pytest.raises(RuntimeError, match="must be removed"):
+            importlib.reload(stream)
+    importlib.reload(stream)

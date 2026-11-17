@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from dataclasses import dataclass
 from typing import Any
@@ -43,7 +44,23 @@ class OopifSession:
             await self.client.close()
 
 
-async def _attach(client: Any, target_id: str) -> OopifSession:
+async def _wait_for_document(scoped: Any, context_id: int) -> None:
+    for _ in range(20):
+        result = await scoped.send(
+            "Runtime.evaluate",
+            {
+                "expression": "document.readyState",
+                "contextId": context_id,
+                "returnByValue": True,
+            },
+        )
+        if result.get("result", {}).get("value") in {"interactive", "complete"}:
+            return
+        await asyncio.sleep(0.05)
+    raise BrowserAgentError("PERCEPTION_FAILED", "The target document did not become ready in time")
+
+
+async def _attach(client: Any, target_id: str, kind: str = "oopif") -> OopifSession:
     attached = await client.send("Target.attachToTarget", {"targetId": target_id, "flatten": True})
     session_id = str(attached.get("sessionId") or "")
     if not session_id:
@@ -74,6 +91,8 @@ async def _attach(client: Any, target_id: str) -> OopifSession:
         if context is None or not isinstance(context.get("id"), int):
             raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
         context_id = int(context["id"])
+        if kind == "target":
+            await _wait_for_document(scoped, context_id)
         tree = await scoped.send("Page.getFrameTree")
         frame = tree.get("frameTree", {}).get("frame", {})
         loader_id = str(frame.get("loaderId") or "")
@@ -92,7 +111,7 @@ async def _attach(client: Any, target_id: str) -> OopifSession:
             client=scoped,
             target_id=target_id,
             session_id=session_id,
-            frame_key=f"oopif:{target_id}:{loader_id}",
+            frame_key=f"{kind}:{target_id}:{loader_id}",
             execution_context_id=context_id,
             url=str(info.get("url") or ""),
             title=str(info.get("title") or ""),
@@ -108,21 +127,55 @@ async def _attach(client: Any, target_id: str) -> OopifSession:
 
 
 async def attach_oopif_route(client: Any, route: FrameRoute, parent_target_id: str) -> OopifSession:
+    described = await client.send(
+        "DOM.describeNode", {"backendNodeId": route.owner_backend_node_id}
+    )
+    frame_id = described.get("node", {}).get("frameId")
+    if not isinstance(frame_id, str) or not frame_id:
+        raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
     targets = await client.send("Target.getTargets")
-    candidates = [
-        target
-        for target in targets.get("targetInfos", [])
-        if isinstance(target, dict)
-        and target.get("type") == "iframe"
-        and target.get("parentId") == parent_target_id
-        and _url_key(str(target.get("url") or "")) == _url_key(route.url)
-    ]
-    if len(candidates) != 1 or not isinstance(candidates[0].get("targetId"), str):
-        raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
-    session = await _attach(client, str(candidates[0]["targetId"]))
-    if _url_key(session.url) != _url_key(route.url):
+    for target in targets.get("targetInfos", []):
+        if (
+            not isinstance(target, dict)
+            or target.get("type") != "iframe"
+            or target.get("parentId") != parent_target_id
+            or not isinstance(target.get("targetId"), str)
+        ):
+            continue
+        session = await _attach(client, str(target["targetId"]))
+        tree = await session.client.send("Page.getFrameTree")
+        frame = tree.get("frameTree", {}).get("frame", {})
+        current_url = str(frame.get("url") or session.url)
+        if (
+            frame.get("id") == frame_id
+            and _url_key(current_url)
+            and _url_key(session.url) == _url_key(current_url)
+            and _url_key(str(target.get("url") or "")) == _url_key(current_url)
+        ):
+            return session
         await session.close()
-        raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
+    raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
+
+
+async def attach_page_target(client: Any, target_id: str) -> OopifSession:
+    return await _attach(client, target_id, kind="target")
+
+
+async def attach_target_expected(client: Any, expected: str) -> OopifSession:
+    if not expected.startswith("target:"):
+        raise BrowserAgentError("PAGE_TAB_EXPIRED", "The model target is invalid")
+    target_id, separator, loader_id = expected.removeprefix("target:").partition(":")
+    if not separator or not target_id or not loader_id:
+        raise BrowserAgentError("PAGE_TAB_EXPIRED", "The model target is invalid")
+    try:
+        session = await _attach(client, target_id, kind="target")
+    except (BrowserAgentError, CDPSessionError) as error:
+        raise BrowserAgentError(
+            "PAGE_TAB_EXPIRED", "The model target is no longer available"
+        ) from error
+    if session.frame_key != expected:
+        await session.close()
+        raise BrowserAgentError("PAGE_TAB_EXPIRED", "The model target navigated or was replaced")
     return session
 
 

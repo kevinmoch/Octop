@@ -23,7 +23,8 @@ Server → Client::
   {"type": "session_update", "session_id": "...", "current_url": "...", ...}
   {"type": "error", "message": "..."}
 
-Auth: ``?token=<JWT>`` query param (browsers cannot set Authorization on WS).
+Auth: enhanced sessions use a one-shot ``?ticket=...``. The legacy workbench
+may use ``?token=<JWT>`` until the versioned removal gate below.
 Listen-only (``?listen_only=1``): still requires ``start``, but never launches
 Chrome — attaches to an existing harness session or pushes idle updates.
 """
@@ -38,8 +39,10 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from packaging.version import Version
 from starlette.websockets import WebSocketState
 
+from octop import __version__
 from octop.api.deps import resolve_user_from_token
 from octop.api.routers.browser.harness import (
     _CONTROL_OWNERS,
@@ -57,6 +60,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 LEGACY_STREAM_JWT_REMOVAL = "Octop 1.1.0"
+if Version(__version__) >= Version("1.1.0"):
+    raise RuntimeError(
+        "Legacy browser-stream JWT authentication must be removed before Octop 1.1.0"
+    )
 
 _FRAME_INTERVAL_S = 1 / 12
 _SESSION_INTERVAL_S = 1.0

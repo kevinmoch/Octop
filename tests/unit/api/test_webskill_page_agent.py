@@ -43,6 +43,11 @@ class FakeClient:
         self.context_listeners: dict[str, list[Any]] = {}
         self.evaluation_context_ids: list[int] = []
         self.detached: list[str] = []
+        self.page_target_available = True
+        self.new_target_url: str | None = None
+        self.open_target_on_release: str | None = None
+        self.frame_url = "https://cross.example.test/frame"
+        self.target_frame_url = self.frame_url
 
     def with_session(self, session_id: str):
         return ScopedFrameClient(self, session_id)
@@ -76,22 +81,28 @@ class FakeClient:
         if method == "Target.attachToTarget":
             return {"sessionId": "cross-session-1"}
         if method == "Target.getTargets":
-            return {
-                "targetInfos": [
+            infos: list[dict[str, Any]] = []
+            if self.page_target_available:
+                infos.append({"targetId": "target-1", "type": "page", "url": self.url})
+            if self.new_target_url is not None:
+                infos.append({"targetId": "target-2", "type": "page", "url": self.new_target_url})
+            infos.extend(
+                [
                     {
                         "targetId": "cross-target-1",
                         "parentId": "target-1",
                         "type": "iframe",
-                        "url": "https://cross.example.test/frame",
+                        "url": self.target_frame_url,
                     },
                     {
                         "targetId": "cross-target-2",
                         "parentId": "target-2",
                         "type": "iframe",
-                        "url": "https://cross.example.test/frame",
+                        "url": self.frame_url,
                     },
                 ]
-            }
+            )
+            return {"targetInfos": infos}
         if method == "Target.detachFromTarget":
             if params and isinstance(params.get("sessionId"), str):
                 self.detached.append(params["sessionId"])
@@ -145,6 +156,8 @@ class FakeClient:
             if params == {"objectId": "button-object"}:
                 return {"nodeId": self.node_id}
             return {"nodeId": 0}
+        if method == "DOM.scrollIntoViewIfNeeded":
+            return {}
         if method == "DOM.getBoxModel":
             if params and params.get("nodeId") == self.node_id:
                 return {"model": {"content": [0, 0, 100, 0, 100, 100, 0, 100]}}
@@ -152,6 +165,8 @@ class FakeClient:
         if method == "Input.dispatchMouseEvent":
             if params and params.get("type") == "mouseReleased":
                 self.clicks.append(params)
+                if self.open_target_on_release is not None:
+                    self.new_target_url = self.open_target_on_release
             return {}
         raise AssertionError(f"Unexpected CDP call: {method}")
 
@@ -221,10 +236,23 @@ class FrameClient(FakeClient):
             return {
                 "frameTree": {
                     "frame": {"id": "main-frame", "loaderId": self.loader_id},
-                    "childFrames": [{"frame": {"id": "frame-1", "loaderId": self.frame_loader_id}}],
+                    "childFrames": [
+                        {"frame": {"id": "frame-1", "loaderId": self.frame_loader_id}},
+                        {
+                            "frame": {
+                                "id": "cross-target-1",
+                                "loaderId": self.frame_loader_id,
+                                "url": self.frame_url,
+                            }
+                        },
+                    ],
                 }
             }
+        if method == "DOM.describeNode" and params == {"backendNodeId": 700}:
+            return {"node": {"frameId": "cross-target-1"}}
         if method == "DOM.getFrameOwner":
+            if params == {"frameId": "cross-target-1"}:
+                return {"backendNodeId": 700}
             if params == {"frameId": "frame-1"}:
                 return {"backendNodeId": 500}
             return {}
@@ -327,7 +355,13 @@ class ScopedFrameClient:
     ) -> dict[str, Any]:
         if method == "Page.getFrameTree":
             return {
-                "frameTree": {"frame": {"id": "frame-1", "loaderId": self.parent.frame_loader_id}}
+                "frameTree": {
+                    "frame": {
+                        "id": "cross-target-1",
+                        "loaderId": self.parent.frame_loader_id,
+                        "url": self.parent.frame_url,
+                    }
+                }
             }
         if method == "DOM.getDocument":
             return {
@@ -348,12 +382,14 @@ class ScopedFrameClient:
         if method == "Runtime.evaluate":
             if params and "contextId" in params:
                 self.parent.evaluation_context_ids.append(int(params["contextId"]))
+            if params and params.get("expression") == "document.readyState":
+                return {"result": {"value": "complete"}}
             if params and params.get("expression") == "location.href":
-                return {"result": {"value": "https://cross.example.test/frame"}}
+                return {"result": {"value": self.parent.frame_url}}
             return {
                 "result": {
                     "value": {
-                        "url": "https://cross.example.test/frame",
+                        "url": self.parent.frame_url,
                         "title": "Cross frame",
                     }
                 }
@@ -517,6 +553,65 @@ async def test_tab_switch_does_not_silently_retarget_model(
         registry=registry,
     )
     browser.active_target = "target-2"
+    perceived = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    assert perceived["type"] == "perceive-result"
+    assert perceived["document"]["key"]
+    assert session.model_target == "target-1"
+
+
+async def test_new_target_updates_model_without_switching_view(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    request = {"ref": perceived["targets"][0]["ref"], "action": "click"}
+    grant = await issue_action_grant(
+        session, request, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    browser.client.open_target_on_release = "https://example.test/child"
+    executed = await execute_action(
+        session, request, grant, registry=registry, resolver=resolver, write_gate=lambda: True
+    )
+    assert executed["outcome"]["ok"] is True
+    assert session.model_target == "target-2"
+    assert session.document is None
+    assert not session.refs
+    assert browser.active_target == "target-1"
+    child = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    assert child["type"] == "perceive-result"
+    assert session.model_target == "target-2"
+
+
+async def test_closed_model_target_fails_instead_of_following_view(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FrameBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    browser.client.page_target_available = False
     with pytest.raises(BrowserAgentError) as error:
         await read_page(
             session,
@@ -720,7 +815,7 @@ async def test_oopif_navigation_invalidates_grant(registry: BrowserAgentRegistry
     assert not browser.clicks
 
 
-async def test_oopif_target_requires_parent_and_exact_query(
+async def test_oopif_target_uses_owner_and_current_frame_url(
     registry: BrowserAgentRegistry,
 ) -> None:
     del registry
@@ -736,16 +831,22 @@ async def test_oopif_target_requires_parent_and_exact_query(
     assert attached.target_id == "cross-target-1"
     await attached.close()
 
-    other_query = FrameRoute(
+    browser.client.target_frame_url = "https://cross.example.test/frame?query=other"
+    with pytest.raises(BrowserAgentError) as error:
+        await attach_oopif_route(browser.client, route, "target-1")
+    assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
+
+    browser.client.target_frame_url = browser.client.frame_url
+    stale_src = FrameRoute(
         path=route.path,
-        url="https://cross.example.test/frame?query=other",
+        url="https://cross.example.test/frame-next",
         hint=route.hint,
         owner_backend_node_id=route.owner_backend_node_id,
         document=None,
     )
-    with pytest.raises(BrowserAgentError) as error:
-        await attach_oopif_route(browser.client, other_query, "target-1")
-    assert error.value.code == "PERCEPTION_SUBTREE_OUT_OF_SCOPE"
+    attached = await attach_oopif_route(browser.client, stale_src, "target-1")
+    assert attached.target_id == "cross-target-1"
+    await attached.close()
 
 
 async def test_oopif_close_removes_listener_and_suppresses_detach_error(

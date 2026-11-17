@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -49,19 +50,31 @@ class FixtureHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/next":
             body = "<!doctype html><html><body><h1>Next document</h1></body></html>"
+        elif self.path == "/child":
+            body = """<!doctype html><html><body>
+<button id="child-action" onclick="window.childClicks=(window.childClicks||0)+1">Child action</button>
+</body></html>"""
         elif self.path in {"/frame-next", "/frame-next?cross=1"}:
-            body = "<!doctype html><html><body><h1>Next frame</h1></body></html>"
+            body = """<!doctype html><html><body><h1>Next frame</h1>
+<button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
+</body></html>"""
         elif self.path in {"/frame", "/frame?cross=1"}:
             body = """<!doctype html><html><body>
 <button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
+<input aria-label="Frame search">
+<select aria-label="Frame count"><option value="10">Ten</option><option value="20">Twenty</option></select>
+<div role="button" tabindex="0" aria-label="Frame scroll area" style="display:block;height:200px;overflow:auto"><div style="height:1500px">Scrollable frame</div></div>
 </body></html>"""
         else:
             body = f"""<!doctype html><html><head><title>P1 fixture</title></head><body>
 <button id="run" onclick="window.clickCount=(window.clickCount||0)+1">Run once</button>
+<input aria-label="Search query">
+<select aria-label="Result count"><option value="10">Ten</option><option value="20">Twenty</option></select>
 <input type="password" aria-label="Secret input">
 <div data-webskill-private><button>Private child</button></div>
-<iframe id="same-frame" src="/frame"></iframe>
-<iframe id="cross-frame" src="http://localhost:{self.server.server_port}/frame?cross=1"></iframe>
+<div role="button" tabindex="0" aria-label="Main scroll area" style="display:block;height:400px;overflow:auto"><div style="height:1500px">Scrollable document</div></div>
+<iframe id="same-frame" src="/frame" style="width:800px;height:450px"></iframe>
+<iframe id="cross-frame" src="http://localhost:{self.server.server_port}/frame?cross=1" style="width:800px;height:450px"></iframe>
 </body></html>"""
         payload = body.encode()
         self.send_response(200)
@@ -82,6 +95,36 @@ async def call(ws: Any, message: dict[str, Any]) -> dict[str, Any]:
     reply = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
     assert isinstance(reply, dict)
     return reply
+
+
+async def perform_action(
+    client: httpx.AsyncClient,
+    ws: Any,
+    headers: dict[str, str],
+    session_id: str,
+    request_id: str,
+    ref: str,
+    action: str,
+    value: str | None = None,
+) -> dict[str, Any]:
+    request = {"ref": ref, "action": action, **({"value": value} if value is not None else {})}
+    issued = await client.post(
+        f"/api/browser-agent/sessions/{session_id}/grants",
+        headers=headers,
+        json={"request": request},
+    )
+    assert issued.status_code == 200, issued.text
+    executed = await call(
+        ws,
+        {
+            "type": "execute",
+            "requestId": request_id,
+            "request": request,
+            "grant": issued.json()["grant"],
+        },
+    )
+    assert executed["outcome"]["ok"] is True, executed
+    return executed
 
 
 async def browser_value(browser: BrowserSession, expression: str) -> Any:
@@ -134,10 +177,13 @@ async def accept() -> dict[str, Any]:
             users = (await client.get("/api/users", headers=admin)).json()
             user_id = next(user["id"] for user in users if user["username"] == "admin")
             profile = f"user-{user_id}"
+            from octop.infra.control.browser.webskill.lease import profile_command_gate
+
             browser = await BrowserSession.create(
                 profile=profile,
                 mode="headless",
                 profile_manager=ProfileManager(base_dir=OUT / "profiles"),
+                command_gate=profile_command_gate(profile),
             )
             _registry[profile] = browser
             navigation = await browser.navigate(fixture_url)
@@ -155,6 +201,8 @@ async def accept() -> dict[str, Any]:
             async with websockets.connect(
                 ws_url, origin=origin, additional_headers={"Sec-Fetch-Site": "same-origin"}
             ) as ws:
+                from octop.infra.control.browser.webskill.sessions import browser_agent_registry
+
                 perceived = await call(
                     ws,
                     {
@@ -182,8 +230,16 @@ async def accept() -> dict[str, Any]:
                     )
                 assert perceived["type"] == "perceive-result", perceived
                 assert perceived["result"]["page"]["url"] == fixture_url
-                assert len(perceived["targets"]) == 1, perceived["targets"]
-                request = {"ref": perceived["targets"][0]["ref"], "action": "click"}
+                assert {target.get("name") for target in perceived["targets"]} == {
+                    "Run once", "Search query", "Result count", "Main scroll area"
+                }, perceived["targets"]
+                request = {
+                    "ref": next(
+                        target["ref"] for target in perceived["targets"]
+                        if target.get("name") == "Run once"
+                    ),
+                    "action": "click",
+                }
                 issued = await client.post(
                     f"/api/browser-agent/sessions/{session_id}/grants",
                     headers=headers,
@@ -203,6 +259,32 @@ async def accept() -> dict[str, Any]:
                 )
                 assert replay["code"] == "PAGE_ACTION_STALE_REF", replay
                 assert await browser_value(browser, "window.clickCount || 0") == 1
+
+                controls = {target.get("name"): target["ref"] for target in perceived["targets"]}
+                await perform_action(
+                    client, ws, headers, session_id, "main-fill",
+                    controls["Search query"], "fill", "Octop query",
+                )
+                assert await browser_value(
+                    browser, "document.querySelector('[aria-label=\"Search query\"]').value"
+                ) == "Octop query"
+                await perform_action(
+                    client, ws, headers, session_id, "main-select",
+                    controls["Result count"], "select", "20",
+                )
+                assert await browser_value(
+                    browser, "document.querySelector('[aria-label=\"Result count\"]').value"
+                ) == "20"
+                await perform_action(
+                    client, ws, headers, session_id, "main-scroll",
+                    controls["Main scroll area"], "scroll", "down",
+                )
+                deadline = time.monotonic() + 5
+                while await browser_value(
+                    browser, "document.querySelector('[aria-label=\"Main scroll area\"]').scrollTop"
+                ) == 0:
+                    assert time.monotonic() < deadline, "The main document did not scroll"
+                    await asyncio.sleep(0.05)
 
                 nested = perceived["result"].get("nestedFrames", [])
                 assert [frame["frame"] for frame in nested] == [
@@ -260,6 +342,33 @@ async def accept() -> dict[str, Any]:
                 )
                 assert frame_replay["code"] == "PAGE_ACTION_STALE_REF", frame_replay
 
+                frame_controls = {
+                    target.get("name"): target["ref"]
+                    for target in frame_perceived["targets"]
+                }
+                for action, name, value in (
+                    ("fill", "Frame search", "Frame query"),
+                    ("select", "Frame count", "20"),
+                ):
+                    await perform_action(
+                        client, ws, headers, session_id, f"same-frame-{action}",
+                        frame_controls[name], action, value,
+                    )
+                assert await browser_value(
+                    browser,
+                    "({value: document.getElementById('same-frame').contentDocument.querySelector('[aria-label=\"Frame search\"]').value, selected: document.getElementById('same-frame').contentDocument.querySelector('select').value})",
+                ) == {"value": "Frame query", "selected": "20"}
+                await perform_action(
+                    client, ws, headers, session_id, "same-frame-scroll",
+                    frame_controls["Frame scroll area"], "scroll", "down",
+                )
+                deadline = time.monotonic() + 5
+                while await browser_value(
+                    browser, "document.getElementById('same-frame').contentDocument.querySelector('[aria-label=\"Frame scroll area\"]').scrollTop"
+                ) == 0:
+                    assert time.monotonic() < deadline, "The same-origin frame did not scroll"
+                    await asyncio.sleep(0.05)
+
                 stale_grant = (
                     await client.post(
                         f"/api/browser-agent/sessions/{session_id}/grants",
@@ -311,13 +420,26 @@ async def accept() -> dict[str, Any]:
                         },
                     },
                 )
+                if oopif_perceived.get("type") != "perceive-result":
+                    tree = await browser._internal.client.send("Page.getFrameTree")  # noqa: SLF001
+                    targets = await browser._internal.client.send("Target.getTargets")  # noqa: SLF001
+                    owners = []
+                    for child in tree.get("frameTree", {}).get("childFrames", []):
+                        frame = child.get("frame", {})
+                        try:
+                            owner = await browser._internal.client.send(  # noqa: SLF001
+                                "DOM.getFrameOwner", {"frameId": frame.get("id")}
+                            )
+                        except Exception as error:
+                            owner = {"errorType": type(error).__name__, "error": str(error)}
+                        owners.append({"frame": frame, "owner": owner})
+                    (OUT / "oopif-target-diagnostics.json").write_text(
+                        json.dumps({"reply": oopif_perceived, "owners": owners, "targets": targets}, indent=2),
+                        encoding="utf-8",
+                    )
                 assert oopif_perceived["type"] == "perceive-result", oopif_perceived
                 assert oopif_perceived["result"]["page"]["url"] == cross_url
                 oopif_ref = oopif_perceived["targets"][0]["ref"]
-                from octop.infra.control.browser.webskill.sessions import (
-                    browser_agent_registry,
-                )
-
                 frame_key = browser_agent_registry.get(session_id, user_id).refs[oopif_ref].frame
                 assert frame_key.startswith("oopif:")
                 oopif_request = {"ref": oopif_ref, "action": "click"}
@@ -350,6 +472,34 @@ async def accept() -> dict[str, Any]:
                 )
                 assert oopif_replay["code"] == "PAGE_ACTION_STALE_REF", oopif_replay
                 assert await oopif_value(browser, frame_key, "window.frameClicks || 0") == 1
+
+                oopif_controls = {
+                    target.get("name"): target["ref"]
+                    for target in oopif_perceived["targets"]
+                }
+                for action, name, value in (
+                    ("fill", "Frame search", "Cross query"),
+                    ("select", "Frame count", "20"),
+                ):
+                    await perform_action(
+                        client, ws, headers, session_id, f"oopif-{action}",
+                        oopif_controls[name], action, value,
+                    )
+                assert await oopif_value(
+                    browser, frame_key,
+                    "({value: document.querySelector('input').value, selected: document.querySelector('select').value})",
+                ) == {"value": "Cross query", "selected": "20"}
+                await perform_action(
+                    client, ws, headers, session_id, "oopif-scroll",
+                    oopif_controls["Frame scroll area"], "scroll", "down",
+                )
+                deadline = time.monotonic() + 5
+                while await oopif_value(
+                    browser, frame_key,
+                    "document.querySelector('[aria-label=\"Frame scroll area\"]').scrollTop",
+                ) == 0:
+                    assert time.monotonic() < deadline, "The OOPIF document did not scroll"
+                    await asyncio.sleep(0.05)
 
                 stale_oopif_grant = (
                     await client.post(
@@ -385,6 +535,64 @@ async def accept() -> dict[str, Any]:
                 )
                 assert stale_oopif["code"] == "PAGE_ACTION_STALE_REF", stale_oopif
 
+                frame_next = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "oopif-next-read",
+                        "scope": {
+                            "frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]
+                        },
+                    },
+                )
+                assert frame_next["type"] == "perceive-result", frame_next
+                await perform_action(
+                    client, ws, headers, session_id, "oopif-back",
+                    "@document", "back",
+                )
+                frame_back = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "oopif-back-read",
+                        "scope": {
+                            "frames": [{"frame": ["iframe#cross-frame"], "include": ["body"]}]
+                        },
+                    },
+                )
+                assert frame_back.get("result", {}).get("page", {}).get("url") == cross_url, frame_back
+
+                await browser.navigate(f"{fixture_url}next")
+                next_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "main-next-read",
+                        "scope": {"include": ["body"]},
+                    },
+                )
+                assert next_perceived["result"]["page"]["url"] == f"{fixture_url}next"
+                await perform_action(
+                    client, ws, headers, session_id, "main-back",
+                    "@document", "back",
+                )
+                assert await browser_value(browser, "location.href") == fixture_url
+                returned_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "main-return-read",
+                        "scope": {"include": ["body"]},
+                    },
+                )
+                request = {
+                    "ref": next(
+                        target["ref"]
+                        for target in returned_perceived["targets"]
+                        if target.get("name") == "Run once"
+                    ),
+                    "action": "click",
+                }
                 next_grant = (
                     await client.post(
                         f"/api/browser-agent/sessions/{session_id}/grants",
@@ -433,6 +641,65 @@ async def accept() -> dict[str, Any]:
                 assert denied["type"] == "error", denied
                 assert after_navigation == {"url": f"{fixture_url}next", "count": None}
 
+                returned = await client.post(
+                    f"/api/browser/sessions/{profile}/handoff",
+                    headers=headers,
+                    json={"target": "agent", "reason": "P2 target acceptance"},
+                )
+                assert returned.status_code == 200, returned.text
+                await browser_value(
+                    browser,
+                    "document.body.insertAdjacentHTML('beforeend', '<a id=\"new-window\" href=\"/child\" target=\"_blank\">Open child</a>')",
+                )
+                target_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "target-read",
+                        "scope": {"include": ["body"]},
+                    },
+                )
+                link = next(
+                    target
+                    for target in target_perceived["targets"]
+                    if target.get("name") == "Open child"
+                )
+                original_target = browser_agent_registry.get(session_id, user_id).model_target
+                target_request = {"ref": link["ref"], "action": "click"}
+                target_issued = await client.post(
+                    f"/api/browser-agent/sessions/{session_id}/grants",
+                    headers=headers,
+                    json={"request": target_request},
+                )
+                assert target_issued.status_code == 200, target_issued.text
+                target_grant = target_issued.json()["grant"]
+                target_executed = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "target-click",
+                        "request": target_request,
+                        "grant": target_grant,
+                    },
+                )
+                assert target_executed["outcome"]["ok"] is True, target_executed
+                model_target = browser_agent_registry.get(session_id, user_id).model_target
+                assert model_target != original_target
+                child_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "child-read",
+                        "scope": {"include": ["body"]},
+                    },
+                )
+                assert child_perceived["type"] == "perceive-result", child_perceived
+                assert child_perceived["result"]["page"]["url"] == f"{fixture_url}child"
+                assert any(
+                    target.get("name") == "Child action"
+                    for target in child_perceived["targets"]
+                )
+
                 wrong_origin = await client.post(
                     f"/api/browser-agent/sessions/{session_id}/tickets",
                     headers={**admin, "Origin": "https://attacker.invalid"},
@@ -457,14 +724,26 @@ async def accept() -> dict[str, Any]:
             assert await browser_value(browser, "location.href") == f"{fixture_url}next"
             assert octop.services is not None
             audit = octop.services.audit_repo.query(action="webskill.page.action")
-            assert any(row.payload == '{"action":"click","ok":true}' for row in audit)
+            action_rows = [json.loads(row.payload or "{}") for row in audit]
+            main_grant_digest = hashlib.sha256(grant.encode("utf-8")).hexdigest()
+            main_audit = next(
+                row for row in action_rows
+                if row.get("grantDigest") == main_grant_digest and row.get("ok") is True
+            )
+            assert main_audit["documentTarget"] == original_target
+            assert main_audit["ref"]
+            assert all(row.get("document") for row in action_rows)
             assert all(grant not in (row.payload or "") for row in audit)
             return {
                 "status": "passed",
                 "checks": [
                     "real Chromium main-document perception and sensitive-subtree filtering",
+                    "main-document fill, select, scroll and back have real side effects",
                     "same-origin frame read/click and child-navigation grant invalidation",
+                    "same-origin frame fill, select and scroll have real side effects",
                     "OOPIF attach, default execution context, scoped click and stale-grant rejection",
+                    "OOPIF fill, select, scroll and frame-scoped back have real side effects",
+                    "target=_blank moves modelTarget into the new page without losing perception",
                     "one-shot ticket over real HTTP/WS",
                     "confirmed grant and exactly one real mouse click",
                     "grant replay rejection without another side effect",

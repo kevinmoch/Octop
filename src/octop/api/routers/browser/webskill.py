@@ -240,7 +240,22 @@ async def issue_grant(
             session.id,
             {
                 "action": body.request.get("action"),
-                "digest": hashlib.sha256(grant.encode("utf-8")).hexdigest(),
+                "grantDigest": hashlib.sha256(grant.encode("utf-8")).hexdigest(),
+                **(
+                    {
+                        "document": hashlib.sha256(
+                            session.document.key.encode("utf-8")
+                        ).hexdigest(),
+                        "documentTarget": session.document.target_id,
+                    }
+                    if session.document is not None
+                    else {}
+                ),
+                **(
+                    {"ref": ref}
+                    if isinstance((ref := body.request.get("ref")), str) and len(ref) <= 256
+                    else {}
+                ),
             },
         )
         return {"grant": grant, "expiresIn": GRANT_TTL_SECONDS}
@@ -329,6 +344,7 @@ async def page_agent_ws(
                         raise BrowserAgentError(
                             "GRANT_REQUIRED", "A matching one-shot action grant is required"
                         )
+                    expected_document = live.document
                     try:
                         reply = await execute_action(
                             live,
@@ -339,9 +355,24 @@ async def page_agent_ws(
                             write_gate=write_gate,
                         )
                     except BrowserAgentError as error:
-                        await _audit_ws(websocket, live, request, {"ok": False}, code=error.code)
+                        await _audit_ws(
+                            websocket,
+                            live,
+                            request,
+                            {"ok": False},
+                            code=error.code,
+                            grant=grant,
+                            expected_document=expected_document,
+                        )
                         raise
-                    await _audit_ws(websocket, live, request, reply["outcome"])
+                    await _audit_ws(
+                        websocket,
+                        live,
+                        request,
+                        reply["outcome"],
+                        grant=grant,
+                        expected_document=expected_document,
+                    )
                 else:
                     raise BrowserAgentError(
                         "REQUEST_UNSUPPORTED",
@@ -376,10 +407,13 @@ async def _audit_ws(
     outcome: dict[str, Any],
     *,
     code: str | None = None,
+    grant: str | None = None,
+    expected_document: Any = None,
 ) -> None:
     server = websocket.app.state.octop_server
     if server.services is None:
         return
+    document = expected_document or session.document
     await asyncio.to_thread(
         server.services.audit_repo.write,
         actor=f"user:{session.user_id}",
@@ -390,6 +424,24 @@ async def _audit_ws(
                 "action": request.get("action"),
                 "ok": outcome.get("ok"),
                 **({"code": public_error_code(code)} if code is not None else {}),
+                **(
+                    {
+                        "document": hashlib.sha256(document.key.encode("utf-8")).hexdigest(),
+                        "documentTarget": document.target_id,
+                    }
+                    if document is not None
+                    else {}
+                ),
+                **(
+                    {"ref": ref}
+                    if isinstance((ref := request.get("ref")), str) and len(ref) <= 256
+                    else {}
+                ),
+                **(
+                    {"grantDigest": hashlib.sha256(grant.encode("utf-8")).hexdigest()}
+                    if grant is not None
+                    else {}
+                ),
             },
             sort_keys=True,
             separators=(",", ":"),

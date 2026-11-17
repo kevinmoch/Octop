@@ -171,6 +171,19 @@ def test_grant_binds_the_complete_action_and_document() -> None:
     assert error.value.code == "GRANT_INVALID"
 
 
+def test_back_requires_document_ref_and_scroll_uses_an_element_ref() -> None:
+    registry = BrowserAgentRegistry()
+    session = perceived_session(registry)
+    with pytest.raises(BrowserAgentError) as error:
+        registry.issue_grant(
+            session, document=document(), request={"ref": "ws_test", "action": "back"}
+        )
+    assert error.value.code == "ACTION_INVALID"
+    request = {"ref": "ws_test", "action": "scroll", "value": "down"}
+    grant = registry.issue_grant(session, document=document(), request=request)
+    registry.consume_grant(session, grant, document=document(), request=request)
+
+
 def test_grant_rejects_other_document_user_frame_and_expiry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

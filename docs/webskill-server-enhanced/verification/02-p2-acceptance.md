@@ -1,6 +1,6 @@
 # P2 实施与真实验证记录
 
-> 状态：🟡 实施中；当前仅完成 P2-0 会话恢复竞态修复，仍为 candidate，不表示 P2 全部能力或生产支持已开放。
+> 状态：🟡 实施中；P2-0～P2-4 已完成本地候选验证，但共享写入全链路、依赖发布、LNA、容量和部署验收仍未收口，不表示 P2 全部能力或生产支持已开放。
 
 ## 1. P2-0 会话恢复竞态修复（2026-11-17）
 
@@ -29,18 +29,38 @@
 
 - `octop-browser-webskill` 的 `feature/session-scoped-cdp@e34bbdd` 为 `CDPClient.send` 增加向后兼容的 `session_id`，并提供 scoped client；245 项 library 测试通过、9 项跳过。Octop 功能分支为 `feature/webskill-p2-oopif`。
 - 感知、签发 grant 和执行都通过 `Target.attachToTarget` 进入真实独立 iframe target，固定默认 execution context 和 `oopif:<targetId>:<loaderId>`。动作结束后 detach，导航、替换或上下文不匹配时 fail-closed。
-- target 选择同时要求 `parentId` 与当前页面一致，并保留 query，避免跨 tab 同 URL 或同 path 不同 query 误选。close 会移除 execution-context listener，detach 失败不会覆盖主结果；back 使用 scoped history，而非主页面 history。
+- target 选择同时要求 `parentId`、iframe 的 `DOM.describeNode.frameId` 与 scoped 根 frame 一致，并核对当前 URL（含 query），避免跨 tab、同 path 不同 query 或 history 后陈旧 `src` 误选。close 会移除 execution-context listener，detach 失败不会覆盖主结果；back 使用 scoped history，而非主页面 history。
 - OOPIF 不调用不存在的 `Input.enable`；执行前重新建立 `DOM.getDocument` 映射，再解析 backendNodeId，不使用主文档或坐标兜底。
-- 43 项后端专项测试通过，覆盖 scoped 读取/单击、默认上下文、attach/detach、父页面/query、listener 清理和导航后 grant 拒绝。真实跨站验收改为绝对 `localhost` 地址导航，保持 OOPIF 身份，最新证据为 `.artifacts/webskill-p1/3022565d08/result.json`。
-- 评审整改后的全量 `make all PYTEST_JOBS=4` 为 `5916 passed, 45 skipped`；Ruff、1312 个文件的格式检查和 mypy（684 个源码文件）均通过。
-- **合入阻断**：`e34bbdd` 仍是本地 editable dependency，未发布、未写入 Octop pin/lock；干净 CI/部署不能据此获得 `with_session`/`session_id`。因此 `oopif` capability 保持 `false`，本分支只做本地提交，不合入 `webskill-integration`，不声称 CI 或生产可用。
+- 43 项后端专项测试通过，覆盖 scoped 读取/单击、默认上下文、attach/detach、父页面/query、listener 清理和导航后 grant 拒绝。真实跨站验收改为绝对 `localhost` 地址导航，保持 OOPIF 身份，最新证据为 `.artifacts/webskill-p1/fd849444f6/result.json`。
+- 早期评审整改后的全量 `make all PYTEST_JOBS=4` 为 `5916 passed, 45 skipped`；Ruff、1312 个文件的格式检查和 mypy（684 个源码文件）均通过。最新全量结果见第 6 节。
+- **合入阻断**：`e34bbdd`、`9b18040`、`927bfe3` 仍是本地 editable dependency，未发布、未写入 Octop pin/lock；干净 CI/部署不能据此获得 scoped client、command gate 或 ref scroll。因此 `oopif` capability 保持 `false`，本分支只做本地提交，不合入 `webskill-integration`，不声称 CI 或生产可用。
 
-## 4. 已通过的验证
+## 4. P2-3 target 工作集与双指针（2026-11-17，本地 candidate）
+
+- `base_target_id` 保留原始 CDP 页面，`model_target` 独立维护。用户切换标签只改变 viewTarget，不再触发 modelTarget 强制跟随；目标被关闭时返回 `PAGE_TAB_EXPIRED`，不自动落到其他页面。
+- 模型需要操作其他 target 时复用 scoped attach 生命周期，读取 `document.readyState` 后再绑定 loader，前后 identity 使用同一个 scoped client，避免新旧 target 混用。
+- 动作后对比 page target 集合，恰有一个新 target 时才更新 modelTarget，并清空旧 document/ref/grant。多个或没有可判定的新 target 时不猜测。
+- 45 项后端专项通过，覆盖用户切页、新窗口、目标关闭和加载中 target。真实 `target=_blank` 验收通过，证据为 `.artifacts/webskill-p1/40be551f42/result.json`。
+- 全量 `make all PYTEST_JOBS=4` 为 `5918 passed, 45 skipped`；Ruff、1313 个文件的格式检查和 mypy（685 个源码文件）均通过。该能力同样受 scoped dependency 未发布约束，capability 不标记为生产可用。
+
+## 5. P2-4 lease、真实动作与安全补强（2026-11-17，本地 candidate）
+
+- `octop-browser-webskill` 本地提交 `9b18040` 为 scoped CDP 增加 command gate，并保证 target 切换保留 gate；`927bfe3` 让 scroll 按元素 ref 的中心发送 wheel，保留原 viewport 默认行为。最新 library 全量为 **248 passed, 9 skipped**。
+- Octop 的 `profile_lease` 使用 OS 文件锁协调同一共享 profile，锁文件只含 pid/profile/acquiredAt，不含伪造的固定租约有效期；进程终止后由 OS 释放。`profile_command_gate` 接入 BrowserSession 初次创建、启动失败重试及真实验收直接创建路径。两个 spawn 进程写入区间不重叠，持锁进程被终止后另一进程可获取锁。锁等待超时返回 `WRITE_LOCKED`；Windows 加锁和解锁均固定到偏移 0 的同一字节，跨平台逻辑有单测，但未冒充真实 Windows CI 证据。
+- 真实 Chromium 验收发现的主页滚动后 frame 不可见点击问题已通过 `DOM.scrollIntoViewIfNeeded` 修复。scroll 遵循 WebSkill 公共契约使用元素 ref，不私造 `@document` frame 语义；`back` 才使用 document ref。主文档和同源 frame 的 fill/select/scroll、主文档 back、OOPIF 的 fill/select/scroll/back 均有真实副作用断言。
+- OOPIF target 发现使用 `DOM.describeNode.frameId`，在 scoped target 中核对根 frame、parent 和当前 URL（含 query），不读取 history 后已过期的 iframe `src`。真实诊断 `.artifacts/webskill-p1/7361592068/oopif-target-diagnostics.json` 证明主页面 frame tree 不包含 OOPIF，不能假定 targetId 等于 frameId。
+- 动作审计在 execute 前快照 document，记录 document 摘要、documentTarget、ref 和 grantDigest，不记录填值、原始 grant/ticket 或 URL query；grant 与 action 可通过同一 grantDigest 对账。
+- 旧工作台 JWT 兼容入口仍保留到需求约定的 1.1.0，代码在版本达到 1.1.0 且未删除该入口时拒绝加载；真实增强链路的 WS query 不含 token。Origin 复用 Uvicorn 的 trusted proxy 处理结果，单测验证回环受信代理可采用 HTTPS scheme、非受信来源的伪造 proto 被拒绝，未放开 `forwarded_allow_ips=*`。
+- `model-auth-probe.mjs` 使用真实本地 HTTP 鉴权端点验证占位兼容请求只发送一次、返回 401、不报 mock 成功且不写入配置；输出为 `endpointRequests=1, httpStatus=401, placeholderPersisted=false`。
+- 71 项浏览器后端专项通过。最新真实验收为 `.artifacts/webskill-p1/fd849444f6/result.json`，覆盖主文档/frame/OOPIF 动作、target=_blank、接管、grant 防重放、权限隔离和审计。
+
+## 6. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
 - `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`transport.test.ts` 1 项覆盖 SDK frame 下钻与聚合；`model.test.ts` 3 项模型边界测试继续通过，前端合计 13 项。TypeScript、ESLint 和 Prettier 检查通过。
-- 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace、主题切换和一次真实单击均通过；`pageErrors` 为空。证据为 `.artifacts/webskill-p1/ui/ui-result.json`，由同一套真实 UI 验收脚本生成。
+- 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace、主题切换和一次真实单击均通过；`pageErrors` 为空。最新证据为 `.artifacts/webskill-p1/ui/ui-result.json`，`confirmedRealClickCount=2`、`confirmedSameOriginFrameClickCount=1`，WS query 仅有 width/height/ticket。
 - P2-0 首项及生命周期补强后的全量 `make all PYTEST_JOBS=4` 均为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。生命周期真实 UI 在全量结束后复验通过，首次模型超时未产生页面脚本错误。
+- P2-4 本轮全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5925 passed, 45 skipped**；Ruff、1315 个文件的格式检查和 mypy（686 个源码文件）均通过。其后新增 lease timeout/Windows 偏移测试纳入上述 71 项专项，并由最终提交钩子再次覆盖。
 
 实际执行命令：
 
@@ -60,9 +80,10 @@ PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JO
 
 真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。
 
-## 5. 尚未开放
+## 7. 尚未开放
 
-- 独立 target 工作集、双指针完整语义、共享写入者与跨进程 lease、容量和部署矩阵验收。
-- `fill/select/scroll/back` 的真实副作用验收、其余动作审计增强、旧 JWT 截止门禁、受信代理 Origin 和占位 key 日志面验证。
+- record daemon、ReplayRunner、Dashboard 原始输入和 harness 的统一写入协调与跨进程接管尚未完成；已有 lease/gate 只覆盖明确注入的客户端，不能据此通过 AC-15、AC-40、AC-51、AC-60。
+- 工作集上限、后台 viewTarget 连续出帧、单采集多订阅、容量/p95 和 Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
+- `e34bbdd`、`9b18040`、`927bfe3` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
 - P3 的录制回放、技能执行和文档产物。
 - LNA 真实用户拒绝与受信 TLS 环境仍未完成复验；本项不将这些边界标记为通过。
