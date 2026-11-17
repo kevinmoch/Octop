@@ -94,4 +94,62 @@ describe("useWebSkillAgentSession", () => {
     ]);
     expect(createSession).toHaveBeenCalledTimes(1);
   });
+
+  it("shares renewal between concurrent failures for the same expired session", async () => {
+    createSession.mockResolvedValueOnce(session("stale"));
+    let finishFresh: ((value: ReturnType<typeof session>) => void) | undefined;
+    createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishFresh = resolve;
+        }),
+    );
+    issueTicket
+      .mockResolvedValueOnce(ticket("initial"))
+      .mockRejectedValueOnce(new Error("Request failed: 404 Missing"))
+      .mockRejectedValueOnce(new Error("Request failed: 404 Missing"))
+      .mockResolvedValue(ticket("recovered"));
+    const { result } = renderHook(() => useWebSkillAgentSession(true, 1));
+    await act(() => result.current.issueTicket());
+
+    const first = result.current.issueTicket();
+    const second = result.current.issueTicket();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(createSession).toHaveBeenCalledTimes(2);
+        expect(finishFresh).toBeTypeOf("function");
+      });
+      finishFresh?.(session("fresh"));
+      await Promise.all([first, second]);
+    });
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(issueTicket.mock.calls.map(([id]) => id)).toEqual([
+      "stale",
+      "stale",
+      "stale",
+      "fresh",
+      "fresh",
+    ]);
+    expect(result.current.sessionId).toBe("fresh");
+  });
+
+  it("ignores a late expiry notification for an already replaced session", async () => {
+    createSession
+      .mockResolvedValueOnce(session("stale"))
+      .mockResolvedValueOnce(session("fresh"));
+    issueTicket
+      .mockResolvedValueOnce(ticket("initial"))
+      .mockRejectedValueOnce(new Error("Request failed: 404 Missing"))
+      .mockResolvedValueOnce(ticket("recovered"));
+    const { result } = renderHook(() => useWebSkillAgentSession(true, 1));
+    await act(() => result.current.issueTicket());
+    await act(() => result.current.issueTicket());
+    expect(result.current.sessionId).toBe("fresh");
+
+    await act(() => result.current.renewSession("stale"));
+
+    expect(createSession).toHaveBeenCalledTimes(2);
+    expect(result.current.sessionId).toBe("fresh");
+  });
 });

@@ -13,11 +13,15 @@ export function useWebSkillAgentSession(
   const creatingRef = useRef<Promise<string> | null>(null);
 
   const ensureSession = useCallback(
-    async (renew = false): Promise<string | null> => {
+    async (expiredSessionId?: string): Promise<string | null> => {
       if (!enabled) return null;
-      if (renew) {
-        sessionRef.current = null;
-        setSessionId(null);
+      if (expiredSessionId) {
+        const current = sessionRef.current;
+        if (current && current !== expiredSessionId) return current;
+        if (current === expiredSessionId) {
+          sessionRef.current = null;
+          setSessionId(null);
+        }
       }
       if (sessionRef.current) return sessionRef.current;
       if (!userId) throw new Error("Octop user identity is not ready");
@@ -45,15 +49,18 @@ export function useWebSkillAgentSession(
       return await browserAgentApi.issueTicket(current);
     } catch (error) {
       if (!isBrowserAgentSessionMissing(error)) throw error;
-      const renewed = await ensureSession(true);
+      const renewed = await ensureSession(current);
       if (!renewed) throw new Error("The WebSkill session is not available");
       return browserAgentApi.issueTicket(renewed);
     }
   }, [ensureSession]);
 
-  const renewSession = useCallback(async () => {
-    await ensureSession(true);
-  }, [ensureSession]);
+  const renewSession = useCallback(
+    async (expectedSessionId: string) => {
+      await ensureSession(expectedSessionId);
+    },
+    [ensureSession],
+  );
 
   const closeSession = useCallback(() => {
     const id = sessionRef.current;

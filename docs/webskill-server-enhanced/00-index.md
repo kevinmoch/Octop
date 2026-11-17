@@ -1,6 +1,6 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1 已完成（candidate）；P2 尚未开始；未支持生产。
+> 状态：🟢 P0/P1 已完成（candidate）；🟡 P2 实施中；未支持生产。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。
 
@@ -12,6 +12,7 @@
 | [design/00-overview.md](design/00-overview.md)               | 多 target/frame 架构、接口、权限、录制回放与技能执行边界 |
 | [verification/00-p0-probes.md](verification/00-p0-probes.md) | P0 探针、真实环境、结果证据和退出条件                    |
 | [verification/01-p1-acceptance.md](verification/01-p1-acceptance.md) | P1 实现边界、真实命令、证据和未验证项               |
+| [verification/02-p2-acceptance.md](verification/02-p2-acceptance.md) | P2 实施项、真实命令、证据和未验证项               |
 
 ## 代码归属
 

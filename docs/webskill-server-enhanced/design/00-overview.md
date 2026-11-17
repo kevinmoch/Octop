@@ -1,6 +1,6 @@
 # Octop 服务端增强版设计
 
-> 状态：🟢 P0/P1 已完成（candidate）；P2 尚未开始；实际支持能力以对应 FR/AC 的真实证据为准。
+> 状态：🟢 P0/P1 已完成（candidate）；🟡 P2 实施中；实际支持能力以对应 FR/AC 的真实证据为准。
 > 需求与编号见 [../00-requirements-overview.md](../00-requirements-overview.md)。
 
 ## 1. 设计目标

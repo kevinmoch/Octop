@@ -59,7 +59,7 @@ export default function WebSkillFrame({
   placement: AssistantPlacement;
   placementLocked: boolean;
   onPlacementChange: (placement: AssistantPlacement) => void;
-  onSessionExpired: () => Promise<void>;
+  onSessionExpired: (expectedSessionId: string) => Promise<void>;
   onClose: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -148,7 +148,7 @@ export default function WebSkillFrame({
           }
         } catch (error) {
           if (data.api === "ticket" && isBrowserAgentSessionMissing(error)) {
-            await onSessionExpired().catch(() => undefined);
+            await onSessionExpired(data.sessionId).catch(() => undefined);
           }
           respond({
             ok: false,
