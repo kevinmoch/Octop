@@ -1,6 +1,6 @@
 # Octop 服务端增强版需求基线
 
-> 状态：🟢 需求已落盘，P0/P1 已完成（candidate）；P2 尚未开始。
+> 状态：🟢 需求已落盘，P0/P1 已完成（candidate）；🟡 P2 实施中。
 > 本专项不规划 WebSkill 的 npm 新版本；P0/P1/P2/P3 均为集成阶段。
 > 阶段与实施边界见 [00-index.md](00-index.md)，技术设计见 [design/00-overview.md](design/00-overview.md)，验证见 [P0 探针](verification/00-p0-probes.md) 与 [P1 实施及真实验证记录](verification/01-p1-acceptance.md)。
 
