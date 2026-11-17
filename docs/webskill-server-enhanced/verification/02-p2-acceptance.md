@@ -15,10 +15,19 @@
 - hook 增加 generation。关闭或卸载时在途 create 不得重新写入缓存；迟到创建的会话会尝试删除，删除失败仍由 idle TTL 兜底。旧 Promise 的 finally 不会误清新一代创建 Promise。
 - 生命周期分支为 `feature/webskill-p2-lifecycle-cleanup`，P2-0 已先合入 `webskill-integration`。
 
-## 2. 已通过的验证
+## 2. P2-1 同源 frame（2026-11-17）
+
+- 功能分支为 `feature/webskill-p2-same-origin-frames`。`DOM.getDocument` 使用 `pierce=true`，服务端生成受限 frame 路径，客户端复用 `createFrameRouter` 下钻和聚合，不在服务端另造聚合器。
+- 主文档只保留一个 document key；子 frame ref 绑定 `frameId:loaderId`。签发和执行 grant 前都重新核对当前 frame/loader，子 frame 独立导航后旧 ref/grant 明确失效，不回退到主文档或坐标。
+- 感知与执行继续使用私有 `RefCache`，不污染 Octop 共享 `BrowserSession`。跨进程 iframe 的 owner 探测失败不会阻断其他同源 frame；目标 frame 不存在或不可读时仍返回明确的 scope 错误。
+- 37 项后端专项测试通过，新增同源读取/单击、子 frame 导航失效和未知/跨源 scope 拒绝；13 项前端测试通过，新增 SDK 路由下钻与聚合测试。
+- 真实 Chromium 完成同源 iframe 一次点击、重放拒绝及独立导航后的 grant 拒绝，证据为 `.artifacts/webskill-p1/c1e139f083/result.json`。`frames` 标记为同源支持，`oopif` 仍为 false。
+- 同源 frame 全量 `make all PYTEST_JOBS=4` 为 `5910 passed, 45 skipped`；Ruff、1311 个文件的格式检查和 mypy（683 个源码文件）均通过，真实 UI 主链路同步通过。
+
+## 3. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
-- `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`model.test.ts` 3 项模型边界测试继续通过，前端合计 12 项。TypeScript、ESLint 和 Prettier 检查通过。
+- `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`transport.test.ts` 1 项覆盖 SDK frame 下钻与聚合；`model.test.ts` 3 项模型边界测试继续通过，前端合计 13 项。TypeScript、ESLint 和 Prettier 检查通过。
 - 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace、主题切换和一次真实单击均通过；`pageErrors` 为空。证据为 `.artifacts/webskill-p1/ui/ui-result.json`，由同一套真实 UI 验收脚本生成。
 - P2-0 首项及生命周期补强后的全量 `make all PYTEST_JOBS=4` 均为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。生命周期真实 UI 在全量结束后复验通过，首次模型超时未产生页面脚本错误。
 
@@ -29,6 +38,7 @@ cd /Users/mochunhui/Git/Octop/dashboard
 npx vitest run \
   src/components/WebSkillFrame.test.tsx \
   src/pages/Control/WebSkillBrowser/useWebSkillAgentSession.test.ts \
+  src/pages/Control/WebSkillBrowser/transport.test.ts \
   src/pages/Control/WebSkillBrowser/model.test.ts
 npx tsc -b
 
@@ -39,9 +49,9 @@ PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JO
 
 真实 UI 先使用 `scripts/webskill-p1/ui_server.py` 启动隔离服务，再执行 `scripts/webskill-p1/ui_acceptance.py`。
 
-## 3. 尚未开放
+## 4. 尚未开放
 
-- frame/OOPIF、独立 target 工作集、双指针完整语义、共享写入者与跨进程 lease、容量和部署矩阵验收。
+- OOPIF、独立 target 工作集、双指针完整语义、共享写入者与跨进程 lease、容量和部署矩阵验收。
 - `fill/select/scroll/back` 的真实副作用验收、其余动作审计增强、旧 JWT 截止门禁、受信代理 Origin 和占位 key 日志面验证。
 - P3 的录制回放、技能执行和文档产物。
 - LNA 真实用户拒绝与受信 TLS 环境仍未完成复验；本项不将这些边界标记为通过。

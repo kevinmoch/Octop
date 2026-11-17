@@ -12,6 +12,14 @@ from octop_browser.dom.builder import DOMBuilder
 from octop_browser.dom.refs import RefCache
 from octop_browser.session import BrowserSession
 
+from .frames import (
+    assert_frame_identity_current,
+    discover_frame_routes,
+    frame_identity,
+    nested_frame_refs,
+    projection_document,
+    select_frame_route,
+)
 from .sessions import (
     DOCUMENT_REF,
     BrowserAgentError,
@@ -29,6 +37,8 @@ MAX_P1_NODES = 1500
 def public_error_code(code: str) -> str:
     return {
         "PERCEPTION_SUBTREE_UNSUPPORTED": "PERCEPTION_SUBTREE_UNSUPPORTED",
+        "PERCEPTION_SUBTREE_OUT_OF_SCOPE": "PERCEPTION_SUBTREE_OUT_OF_SCOPE",
+        "PERCEPTION_SUBTREE_UNKNOWN_REF": "PERCEPTION_SUBTREE_UNKNOWN_REF",
         "PERCEPTION_FAILED": "PERCEPTION_FAILED",
         "PAGE_ACTION_STALE_REF": "PAGE_ACTION_STALE_REF",
         "GRANT_INVALID": "PAGE_ACTION_STALE_REF",
@@ -215,10 +225,6 @@ async def read_page(
     registry: BrowserAgentRegistry,
 ) -> dict[str, Any]:
     scope = request.get("scope")
-    if not isinstance(scope, dict) or scope.get("include") != ["body"] or "frames" in scope:
-        raise BrowserAgentError(
-            "PERCEPTION_FAILED", "P1 perception is restricted to the main document body"
-        )
     if "ref" in request:
         raise BrowserAgentError(
             "PERCEPTION_SUBTREE_UNSUPPORTED",
@@ -229,15 +235,22 @@ async def read_page(
         raise BrowserAgentError("PERCEPTION_FAILED", "Image capture is not available in P1")
     browser = await resolve_browser(session, resolver)
     before = await document_identity(session, browser)
-    raw = await browser._internal.client.send("DOM.getDocument", {"depth": -1})  # noqa: SLF001
+    client = browser._internal.client  # noqa: SLF001
+    raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
     root = raw.get("root", {})
     if not isinstance(root, dict):
         raise BrowserAgentError("PERCEPTION_FAILED", "The browser document is unavailable")
+    routes = discover_frame_routes(root, before.url)
+    route = select_frame_route(routes, scope)
+    selected_frame = await frame_identity(client, route)
+    projected_root = projection_document(root, route)
+    selected_url = route.url if route is not None and route.url else before.url
+    selected_title = before.title if route is None else ""
     try:
         dom = DOMBuilder(
-            dom=root,
-            url=before.url,
-            title=before.title,
+            dom=projected_root,
+            url=selected_url,
+            title=selected_title,
             ref_cache=RefCache(),
         ).build(level="structured")
         raw_elements = json.loads(dom).get("elements", [])
@@ -247,12 +260,12 @@ async def read_page(
         ) from error
     if not isinstance(raw_elements, list):
         raise BrowserAgentError("PERCEPTION_FAILED", "The browser DOM response is invalid")
-    excluded = _sensitive_subtrees(root)
+    excluded = _sensitive_subtrees(projected_root)
     backend_ids = _node_index(root)
     if any(element.get("framePath") for element in raw_elements if isinstance(element, dict)):
         raise BrowserAgentError(
             "PERCEPTION_SUBTREE_UNSUPPORTED",
-            "Frame perception requires the P2 target/frame adapter",
+            "Frame projection exceeded its selected document",
         )
     elements = [
         element
@@ -264,15 +277,21 @@ async def read_page(
     if len(elements) > MAX_P1_NODES:
         raise BrowserAgentError(
             "PERCEPTION_FAILED",
-            f"The document has more than {MAX_P1_NODES} readable controls; P1 does not silently truncate it",
+            f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
         )
     after = await document_identity(session, browser)
-    if before.key != after.key:
+    if before.key != after.key or selected_frame != await frame_identity(client, route):
         raise BrowserAgentError(
-            "PERCEPTION_FAILED", "The document changed while it was being perceived"
+            "PERCEPTION_FAILED", "The document or frame changed while it was being perceived"
         )
+    if route is None or session.document is None or session.document.key != after.key:
+        session.refs.clear()
+    else:
+        frame_id = selected_frame.partition(":")[0]
+        for ref, entry in list(session.refs.items()):
+            if entry.frame.partition(":")[0] == frame_id:
+                session.refs.pop(ref, None)
     session.document = after
-    session.refs.clear()
     nodes: list[dict[str, Any]] = []
     targets: list[dict[str, Any]] = []
     for element in elements:
@@ -281,14 +300,19 @@ async def read_page(
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "Could not bind a visible control to its backend node identity"
             )
-        ref = registry.issue_ref(session, backend_node_id)
+        ref = registry.issue_ref(session, backend_node_id, selected_frame)
         nodes.append(_node(element, ref))
         targets.append(_target(element, ref))
+    nested = nested_frame_refs(routes, route.path if route is not None else ())
     return {
         "type": "perceive-result",
         "result": {
             "nodes": nodes,
-            "page": {"url": after.url, **({"title": after.title} if after.title else {})},
+            "page": {
+                "url": selected_url,
+                **({"title": selected_title} if selected_title else {}),
+            },
+            **({"nestedFrames": nested} if nested else {}),
         },
         "targets": targets,
         "document": after.public(),
@@ -309,6 +333,9 @@ async def issue_action_grant(
         )
     browser = await resolve_browser(session, resolver)
     document = await document_identity(session, browser)
+    if request.get("ref") != DOCUMENT_REF:
+        entry = registry.resolve_ref(session, str(request.get("ref") or ""), document)
+        await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
     return registry.issue_grant(session, document=document, request=request)
 
 
@@ -374,6 +401,7 @@ async def execute_action(
             if ref == DOCUMENT_REF
             else registry.resolve_ref(session, ref, document)
         )
+        await assert_frame_identity_current(browser._internal.client, entry.frame)  # noqa: SLF001
         target = await _actual_target(browser, entry, document)
         if target.get("secret") is True:
             return {
