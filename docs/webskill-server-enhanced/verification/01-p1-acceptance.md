@@ -35,20 +35,27 @@
 - **行为与真实复验**：34 项后端专项测试、4 项会话恢复 hook 测试和 3 项模型边界测试通过。真实 UI 验收注入一次 ticket 404，确认创建两个不同会话并恢复推流，随后模型回复、trace、主题切换和一次真实单击全部通过；仅豁免该注入接口的一条 404，其他控制台错误仍失败。
 - 本机模型服务一度对直接 HTTP 请求也无响应，导致首次完整 UI 复验在模型阶段超时；服务恢复后未改生产代码，同一验收完整通过，不将该环境超时记为代码回归。
 
+### 上游同步复验（2026-11-17，`ff078d3f` / Octop 1.0.3b6）
+
+- `webskill-integration` 通过 merge commit `f0a5c193` 同步官方 `ff078d3f`，P1 功能分支保持不变。唯一冲突位于前端权限映射，保留官方 cloud 权限并加入 WebSkill browser 权限；相关 15 项权限测试通过。
+- 同步后 34 项后端专项、7 项前端会话/模型测试均通过。真实 Chromium 证据更新为 `.artifacts/webskill-p1/688f24a665/result.json`；真实 UI 再次通过一次 404 换建、模型、trace、主题和确认单击。
+- 主 Dashboard 单独构建会清空输出目录中的 WebSkill 子包，使 `/webskill/` 回退到主页面；完整 `make build-frontend` 会依次重建主包与 WebSkill 子包。首次因此产生的 iframe 初始化失败在完整构建后消除，不是上游代码冲突。
+- 全量 `make all PYTEST_JOBS=4` 为 `5907 passed, 45 skipped`；Ruff、1310 个文件的格式检查和 mypy（682 个源码文件）均通过。新组合保持 `candidate`，不标记生产支持。
+
 ## 2. 已通过的验证
 
 | 范围 | 实际结果 | 证据 |
 | --- | --- | --- |
 | 会话、grant、权限和适配层 | 34 项测试通过；覆盖一次性/过期、换值/重放、跨文档/跨用户、ref 隔离、handoff 来源校验、同会话双连接、未认领 idle TTL、活动流断开后完整恢复窗口、错误码白名单、无 browser 权限、审计脱敏 | 下方 pytest 命令 |
 | UI 会话恢复 | 404/410 换建并重试一次、非失效错误不换建、并发创建去重均通过 | `useWebSkillAgentSession.test.ts` 4 项测试 |
-| 真实 Chromium + HTTP/WS | 主文档感知、敏感子树过滤、单击一次、重放拒绝、人工导航接管、权限隔离、关闭逻辑会话不杀 Chrome、真实审计均通过 | `.artifacts/webskill-p1/2e4170192f/result.json` |
+| 真实 Chromium + HTTP/WS | 主文档感知、敏感子树过滤、单击一次、重放拒绝、人工导航接管、权限隔离、关闭逻辑会话不杀 Chrome、真实审计均通过 | `.artifacts/webskill-p1/688f24a665/result.json` |
 | 真实 UI + 本机模型 | 实际菜单点击、一次 ticket 404 后换建并恢复推流、Chatbot 挂载、Console 模型配置、真实 `qwen3.5:9b` 回复、trace 中的 `llm.response` 与 `llm.usage`、主题实时切换、确认后单击一次均通过；无页面脚本错误 | `.artifacts/webskill-p1/ui/ui-result.json` |
 | 新通路认证 | 画面流和 PageAgent 的 URL 参数只有尺寸及一次性 ticket，没有长期 `token` 参数 | 同上；旧工作台 JWT 仅限期兼容 |
 | 普通远程 HTTP | 非回环 HTTP 的 `isSecureContext=false`，显示 HTTPS/OPFS/WebCrypto 拒绝说明，不挂载 WebSkill iframe | `.artifacts/webskill-p1/ui/insecure-result.json` |
 | HTTPS | 临时自签 HTTPS 下的完整模型、trace 和确认单击通过 | `.artifacts/webskill-p1/ui/ui-result-https.json` |
 | 真实鉴权端点 | 实际 HTTP 服务对兼容占位值返回 401；`LLM_REQUEST_FAILED`、请求一次、配置无占位值 | `cd dashboard/webskill && node scripts/model-auth-probe.mjs` |
 | 独立包 | `npm ci` 干净安装、类型检查和 Vite 构建通过；React 19.2.8 单版本树，Console/Monaco 懒加载 | `dashboard/webskill/package-lock.json` |
-| Octop 回归 | R3 修复后 `5663 passed, 40 skipped`；Ruff、格式检查和 mypy（664 个源码文件）均通过 | `make all PYTEST_JOBS=4`，使用已存在的 uv |
+| Octop 回归 | R3 修复后 `5663 passed, 40 skipped`；同步 `ff078d3f` 后 `5907 passed, 45 skipped`；Ruff、格式检查和 mypy 均通过 | `make all PYTEST_JOBS=4`，使用已存在的 uv |
 
 ## 3. 实际执行命令
 
