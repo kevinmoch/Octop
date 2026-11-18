@@ -45,6 +45,55 @@ class OopifSession:
             await self.client.close()
 
 
+@dataclass
+class FrameAttachment:
+    sessions: list[OopifSession]
+    frame_key: str
+
+    @property
+    def client(self) -> Any:
+        return self.sessions[-1].client
+
+    @property
+    def target_id(self) -> str:
+        return self.sessions[-1].target_id
+
+    @property
+    def execution_context_id(self) -> int:
+        return self.sessions[-1].execution_context_id
+
+    @property
+    def url(self) -> str:
+        return self.sessions[-1].url
+
+    @property
+    def title(self) -> str:
+        return self.sessions[-1].title
+
+    async def close(self) -> None:
+        for session in reversed(self.sessions):
+            await session.close()
+
+    async def assert_current(self) -> None:
+        client = self.sessions[0].client
+        session_index = 0
+        for segment in self.frame_key.split(">"):
+            if segment.startswith("oopif:"):
+                session = self.sessions[session_index]
+                session_index += 1
+                client = session.client
+                tree = await client.send("Page.getFrameTree")
+                loader = str(tree.get("frameTree", {}).get("frame", {}).get("loaderId") or "")
+                if f"oopif:{session.target_id}:{loader}" != segment:
+                    raise BrowserAgentError(
+                        "PAGE_ACTION_STALE_REF", "The OOPIF document navigated or was replaced"
+                    )
+            else:
+                from .frames import assert_frame_identity_current
+
+                await assert_frame_identity_current(client, segment)
+
+
 async def _wait_for_document(scoped: Any, context_id: int) -> None:
     for _ in range(20):
         result = await scoped.send(
@@ -66,7 +115,8 @@ async def _attach(client: Any, target_id: str, kind: str = "oopif") -> OopifSess
     session_id = str(attached.get("sessionId") or "")
     if not session_id:
         raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
-    scoped = client.with_session(session_id)
+    scope_owner = getattr(client, "_parent", client)
+    scoped = scope_owner.with_session(session_id)
     try:
         contexts: list[dict[str, Any]] = []
 
@@ -81,21 +131,27 @@ async def _attach(client: Any, target_id: str, kind: str = "oopif") -> OopifSess
         await scoped.enable_domain("Runtime")
         await scoped.enable_domain("DOM")
         await scoped.enable_domain("Page")
+        tree = await scoped.send("Page.getFrameTree")
+        frame = tree.get("frameTree", {}).get("frame", {})
+        root_frame_id = frame.get("id")
+        default_contexts = [
+            candidate
+            for candidate in contexts
+            if candidate.get("auxData", {}).get("isDefault") is True
+        ]
         context = next(
             (
                 candidate
-                for candidate in contexts
-                if candidate.get("auxData", {}).get("isDefault") is True
+                for candidate in default_contexts
+                if candidate.get("auxData", {}).get("frameId") == root_frame_id
             ),
-            None,
+            default_contexts[0] if len(default_contexts) == 1 else None,
         )
         if context is None or not isinstance(context.get("id"), int):
             raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
         context_id = int(context["id"])
         if kind == "target":
             await _wait_for_document(scoped, context_id)
-        tree = await scoped.send("Page.getFrameTree")
-        frame = tree.get("frameTree", {}).get("frame", {})
         loader_id = str(frame.get("loaderId") or "")
         if not loader_id:
             raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
@@ -198,3 +254,27 @@ async def attach_oopif_expected(client: Any, expected: str) -> OopifSession:
             "PAGE_ACTION_STALE_REF", "The OOPIF document navigated or was replaced"
         )
     return session
+
+
+async def attach_frame_expected(client: Any, expected: str) -> FrameAttachment:
+    sessions: list[OopifSession] = []
+    current_client = client
+    try:
+        for segment in expected.split(">"):
+            if segment.startswith("oopif:"):
+                session = await attach_oopif_expected(current_client, segment)
+                sessions.append(session)
+                current_client = session.client
+            else:
+                if not sessions:
+                    raise BrowserAgentError(
+                        "PAGE_ACTION_STALE_REF", "The frame reference is invalid"
+                    )
+                from .frames import assert_frame_identity_current
+
+                await assert_frame_identity_current(current_client, segment)
+        return FrameAttachment(sessions=sessions, frame_key=expected)
+    except Exception:
+        for session in reversed(sessions):
+            await session.close()
+        raise

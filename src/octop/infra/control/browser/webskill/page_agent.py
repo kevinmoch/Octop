@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any, cast
 
 from octop_browser.actions import interact, navigate
@@ -16,12 +17,18 @@ from .frames import (
     assert_frame_identity_current,
     discover_frame_routes,
     frame_identity,
+    frame_scope_path,
     nested_frame_refs,
     projection_document,
-    select_frame_route,
+    select_frame_route_step,
 )
 from .lease import profile_lease
-from .oopif import OopifSession, attach_oopif_expected, attach_oopif_route
+from .oopif import (
+    FrameAttachment,
+    OopifSession,
+    attach_frame_expected,
+    attach_oopif_route,
+)
 from .sessions import (
     DOCUMENT_REF,
     BrowserAgentError,
@@ -253,7 +260,7 @@ async def read_page(
         raise BrowserAgentError("PERCEPTION_FAILED", "Image capture is not available in P1")
     browser = await resolve_browser(session, resolver)
     model_attachment = await attach_model_target(session, browser)
-    attached: OopifSession | None = None
+    attached: FrameAttachment | None = None
     try:
         before = await document_identity(
             session,
@@ -268,46 +275,75 @@ async def read_page(
         if not isinstance(root, dict):
             raise BrowserAgentError("PERCEPTION_FAILED", "The browser document is unavailable")
         routes = discover_frame_routes(root, before.url)
-        route = select_frame_route(routes, scope)
+        route = select_frame_route_step(routes, scope)
+        selected_client = client
+        remaining_path = frame_scope_path(scope)
+        document_prefix: tuple[str, ...] = ()
         if route is not None and route.document is None:
-            attached = await attach_oopif_route(client, route, before.target_id)
-            selected_client = attached.client
-            selected_frame = attached.frame_key
-            selected_url = attached.url
-            selected_title = attached.title
-            raw = await selected_client.send("DOM.getDocument", {"depth": -1})
-            root = raw.get("root", {})
-            if not isinstance(root, dict):
-                raise BrowserAgentError("PERCEPTION_FAILED", "The OOPIF document is unavailable")
-            projected_root = projection_document(root, None)
-            backend_ids = _node_index(root)
-            nested: list[dict[str, str]] = []
+            sessions: list[OopifSession] = []
+            while route is not None and route.document is None:
+                parent_target = before.target_id if not sessions else sessions[-1].target_id
+                attached_session = await attach_oopif_route(selected_client, route, parent_target)
+                sessions.append(attached_session)
+                attached = FrameAttachment(
+                    sessions=sessions,
+                    frame_key=">".join(item.frame_key for item in sessions),
+                )
+                selected_client = attached.client
+                remaining_path = remaining_path[len(route.path) :]
+                document_prefix = (*document_prefix, *route.path)
+                raw = await selected_client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+                root = raw.get("root", {})
+                if not isinstance(root, dict):
+                    raise BrowserAgentError(
+                        "PERCEPTION_FAILED", "The OOPIF document is unavailable"
+                    )
+                routes = discover_frame_routes(root, attached.url)
+                route = select_frame_route_step(
+                    routes,
+                    {"frames": [{"frame": list(remaining_path), "include": ["body"]}]},
+                )
+        local_frame = await frame_identity(selected_client, route) if route is not None else None
+        if route is not None:
+            refreshed = await selected_client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+            refreshed_root = refreshed.get("root", {})
+            if not isinstance(refreshed_root, dict):
+                raise BrowserAgentError("PERCEPTION_FAILED", "The frame snapshot is unavailable")
+            refreshed_routes = discover_frame_routes(
+                refreshed_root, attached.url if attached is not None else before.url
+            )
+            refreshed_route = select_frame_route_step(
+                refreshed_routes,
+                {"frames": [{"frame": list(remaining_path), "include": ["body"]}]},
+            )
+            if (
+                refreshed_route is None
+                or refreshed_route.path != route.path
+                or refreshed_route.owner_backend_node_id != route.owner_backend_node_id
+                or await frame_identity(selected_client, refreshed_route) != local_frame
+            ):
+                raise BrowserAgentError(
+                    "PERCEPTION_FAILED", "The frame changed while its snapshot was being bound"
+                )
+            root = refreshed_root
+            route = refreshed_route
+            routes = refreshed_routes
+        selected_frame = (
+            attached.frame_key + (f">{local_frame}" if local_frame else "")
+            if attached is not None
+            else local_frame or "self"
+        )
+        projected_root = projection_document(root, route)
+        backend_ids = _node_index(root)
+        if attached is not None:
+            parent_path = (*document_prefix, *(route.path if route is not None else ()))
+            prefixed_routes = [
+                replace(candidate, path=(*document_prefix, *candidate.path)) for candidate in routes
+            ]
+            nested = nested_frame_refs(prefixed_routes, parent_path)
+            selected_url = route.url if route is not None and route.url else attached.url
+            selected_title = attached.title if route is None else ""
         else:
-            selected_client = client
-            selected_frame = await frame_identity(client, route)
-            if route is not None:
-                refreshed = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
-                refreshed_root = refreshed.get("root", {})
-                if not isinstance(refreshed_root, dict):
-                    raise BrowserAgentError(
-                        "PERCEPTION_FAILED", "The frame snapshot is unavailable"
-                    )
-                refreshed_routes = discover_frame_routes(refreshed_root, before.url)
-                refreshed_route = select_frame_route(refreshed_routes, scope)
-                if (
-                    refreshed_route is None
-                    or refreshed_route.path != route.path
-                    or refreshed_route.owner_backend_node_id != route.owner_backend_node_id
-                    or await frame_identity(client, refreshed_route) != selected_frame
-                ):
-                    raise BrowserAgentError(
-                        "PERCEPTION_FAILED", "The frame changed while its snapshot was being bound"
-                    )
-                root = refreshed_root
-                route = refreshed_route
-                routes = refreshed_routes
-            projected_root = projection_document(root, route)
-            backend_ids = _node_index(root)
             nested = nested_frame_refs(routes, route.path if route is not None else ())
             selected_url = route.url if route is not None and route.url else before.url
             selected_title = before.title if route is None else ""
@@ -349,22 +385,25 @@ async def read_page(
                 "PERCEPTION_FAILED", "The document changed while it was being perceived"
             )
         if attached is not None:
-            tree = await attached.client.send("Page.getFrameTree")
-            loader = str(tree.get("frameTree", {}).get("frame", {}).get("loaderId") or "")
-            if f"oopif:{attached.target_id}:{loader}" != selected_frame:
+            try:
+                await attached.assert_current()
+            except BrowserAgentError as error:
                 raise BrowserAgentError(
-                    "PERCEPTION_FAILED", "The OOPIF document changed while it was being perceived"
-                )
+                    "PERCEPTION_FAILED", "The frame path changed while it was being perceived"
+                ) from error
         elif selected_frame != await frame_identity(client, route):
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "The frame changed while it was being perceived"
             )
-        if route is None or session.document is None or session.document.key != after.key:
+        if (
+            not frame_scope_path(scope)
+            or session.document is None
+            or session.document.key != after.key
+        ):
             session.refs.clear()
         else:
-            frame_id = "oopif" if attached is not None else selected_frame.partition(":")[0]
             for ref, entry in list(session.refs.items()):
-                if entry.frame.partition(":")[0] == frame_id:
+                if entry.frame == selected_frame:
                     session.refs.pop(ref, None)
         session.document = after
         nodes: list[dict[str, Any]] = []
@@ -421,7 +460,7 @@ async def issue_action_grant(
         if request.get("ref") != DOCUMENT_REF:
             entry = registry.resolve_ref(session, str(request.get("ref") or ""), document)
             if entry.frame.startswith("oopif:"):
-                attached = await attach_oopif_expected(client, entry.frame)
+                attached = await attach_frame_expected(client, entry.frame)
                 await attached.close()
             else:
                 await assert_frame_identity_current(client, entry.frame)
@@ -489,7 +528,7 @@ async def execute_action(
                 "The action was not executed because user control took precedence",
             )
         model_attachment = await attach_model_target(session, browser)
-        attached: OopifSession | None = None
+        attached: FrameAttachment | None = None
         try:
             client = (
                 model_attachment.client
@@ -511,7 +550,7 @@ async def execute_action(
                 else registry.resolve_ref(session, ref, document)
             )
             if entry.frame.startswith("oopif:"):
-                attached = await attach_oopif_expected(client, entry.frame)
+                attached = await attach_frame_expected(client, entry.frame)
                 client = attached.client
                 await client.send("DOM.getDocument", {"depth": -1})
             else:

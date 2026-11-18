@@ -1,6 +1,6 @@
 # P2 实施与真实验证记录
 
-> 状态：🟡 实施中；P2-0～P2-6 已有本地候选证据，但依赖发布、受信 TLS、嵌套 OOPIF 和部署验收仍未收口，不表示 P2 全部能力或生产支持已开放。
+> 状态：🟡 实施中；P2-0～P2-7 已有本地候选证据，但依赖发布、受信 TLS 和部署验收仍未收口，不表示 P2 全部能力或生产支持已开放。
 
 ## 1. P2-0 会话恢复竞态修复（2026-11-17）
 
@@ -93,6 +93,14 @@
 - 本批专项为 **106 passed**，library 全量为 **265 passed, 9 skipped**。该结果覆盖 AC-32/34/45 的本地四观看端场景，不代表多副本或 Kubernetes 容量结论。
 - P2-6 最终全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5947 passed, 45 skipped**（316.17 秒）；Ruff、1319 个文件的格式检查和 mypy（688 个源码文件）均通过。
 
+### P2-7 嵌套 OOPIF（2026-11-18，本地 candidate）
+
+- 新增 `FrameAttachment` 复合 frame 身份，使用 `>` 分隔多层 target/frame；直接 OOPIF key 保持兼容。读取、grant 签发与执行均逐层 attach 并校验 loader，嵌套 key 不回退主文档或坐标。
+- execution context 按 `Page.getFrameTree` 根 frameId 选择，下一层 scoped client 回退到根 CDP 连接创建，避免多层上下文中选错 URL 或禁止二次 scope。ref 只在当前完整 frame key 范围内更新，不再清空其他有效嵌套引用。
+- 真实 Chromium 同时通过 OOPIF→同源 frame 和 OOPIF→OOPIF 的读取与点击，并在嵌套同源 frame 导航后拒绝旧 grant。证据为 `.artifacts/webskill-p1/2bca0ac760/result.json`，同一次执行也再次通过原有 60 秒后台推流与跨进程接管验收。
+- 本项不代表嵌套回放状态机已开放；P3 的逐步 grant 与回放授权仍按后续阶段实施。
+- P2-7 全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5947 passed, 45 skipped**（350.50 秒）；Ruff、1319 个文件的格式检查和 mypy（688 个源码文件）均通过。
+
 ## 6. 已通过的验证
 
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
@@ -139,7 +147,6 @@ PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JO
 
 - 跨进程接管、动作事务及 AC-32/34/45 已有本地候选证据；锁等待、更完整运行指标和目标负载仍需在实际部署中复验，不能据此宣称 AC-14/15/40/51/60 已获生产准入。
 - Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
-- OOPIF 内再嵌套 frame 的下钻与聚合仍未开放；当前真实 UI 证据只覆盖一层 OOPIF。
 - `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977`、`c1a8202`、`c359041`、`1504919` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
 - P3 的逐步授权回放、技能执行和文档产物。
 - LNA 两种拒绝场景已在隔离自签 TLS 下通过；生产受信 TLS 及真实用户授权/拒绝矩阵仍需独立验收，不能将当前证据扩大为所有浏览器和网络拓扑均已通过。

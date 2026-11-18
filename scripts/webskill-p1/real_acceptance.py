@@ -61,7 +61,26 @@ class FixtureHandler(BaseHTTPRequestHandler):
             body = """<!doctype html><html><body><h1>Next frame</h1>
 <button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
 </body></html>"""
-        elif self.path in {"/frame", "/frame?cross=1"}:
+        elif self.path == "/nested-frame-next":
+            body = """<!doctype html><html><body><button>Nested next</button></body></html>"""
+        elif self.path == "/nested-frame":
+            body = """<!doctype html><html><body>
+<button onclick="window.nestedSameClicks=(window.nestedSameClicks||0)+1">Nested same action</button>
+</body></html>"""
+        elif self.path == "/nested-cross":
+            body = """<!doctype html><html><body>
+<button onclick="window.nestedCrossClicks=(window.nestedCrossClicks||0)+1">Nested cross action</button>
+</body></html>"""
+        elif self.path == "/frame?cross=1":
+            body = f"""<!doctype html><html><body>
+<button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
+<input aria-label="Frame search">
+<select aria-label="Frame count"><option value="10">Ten</option><option value="20">Twenty</option></select>
+<div role="button" tabindex="0" aria-label="Frame scroll area" style="display:block;height:200px;overflow:auto"><div style="height:1500px">Scrollable frame</div></div>
+<iframe id="nested-same" src="/nested-frame"></iframe>
+<iframe id="nested-cross" src="http://127.0.0.1:{self.server.server_port}/nested-cross"></iframe>
+</body></html>"""
+        elif self.path == "/frame":
             body = """<!doctype html><html><body>
 <button id="frame-action" onclick="window.frameClicks=(window.frameClicks||0)+1">Frame action</button>
 <input aria-label="Frame search">
@@ -140,9 +159,9 @@ async def browser_value(browser: BrowserSession, expression: str) -> Any:
 
 
 async def oopif_value(browser: BrowserSession, frame_key: str, expression: str) -> Any:
-    from octop.infra.control.browser.webskill.oopif import attach_oopif_expected
+    from octop.infra.control.browser.webskill.oopif import attach_frame_expected
 
-    attached = await attach_oopif_expected(browser._internal.client, frame_key)  # noqa: SLF001
+    attached = await attach_frame_expected(browser._internal.client, frame_key)  # noqa: SLF001
     try:
         result = await attached.client.send(
             "Runtime.evaluate",
@@ -601,6 +620,117 @@ async def accept() -> dict[str, Any]:
                 ):
                     assert time.monotonic() < deadline, "The OOPIF document did not scroll"
                     await asyncio.sleep(0.05)
+
+                nested_same_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "nested-same-read",
+                        "scope": {
+                            "frames": [
+                                {
+                                    "frame": ["iframe#cross-frame", "iframe#nested-same"],
+                                    "include": ["body"],
+                                }
+                            ]
+                        },
+                    },
+                )
+                assert nested_same_perceived["type"] == "perceive-result", nested_same_perceived
+                nested_same_request = {
+                    "ref": nested_same_perceived["targets"][0]["ref"],
+                    "action": "click",
+                }
+                nested_same_key = browser_agent_registry.get(session_id, user_id).refs[
+                    nested_same_request["ref"]
+                ].frame
+                assert nested_same_key.startswith(f"{frame_key}>"), nested_same_key
+                await perform_action(
+                    client,
+                    ws,
+                    headers,
+                    session_id,
+                    "nested-same-click",
+                    nested_same_request["ref"],
+                    "click",
+                )
+                assert await oopif_value(
+                    browser,
+                    frame_key,
+                    "document.getElementById('nested-same').contentWindow.nestedSameClicks || 0",
+                ) == 1
+
+                nested_cross_perceived = await call(
+                    ws,
+                    {
+                        "type": "perceive",
+                        "requestId": "nested-cross-read",
+                        "scope": {
+                            "frames": [
+                                {
+                                    "frame": ["iframe#cross-frame", "iframe#nested-cross"],
+                                    "include": ["body"],
+                                }
+                            ]
+                        },
+                    },
+                )
+                assert nested_cross_perceived["type"] == "perceive-result", nested_cross_perceived
+                nested_cross_request = {
+                    "ref": nested_cross_perceived["targets"][0]["ref"],
+                    "action": "click",
+                }
+                nested_cross_key = browser_agent_registry.get(session_id, user_id).refs[
+                    nested_cross_request["ref"]
+                ].frame
+                assert nested_cross_key.count("oopif:") == 2, nested_cross_key
+                await perform_action(
+                    client,
+                    ws,
+                    headers,
+                    session_id,
+                    "nested-cross-click",
+                    nested_cross_request["ref"],
+                    "click",
+                )
+                assert await oopif_value(
+                    browser, nested_cross_key, "window.nestedCrossClicks || 0"
+                ) == 1
+
+                nested_stale_response = await client.post(
+                    f"/api/browser-agent/sessions/{session_id}/grants",
+                    headers=headers,
+                    json={"request": nested_same_request},
+                )
+                assert nested_stale_response.status_code == 200, nested_stale_response.text
+                nested_stale_grant = nested_stale_response.json()["grant"]
+                await oopif_value(
+                    browser,
+                    frame_key,
+                    "document.getElementById('nested-same').contentWindow.location.assign('/nested-frame-next')",
+                )
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    nested_path = await oopif_value(
+                        browser,
+                        frame_key,
+                        "document.getElementById('nested-same').contentWindow.location.pathname",
+                    )
+                    if nested_path == "/nested-frame-next":
+                        break
+                    await asyncio.sleep(0.05)
+                else:
+                    raise AssertionError("The nested same-origin frame did not navigate")
+                nested_stale = await call(
+                    ws,
+                    {
+                        "type": "execute",
+                        "requestId": "nested-stale",
+                        "request": nested_same_request,
+                        "grant": nested_stale_grant,
+                    },
+                )
+                assert nested_stale["code"] == "PAGE_ACTION_STALE_REF", nested_stale
 
                 stale_oopif_grant = (
                     await client.post(
@@ -1073,6 +1203,7 @@ async def accept() -> dict[str, Any]:
                     "same-origin frame fill, select and scroll have real side effects",
                     "OOPIF attach, default execution context, scoped click and stale-grant rejection",
                     "OOPIF fill, select and scroll have real side effects; back is document-scoped",
+                    "nested same-origin and OOPIF frames support scoped click and stale-grant rejection",
                     "target=_blank moves modelTarget into the new page without losing perception",
                     "back after target=_blank changes only modelTarget history, not the base page",
                     "target workset overflow does not move modelTarget or hide the real click",

@@ -95,7 +95,7 @@ def discover_frame_routes(root: dict[str, Any], page_url: str) -> list[FrameRout
     return routes
 
 
-def select_frame_route(routes: list[FrameRoute], scope: object) -> FrameRoute | None:
+def frame_scope_path(scope: object) -> tuple[str, ...]:
     if not isinstance(scope, dict):
         raise BrowserAgentError("PERCEPTION_FAILED", "Perception scope must be an object")
     if "frames" not in scope:
@@ -103,7 +103,7 @@ def select_frame_route(routes: list[FrameRoute], scope: object) -> FrameRoute | 
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "Perception is restricted to the document body"
             )
-        return None
+        return ()
     frames = scope.get("frames")
     if not isinstance(frames, list) or len(frames) != 1 or not isinstance(frames[0], dict):
         raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
@@ -120,11 +120,32 @@ def select_frame_route(routes: list[FrameRoute], scope: object) -> FrameRoute | 
     if len(path) > 8:
         raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
     if path in {(), ("self",)}:
+        return ()
+    return path
+
+
+def select_frame_route(routes: list[FrameRoute], scope: object) -> FrameRoute | None:
+    path = frame_scope_path(scope)
+    if not path:
         return None
     route = next((candidate for candidate in routes if candidate.path == path), None)
     if route is None:
         raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
     return route
+
+
+def select_frame_route_step(routes: list[FrameRoute], scope: object) -> FrameRoute | None:
+    path = frame_scope_path(scope)
+    if not path:
+        return None
+    candidates = [
+        candidate
+        for candidate in routes
+        if len(candidate.path) <= len(path) and path[: len(candidate.path)] == candidate.path
+    ]
+    if not candidates:
+        raise BrowserAgentError("PERCEPTION_SUBTREE_OUT_OF_SCOPE", FRAME_SCOPE_ERROR)
+    return max(candidates, key=lambda candidate: len(candidate.path))
 
 
 def nested_frame_refs(
