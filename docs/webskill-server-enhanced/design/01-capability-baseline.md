@@ -37,7 +37,7 @@ R0 不修改既有 FR/AC 的通过状态；新增/调整需求必须按需求变
 | 已发布技能跨会话执行 | candidate（R1 新会话重新读取/执行） | 保留 | R1 |
 | `pageTabs` | candidate（R2A 真实 UI+模型通过） | 保留 | R2A |
 | `pagePerceptionPaging` | candidate（segment 1→cursor→segment 2 真实通过） | 保留 | R2A |
-| PDF 直传/逐页 | partial（pypdf 文本回退；逐页/渲染待补） | 实现 | R2B |
+| PDF 直传/逐页 | candidate（真实 Chatbot 附件文本；渲染/图片投放待补） | 保留 | R2B |
 | `pageImage` | candidate（真实 UI+模型主文档取像） | 保留 | R2B |
 | `downloads` | partial（会话级实现；真实下载验收待补） | 实现（仅当前会话已完成项） | R2B |
 | `remoteImage` | unsupported | 默认不支持；独立 SSRF 评审后另议 | R2C |
@@ -173,3 +173,7 @@ R1 已完成本地 candidate（真实 `qwen3.5:9b`）。R2A 进入条件：
 - `pageTabs`、`pagePerceptionPaging`、target/frame 矩阵的端口合同和安全边界确认；
 - 固定模板候选、录制回放不得作为 R2A 的证据；
 - R2B/R2C 按 R0 决策和独立安全评审进入；R2C 默认不支持。
+
+## 9. R2C 高风险能力决策
+
+remoteImage、WebOffice、WebOfficeTemplate、DWG、页面声明技能/WebMCP 均为 `unsupported`；远程 MCP 为 `not-applicable`。详见 [R2C 决策](../verification/07-r2c-high-risk-decisions.md)。没有实现任意 URL 抓取、requestkey 或 DWG 解析。

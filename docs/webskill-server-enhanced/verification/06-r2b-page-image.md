@@ -1,7 +1,7 @@
 # R2B 页面图片：真实 UI + 模型验收
 
-> 状态：🟢 pageImage 本地 candidate；🟡 PDF/downloads 仍未完成。  
-> 日期：2026-11-19  
+> 状态：🟢 pageImage 本地 candidate；🟡 PDF/downloads 仍未完成。
+> 日期：2026-11-19
 > 模型：本地 `qwen3.5:9b`；证据：`.artifacts/webskill-p1/ui/ui-result-r2b-page-image.json`。
 
 ## 1. 实现
@@ -80,7 +80,8 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - 宿主 `pdfExtractor` 通过 bridge 调用该端点；未接 `pdfDocumentReader`。
 - 测试：`tests/unit/api/test_webskill_pdf.py` 2 passed（文本、页数、坏 base64、跨源拒绝）。
 
-**仍缺**：PDF 真实附件 UI/渲染验收。`pdfjs-dist@6.5.438` 客户端 `pdfDocumentReader` 已接（逐页 text/images/render），但本轮没有用真实 PDF 附件走 Chatbot 读取；服务端 pypdf 端点只证明文本回退。因此 `pdf-input` 保持 `partial`，R2B 不整体通过。
+**已补真实附件验收**：Chatbot 上传 `bulletin.pdf`，真实模型调用 `read_document`，`pdfjs-dist@6.5.438` reader 的 PDF 文本进入模型上下文（`pdfTextObserved=true`）；`pdf-input` 升为 candidate。
+**仍缺**：PDF 整页渲染图/图片投放、加密/超大 PDF、取消的真实 UI 矩阵。
 
 ## 7. downloads
 

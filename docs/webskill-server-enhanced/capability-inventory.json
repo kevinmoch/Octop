@@ -306,15 +306,15 @@
         "pdfDocumentReader"
       ],
       "uiSurface": "Chatbot",
-      "status": "partial",
-      "decision": "implement",
+      "status": "candidate",
+      "decision": "keep",
       "phase": "R2B",
       "requiresSdkChange": false,
       "currentEvidence": [
-        "dashboard/webskill/src/pdf.ts",
+        ".artifacts/webskill-p1/ui/ui-result-r2b-pdf-attachment.json",
         "tests/unit/api/test_webskill_pdf.py"
       ],
-      "notes": "pdfjs-dist 6.5.438 客户端逐页 text/images/render 已接；pypdf 服务端文本端点保留；真实 PDF 附件/渲染验收未完成。"
+      "notes": "真实 Chatbot PDF 附件读取，pdfjs reader 文本进入模型上下文；渲染页/图片投放未单测。"
     },
     {
       "id": "page-image",
