@@ -177,3 +177,7 @@ R1 已完成本地 candidate（真实 `qwen3.5:9b`）。R2A 进入条件：
 ## 9. R2C 高风险能力决策
 
 remoteImage、WebOffice、WebOfficeTemplate、DWG、页面声明技能/WebMCP 均为 `unsupported`；远程 MCP 为 `not-applicable`。详见 [R2C 决策](../verification/07-r2c-high-risk-decisions.md)。没有实现任意 URL 抓取、requestkey 或 DWG 解析。
+
+## 10. R3 产物与 viewer
+
+DOCX/PPTX/XLSX/PDF/大屏与 isolated viewer 的切片证据见 [08-r3-artifact-journey.md](../verification/08-r3-artifact-journey.md)。文档场景仍为脚本化模型；真实模型文档任务、Console 审计串联、刷新/重开/重启恢复未完成。

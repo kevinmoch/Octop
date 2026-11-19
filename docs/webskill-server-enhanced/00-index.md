@@ -22,6 +22,7 @@
 | [verification/05-r2a-page-tabs-paging.md](verification/05-r2a-page-tabs-paging.md) | R2A pageTabs/分页实现与未完成验收 |
 | [verification/06-r2b-page-image.md](verification/06-r2b-page-image.md) | R2B pageImage 真实 UI+模型验收、PDF/downloads 与未完成项 |
 | [verification/07-r2c-high-risk-decisions.md](verification/07-r2c-high-risk-decisions.md) | R2C remoteImage/WebOffice/DWG/页面技能默认不支持决策 |
+| [verification/08-r3-artifact-journey.md](verification/08-r3-artifact-journey.md) | R3 产物交付/隔离 viewer 切片证据与未完成边界 |
 
 ## 代码归属
 
