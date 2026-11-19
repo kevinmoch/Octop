@@ -30,7 +30,7 @@ class FakeCaptureClient:
         if method == "Target.getTargets":
             return {"targetInfos": [{"targetId": "target-1", "type": "page"}]}
         if method == "Page.getFrameTree":
-            return {"frameTree": {"frame": {"loaderId": "loader-1"}}}
+            return {"frameTree": {"frame": {"id": "frame-1", "loaderId": "loader-1"}}}
         if method == "Runtime.evaluate":
             return {"result": {"value": {"url": "https://example.test/", "title": "Example"}}}
         if method == "DOM.scrollIntoViewIfNeeded":
@@ -157,3 +157,26 @@ def test_capture_image_uses_oopif_client(monkeypatch) -> None:
     )
     assert result["result"]["data"]
     assert closed == [True]
+
+
+def test_capture_image_uses_same_origin_frame_absolute_box() -> None:
+    client = FakeCaptureClient()
+    current = _session()
+    key = current.document.key if current.document is not None else ""
+    current.refs = {
+        "ws_ref": PageRef(
+            backend_node_id=5,
+            document_key=key,
+            frame="frame-1:loader-1",
+        )
+    }
+    result = asyncio.run(
+        capture_image(
+            current,
+            {"ref": "ws_ref", "maxBytes": 1024},
+            registry=BrowserAgentRegistry(),
+            resolver=_resolver(FakeCaptureBrowser(client)),
+        )
+    )
+    assert result["result"]["width"] == 100
+    assert "Page.captureScreenshot" in client.calls

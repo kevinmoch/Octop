@@ -335,7 +335,7 @@
         "tests/unit/api/test_webskill_capture.py",
         ".artifacts/webskill-p1/ui/ui-result-r2b-page-image.json"
       ],
-      "notes": "R2B 主文档真实取像通过；OOPIF 取像已接并单测，same-origin child frame 仍明确不支持。"
+      "notes": "R2B 主文档真实取像通过；OOPIF 与 same-origin child frame 取像已接并单测。"
     },
     {
       "id": "downloads",

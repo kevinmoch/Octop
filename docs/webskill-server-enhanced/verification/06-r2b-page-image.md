@@ -9,7 +9,7 @@
 - 后端 `capture_image`：
   - 只接受一个来自 fresh `perceive_page` 的 ref 与正字节预算；
   - `DOM.scrollIntoViewIfNeeded` + `DOM.getBoxModel` + `Page.captureScreenshot`；
-  - 主文档真实通过；OOPIF 通过 `attach_frame_expected` 在目标 frame client 上取像并关闭 attachment；same-origin child frame 仍明确返回 unsupported；
+  - 主文档真实通过；OOPIF 通过 `attach_frame_expected` 在目标 frame client 上取像并关闭 attachment；same-origin child frame 使用当前 CDP client 的绝对 box 取像；
   - 超过预算返回 failure，不截断；
   - 不暴露服务器路径、选择器、URL 或任意 CDP。
 - WebSocket 协议新增 `capture-image` / `capture-image-result`；transport 解析。

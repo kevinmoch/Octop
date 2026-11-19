@@ -473,14 +473,7 @@ async def capture_image(
             attached = await attach_frame_expected(client, entry.frame)
             client = attached.client
         elif entry.frame != "self":
-            return {
-                "type": "capture-image-result",
-                "result": {
-                    "id": ref,
-                    "reason": "Page images inside a same-origin child frame are not supported by this host yet",
-                    "triedLevels": ["cdp-screenshot"],
-                },
-            }
+            await assert_frame_identity_current(client, entry.frame)
         await client.send("DOM.scrollIntoViewIfNeeded", {"backendNodeId": entry.backend_node_id})
         box = await client.send("DOM.getBoxModel", {"backendNodeId": entry.backend_node_id})
         quad = box.get("model", {}).get("border", [])
