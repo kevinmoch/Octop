@@ -27,6 +27,9 @@ config:
   timezone: Asia/Shanghai
   # 留空则使用 https://<ingress.host>。有多个来源时写成逗号分隔的完整地址。
   corsOrigins: ""
+  # 逗号分隔的代理来源 CIDR，例如 10.244.0.0/16。必须填写真实代理网段。
+  # 留空保持 Uvicorn 只信回环代理的默认值，禁止设为 "*"。
+  forwardedAllowIps: ""
 
 # Secret 名字。内容仍要事先 kubectl create，chart 不会生成口令。
 secrets:
@@ -67,6 +70,14 @@ resources:
   limits:
     cpu: "2"
     memory: 4Gi
+
+# 浏览器 profile 和其他 Octop 本机文件。多副本保持 false；持久卷只支持单副本。
+# Pod 重建后浏览器 profile 可以保留，但内存中的 PageAgent 会话仍必须重建。
+persistence:
+  enabled: false
+  size: 20Gi
+  # 空字符串使用集群默认 StorageClass。
+  storageClass: ""
 
 # 自带 pgvector。改用托管库时 enabled 设为 false，并填写下面的 database.host。
 # 托管库要预先允许 CREATE EXTENSION vector。

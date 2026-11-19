@@ -11,24 +11,70 @@ export type RuntimeLlmEntry = RuntimeConfig["llm"]["entries"][number];
 type AddressSpace = "public" | "local" | "loopback";
 type LnaPermission = "local-network" | "loopback-network";
 
+function ipv4Space(values: number[]): AddressSpace {
+  if (values.length !== 4 || values.some((part) => part > 255)) return "public";
+  if (values[0] === 127) return "loopback";
+  if (
+    values[0] === 0 ||
+    values[0] === 10 ||
+    (values[0] === 100 && values[1] >= 64 && values[1] <= 127) ||
+    (values[0] === 172 && values[1] >= 16 && values[1] <= 31) ||
+    (values[0] === 192 && values[1] === 168) ||
+    (values[0] === 169 && values[1] === 254)
+  )
+    return "local";
+  return "public";
+}
+
+function ipv6Words(host: string): number[] | undefined {
+  const halves = host.split("::");
+  if (halves.length > 2) return;
+  const left = halves[0] ? halves[0].split(":") : [];
+  const right = halves[1] ? halves[1].split(":") : [];
+  if (
+    [...left, ...right].some((part) => !/^[\da-f]{1,4}$/.test(part)) ||
+    (halves.length === 1 && left.length !== 8) ||
+    left.length + right.length >= 8
+  )
+    return;
+  const words = [
+    ...left,
+    ...(halves.length === 2
+      ? Array.from({ length: 8 - left.length - right.length }, () => "0")
+      : []),
+    ...right,
+  ];
+  return words.map((part) => Number.parseInt(part, 16));
+}
+
 function addressSpace(hostname: string): AddressSpace {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host === "::1")
-    return "loopback";
+  const host = hostname
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return "loopback";
   const octets = host.split(".");
-  if (octets.length === 4 && octets.every((part) => /^\d+$/.test(part))) {
-    const values = octets.map(Number);
-    if (values[0] === 127) return "loopback";
+  if (octets.length === 4 && octets.every((part) => /^\d+$/.test(part)))
+    return ipv4Space(octets.map(Number));
+  const words = ipv6Words(host);
+  if (words) {
+    if (words.slice(0, 7).every((word) => word === 0) && words[7] === 1)
+      return "loopback";
+    if (words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff)
+      return ipv4Space([
+        words[6] >> 8,
+        words[6] & 255,
+        words[7] >> 8,
+        words[7] & 255,
+      ]);
     if (
-      values[0] === 10 ||
-      (values[0] === 172 && values[1] >= 16 && values[1] <= 31) ||
-      (values[0] === 192 && values[1] === 168) ||
-      (values[0] === 169 && values[1] === 254)
+      words.every((word) => word === 0) ||
+      (words[0] & 0xfe00) === 0xfc00 ||
+      (words[0] & 0xffc0) === 0xfe80
     )
       return "local";
   }
-  if (host.endsWith(".local") || /^f[cd]/.test(host) || /^fe[89ab]/.test(host))
-    return "local";
+  if (host.endsWith(".local")) return "local";
   return "public";
 }
 

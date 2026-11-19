@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -2705,7 +2705,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.9,<2" },
     { name = "mss", marker = "extra == 'desktop'", specifier = ">=9.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
-    { name = "octop-browser", specifier = ">=1.0.0" },
+    { name = "octop-browser", path = "wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl" },
     { name = "octop-gateway", specifier = ">=1.0.3" },
     { name = "octop-harness", extras = ["all"], specifier = ">=1.0.10" },
     { name = "octop-memory", specifier = ">=1.0.4" },
@@ -2763,18 +2763,33 @@ dev = [
 
 [[package]]
 name = "octop-browser"
-version = "1.0.0"
-source = { registry = "https://pypi.org/simple" }
+version = "1.1.0+webskill.local.1"
+source = { path = "wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl" }
 dependencies = [
     { name = "aiohttp" },
     { name = "mcp" },
     { name = "pydantic" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9c/a6/a89e5d3c6b27bb5dc310290f52fb85a3d1f59279b7854ebd5c9973855651/octop_browser-1.0.0.tar.gz", hash = "sha256:a7e12bcf7ca1541d6c81e05d88ecb6a3aaf988ee648fe05922d06f94de18210c", size = 455743, upload-time = "2026-09-24T10:14:17.347Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/2a/16ab16287ea1e3f2357c12ccfe1c90dd0ec7af70d71605c54933c5e7db86/octop_browser-1.0.0-py3-none-any.whl", hash = "sha256:9856d0a3449ff8fb63dc86acb6cf51e492e3d70d77f7f9a35c1802c99566a174", size = 108073, upload-time = "2026-09-24T10:14:15.855Z" },
+    { filename = "octop_browser-1.1.0+webskill.local.1-py3-none-any.whl", hash = "sha256:d4861580231ecad869dba9ca22b17f719745d19d9e230dee8a6a28c339d12001" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
+    { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.5" },
+    { name = "mcp", specifier = ">=1.9,<2" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.9" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
+    { name = "websockets", specifier = ">=12.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "octop-gateway"

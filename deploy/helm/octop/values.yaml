@@ -25,6 +25,9 @@ config:
   timezone: Asia/Shanghai
   # Empty becomes https://<ingress.host>.
   corsOrigins: ""
+  # Comma-separated proxy source CIDRs, for example 10.244.0.0/16.
+  # Empty keeps Uvicorn's loopback-only default. Never use "*" here.
+  forwardedAllowIps: ""
 
 secrets:
   database: octop-pg
@@ -62,6 +65,14 @@ resources:
   limits:
     cpu: "2"
     memory: 4Gi
+
+# Browser profiles and other local Octop files. Keep disabled for multiple
+# replicas; a persistent home is supported only with replicaCount=1.
+# The in-memory browser-agent session is still lost when its Pod is replaced.
+persistence:
+  enabled: false
+  size: 20Gi
+  storageClass: ""
 
 # Bundled pgvector. Set enabled to false and database.host for a managed database.
 # Managed databases must already allow CREATE EXTENSION vector.

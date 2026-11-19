@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "octop": {
+        "version": "1.0.3b6",
+        "commit": "17401dfe",
+        "workingTree": "P2-10-local"
+      },
+      "harness": "1.0.10",
+      "browser": {
+        "commit": "42d6f7c2c59e6617a84658d615a08ce2bfb5f0cf",
+        "version": "1.1.0+webskill.local.1",
+        "releaseStatus": "local-fork",
+        "source": "wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl",
+        "wheelSha256": "d4861580231ecad869dba9ca22b17f719745d19d9e230dee8a6a28c339d12001",
+        "editable": false
+      },
+      "sdk": "0.29.0",
+      "chatbot": "0.26.0",
+      "console": "0.22.5",
+      "chromium": "156.0.8078.79",
+      "deployment": {
+        "replicas": 1,
+        "storage": "pvc"
+      },
+      "status": "candidate",
+      "evidence": [
+        ".artifacts/webskill-p1/k8s/persistent-result.json",
+        ".artifacts/webskill-p1/aa2c71370a/result.json",
+        ".artifacts/webskill-p1/aa2c71370a/stream.json",
+        ".artifacts/webskill-p1/ui/ui-result-trusted-lna-permission.json",
+        ".artifacts/webskill-p1/ui/ui-result-trusted-lna-policy.json"
+      ],
+      "pending": [
+        "ordinary trusted TLS UI passed evidence",
+        "full regression on the frozen P2 commit",
+        "real-user LNA and browser/network topology matrix"
+      ]
+    },
+    {
+      "octop": {
+        "version": "1.0.3b6",
+        "commit": "17401dfe",
+        "workingTree": "P2-10-local"
+      },
+      "harness": "1.0.10",
+      "browser": {
+        "commit": "42d6f7c2c59e6617a84658d615a08ce2bfb5f0cf",
+        "version": "1.1.0+webskill.local.1",
+        "releaseStatus": "local-fork",
+        "source": "wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl",
+        "wheelSha256": "d4861580231ecad869dba9ca22b17f719745d19d9e230dee8a6a28c339d12001",
+        "editable": false
+      },
+      "sdk": "0.29.0",
+      "chatbot": "0.26.0",
+      "console": "0.22.5",
+      "chromium": "156.0.8078.79",
+      "deployment": {
+        "replicas": 2,
+        "storage": "emptyDir",
+        "sessionAffinity": "ingress-cookie"
+      },
+      "status": "candidate",
+      "evidence": [
+        ".artifacts/webskill-p1/k8s/emptyDir-result.json"
+      ],
+      "pending": [
+        "full regression on the frozen P2 commit",
+        "cross-Pod shared writes are not supported"
+      ]
+    }
+  ]
+}

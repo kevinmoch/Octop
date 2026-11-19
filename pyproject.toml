@@ -37,7 +37,8 @@ dependencies = [
     "acme>=5.6.0",
     "josepy>=2.2.0",
     "boto3>=1.40.61",
-    "octop-browser>=1.0.0",
+    # Local Octop × WebSkill integration fork; replace with a registry version before an Octop release.
+    "octop-browser==1.1.0+webskill.local.1",
     "playwright>=1.40",
     "psycopg[binary]>=3.2",
     "langgraph-checkpoint-postgres>=2.0",
@@ -106,6 +107,9 @@ dev = [
 
 [project.scripts]
 octop = "octop.cli.main:cli"
+
+[tool.uv.sources]
+octop-browser = { path = "wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/octop"]

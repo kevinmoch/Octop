@@ -22,9 +22,9 @@ def test_control_owner_is_persisted_and_cleared(tmp_path: Path, monkeypatch) -> 
 
         from octop_browser.lease import write_control_owner
 
+        ownership.set_control_owner("user-1", "agent")
         write_control_owner("user-1", "user")
-        ownership._CONTROL_OWNERS.pop("user-1", None)
         assert ownership.control_owner_for("user-1") == "user"
         ownership.clear_control_owner("user-1")
     finally:
-        ownership._CONTROL_OWNERS.pop("user-1", None)
+        ownership.clear_control_owner("user-1")

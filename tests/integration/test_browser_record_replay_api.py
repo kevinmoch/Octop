@@ -107,11 +107,16 @@ async def test_record_replay_start_returns_503_when_daemon_fails(env: Any) -> No
     assert body["error"]["details"]["recordReplay"]["error"] == "Daemon did not start"
 
 
-async def test_record_replay_start_rejects_user_takeover(env: Any, monkeypatch: Any) -> None:
-    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+async def test_record_replay_start_rejects_user_takeover(
+    env: Any, monkeypatch: Any, tmp_path: Any
+) -> None:
+    from octop_browser.settings import settings as browser_settings
+
+    from octop.infra.control.browser.webskill import ownership
 
     client, _srv, auth = env
-    monkeypatch.setitem(_CONTROL_OWNERS, "user-1", "user")
+    monkeypatch.setattr(browser_settings, "profiles_dir", tmp_path / "browser-profiles")
+    ownership.set_control_owner("user-1", "user")
     with patch(
         "octop.api.routers.browser.record_replay.ensure_record_daemon",
         new=AsyncMock(),
@@ -307,16 +312,18 @@ async def test_replay_stops_when_user_takes_control(tmp_path, monkeypatch) -> No
     from octop_browser.record.models import RecordingManifest, SemanticStep, StepsDocument
     from octop_browser.record.settings import RecordReplaySettings
     from octop_browser.record.store import RecordingStore
+    from octop_browser.settings import settings as browser_settings
 
     from octop.api.routers.browser import record_replay
-    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+    from octop.infra.control.browser.webskill import ownership
 
     calls: list[str] = []
-    monkeypatch.setitem(_CONTROL_OWNERS, "user-1", "agent")
+    monkeypatch.setattr(browser_settings, "profiles_dir", tmp_path / "browser-profiles")
+    ownership.set_control_owner("user-1", "agent")
 
     async def navigate(url: str) -> ToolResult:
         calls.append(url)
-        _CONTROL_OWNERS["user-1"] = "user"
+        ownership.set_control_owner("user-1", "user")
         return ToolResult(
             success=True,
             content="ok",

@@ -101,8 +101,38 @@
 - 本项不代表嵌套回放状态机已开放；P3 的逐步 grant 与回放授权仍按后续阶段实施。
 - P2-7 全量 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5947 passed, 45 skipped**（350.50 秒）；Ruff、1319 个文件的格式检查和 mypy（688 个源码文件）均通过。
 
+### P2-8 部署、受信代理与持久化（2026-11-18，本地 candidate）
+
+- Helm 默认保持每 Pod `emptyDir`；新增单副本 `persistence.enabled`、独立 PVC 和 `helm.sh/resource-policy: keep`，多副本共用本地持久目录在模板渲染时拒绝。`config.forwardedAllowIps` 仅接受显式代理 CIDR，模板拒绝 `*`。
+- kind `v1.37.0`、Ingress NGINX `1.15.1`、真实 Octop/Chromium/PostgreSQL 已部署。真实验收通过一次性 ticket 启动服务器 Chromium，再用受限 PageAgent 读取和点击 fixture，不直接绕过服务边界操作 CDP。
+- 单副本 PVC 的真实证据为 `.artifacts/webskill-p1/k8s/persistent-result.json`：Pod UID 更换、旧 PageAgent 会话返回 404、删除前 Cookie 已落盘、替换后仍读取 `signed-in` 且可继续执行动作。该证据不表示旧内存会话被恢复，也不表示多副本共享锁。
+- 实际部署发现老版本 Uvicorn 将代理 HTTPS 在 WS scope 中重写为 `wsss`，原有仅识别 `wss` 的检查会拒绝握手。`check_websocket_origin` 已显式归一化 `https/wss/wsss`，非安全 scheme 仍拒绝；`tests/unit/api/test_webskill_http.py` 合计 **20 passed**，并已在加载前直接断言镜像内包含修复。
+- 双副本 `emptyDir` 的真实证据为 `.artifacts/webskill-p1/k8s/emptyDir-result.json`：同一 `OCTOP_AFFINITY` 下重复读取同一会话成功，删除所属 Pod 后旧会话 404，另一副本读取 `anonymous` 并可重新登录和操作。测试身份在故障切换前预置；本项不验证动态用户复制，也不宣称跨 Pod 文件锁。
+- 历史普通 TLS 成功声明因 `ui-result-https.json` 被 LNA 覆盖而撤销；当前独立复验见 P2-10，旧文件不再充当该链路证据。
+- 两种 LNA 拒绝复验均使用局域网 HTTPS Origin 和受信证书，未启用 `ignore_https_errors`：`ui-result-trusted-lna-permission.json` 与 `ui-result-trusted-lna-policy.json` 均为 `status=passed`、`lnaDenied=true`、`structuredErrorVisible=true`、`modelRequests=0`。
+
+### P2-9 本地 fork 与依赖 pin（2026-11-18）
+
+- 用户决定不再向远程推送或修改上游 PR。`TencentCloud/octop-browser#26` 已关闭，远程功能分支已删除；本地提交保留。
+- 本地 fork 版本为 `1.1.0+webskill.local.1`，明确不是上游正式版本。`mcp` 依赖范围修正为 `>=1.9,<2`。
+- 本地 fork 的真实浏览器验收已通过，证据为 `.artifacts/webskill-p1/aa2c71370a/result.json`：嵌套 frame、target、grant、接管、daemon 和审计均通过。四个观看端各收到 408 帧、`uniquePayloads=2`，p95 帧间隔低于 0.159 秒，证据为同目录 `stream.json`。
+- 本节其余历史测试数字只对应历史工作树；最终数字以 P2-10 冻结记录为准。
+
+### P2-10 最终评审整改（2026-11-18，本地代码冻结候选）
+
+- fork 版本提交固定为 `42d6f7c2c59e6617a84658d615a08ce2bfb5f0cf`；`scripts/webskill-p1/build_local_browser.py` 要求 HEAD 与该提交一致、工作树干净，并使用提交时间重建 wheel。两次重建 SHA-256 均为 `d4861580231ecad869dba9ca22b17f719745d19d9e230dee8a6a28c339d12001`。
+- Octop 改为引用 `wheelhouse/octop_browser-1.1.0+webskill.local.1-py3-none-any.whl`，`uv.lock` 已包含同一 SHA-256；`uv sync --frozen --no-install-project` 与独立 wheel 非 editable 安装通过，后者全量 **265 passed, 9 skipped**。Docker 构建显式复制 wheelhouse，不再依赖构建机上的目录源码。
+- `control_owner_for` 每次读取共享 owner 文件，移除进程内旧状态；真实文件切换回归通过。旧 `_CONTROL_OWNERS` 测试均已改为实际文件状态。相关录制/接管/中间件专项 **20 passed**。
+- LNA 主机分类补齐 `localhost.`、浏览器规范化 IPv4 简写、IPv4-mapped IPv6 与 CGNAT；模型专项 **7 passed**，TypeScript 通过。普通域名解析后的地址空间仍由浏览器在连接时校验，应用层不伪造 DNS 解析结论。
+- UI 验收按普通 HTTPS、受信 TLS、LNA permission/policy 分文件保存，不再相互覆盖。
+- 普通受信 TLS 的最新真实结果为 **未通过**：证书、登录、会话恢复与推流已进入，但模型回复等待 90 秒超时，`.artifacts/webskill-p1/ui/ui-result-trusted.json` 为 `failed`；直接最小模型请求也在 45 秒内无响应。未启用忽略证书错误，不能将本次结果记为通过。
+- **最终评审允许启动 P3；普通受信 TLS 仍待模型恢复后复验。** P2 是本地代码候选，不宣称生产验收完成。
+- 早期完整提交门禁为 **5953 passed, 2 failed, 83 skipped**；两个失败均为缺失 `local-embedding` 可选依赖后的知识库行为，不涉及浏览器/候选实现。证据保留为 `.artifacts/webskill-local/p2-optional-deps-failed.log`。通过 `uv sync --frozen --extra local-embedding` 恢复锁定依赖后，相关文件 **52 passed**；未修改或禁用既有测试。
+- 依赖恢复后的最终 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5957 passed, 45 skipped**（384.54 秒），Ruff、格式和 mypy 均通过，日志为 `.artifacts/webskill-local/make-all-restored-final.log`。此前 Laya 健康检查单次时序失败已独立复跑通过，未修改其测试。
+
 ## 6. 已通过的验证
 
+- P2-8 本轮 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5951 passed, 45 skipped**（427.87 秒）；Ruff、格式和 mypy 通过，日志为 `.artifacts/webskill-p1/make-all-p2-final.log`。该结果覆盖当前工作树，不替代正式发布、pin 和非 editable 验证。
 - `useWebSkillAgentSession.test.ts` 共 8 项：404/410 换建、非失效错误不换建、普通并发创建去重、并发 404 换建去重、迟到旧 404 忽略，以及关闭/卸载时迟到 create 的删除。
 - `WebSkillFrame.test.tsx` 1 项组件/hook 集成测试覆盖旧 iframe 迟到 404；`transport.test.ts` 2 项覆盖 SDK frame 下钻/聚合与 `WRITE_LOCKED` 透传；`model.test.ts` 4 项模型边界测试（含 LNA 拒绝时不调用 fetch）继续通过，前端合计 15 项。TypeScript、ESLint 和 Prettier 检查通过。
 - 真实 UI 重新执行一次 ticket 404 注入，确认换建后恢复推流，模型回复、Console trace 和主题切换均通过；主页面、同源 frame、OOPIF 各一次真实单击，`pageErrors` 为空。最新证据为 `.artifacts/webskill-p1/ui/ui-result.json`，`confirmedRealClickCount=3`、`confirmedSameOriginFrameClickCount=1`、`confirmedOopifClickCount=1`，WS query 仅有 width/height/ticket。
@@ -146,7 +176,7 @@ PATH="/Users/mochunhui/Git/octop-browser/.tools/uv/bin:$PATH" make all PYTEST_JO
 ## 7. 尚未开放
 
 - 跨进程接管、动作事务及 AC-32/34/45 已有本地候选证据；锁等待、更完整运行指标和目标负载仍需在实际部署中复验，不能据此宣称 AC-14/15/40/51/60 已获生产准入。
-- Kubernetes 亲和/持久化矩阵未完成；多副本与 `emptyDir` 继续 blocked。
-- `e34bbdd`、`9b18040`、`927bfe3`、`389b775`、`862e977`、`c1a8202`、`c359041`、`1504919` 未发布、未锁定到 Octop 依赖；干净 CI、部署和生产支持不能依赖本机 editable 环境。
+- Kubernetes 单副本 PVC 与双副本 `emptyDir` 已有真实证据，但仅标记 `candidate`；正式发布/pin 前不扩大为生产支持。
+- 本阶段已改用本地 fork `1.1.0+webskill.local.1` 与 `editable=false` 路径 pin，不再等待上游审批；上游 PR `#26` 已关闭，远程功能分支已删除。该本地版本仍需完成最终真实浏览器、全量和部署复验，不能当成上游正式发布或生产默认依赖。
 - P3 的逐步授权回放、技能执行和文档产物。
-- LNA 两种拒绝场景已在隔离自签 TLS 下通过；生产受信 TLS 及真实用户授权/拒绝矩阵仍需独立验收，不能将当前证据扩大为所有浏览器和网络拓扑均已通过。
+- 受信 TLS 普通链路和两种 LNA 拒绝链路已完成隔离验收；真实用户授权/拒绝矩阵及其他浏览器和网络拓扑仍需按兼容矩阵逐项验证，不能将当前证据扩大为所有环境均已通过。

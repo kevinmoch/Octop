@@ -21,6 +21,16 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / ".artifacts" / "webskill-p1" / "ui"
 OUT.mkdir(parents=True, exist_ok=True)
 BASE_URL = os.environ.get("WEBSKILL_P1_UI_URL", "http://127.0.0.1:18088")
+MODEL_TIMEOUT_MS = int(os.environ.get("WEBSKILL_P1_MODEL_TIMEOUT_MS", "90000"))
+
+
+def safe_error(error: BaseException | str) -> str:
+    text = str(error)
+    return re.sub(
+        r"(?i)(authorization:\s*bearer\s+)[^\s]+",
+        r"\1[REDACTED]",
+        text,
+    )[:2000]
 
 
 class TlsModelServer(ThreadingHTTPServer):
@@ -103,6 +113,7 @@ async def run() -> dict[str, Any]:
     errors: list[str] = []
     expected_ticket_errors: list[str] = []
     websocket_queries: list[str] = []
+    created_session_ids: list[str] = []
 
     def record_websocket(socket: Any) -> None:
         parsed = urlsplit(socket.url)
@@ -141,8 +152,11 @@ async def run() -> dict[str, Any]:
         if model_server is not None
         else os.environ.get("WEBSKILL_P1_MODEL_URL", "http://127.0.0.1:1234/v1")
     )
+    model_api_key = os.environ.get("WEBSKILL_P1_MODEL_API_KEY", "")
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(executable_path=find_chrome(), headless=True)
+        browser = await playwright.chromium.launch(
+            executable_path=find_chrome(), headless=True, args=["--no-proxy-server"]
+        )
         page = await browser.new_page(
             viewport={"width": 1440, "height": 900},
             locale="zh-CN",
@@ -151,6 +165,66 @@ async def run() -> dict[str, Any]:
         page.on("pageerror", lambda error: errors.append((error.stack or str(error))[:2000]))
         page.on("console", record_console)
         page.on("websocket", record_websocket)
+        await page.add_init_script(
+            f"""
+            const originalWebSocketSend = WebSocket.prototype.send;
+            WebSocket.prototype.send = function (data) {{
+                if (typeof data === "string") {{
+                    try {{
+                        const message = JSON.parse(data);
+                        if (message.type === "start" && message.url === "https://cloud.tencent.com") {{
+                            message.url = {json.dumps(fixture_url)};
+                            data = JSON.stringify(message);
+                        }}
+                    }} catch {{}}
+                }}
+                return originalWebSocketSend.call(this, data);
+            }};
+            """
+        )
+        if os.environ.get("WEBSKILL_P1_UI_DEBUG") == "1":
+
+            def record_model_response(response: Any) -> None:
+                if "chat/completions" in response.url:
+                    print(
+                        "Model response",
+                        response.status,
+                        response.headers.get("access-control-allow-origin"),
+                        response.url,
+                        flush=True,
+                    )
+
+            def record_model_request(request: Any) -> None:
+                if "chat/completions" in request.url:
+                    headers = {
+                        key: value
+                        for key, value in request.headers.items()
+                        if key.lower() not in {"authorization", "cookie"}
+                    }
+                    print("Model request headers", headers, flush=True)
+
+            def record_model_failure(request: Any) -> None:
+                if "chat/completions" in request.url:
+                    print("Model request failed", request.failure, request.url, flush=True)
+
+            page.on("request", record_model_request)
+            page.on("response", record_model_response)
+            page.on("requestfailed", record_model_failure)
+        if os.environ.get("WEBSKILL_P1_LNA_ALLOW") == "1":
+            cdp = await page.context.new_cdp_session(page)
+            target = await cdp.send("Target.getTargetInfo")
+            browser_context_id = target.get("targetInfo", {}).get("browserContextId")
+            assert isinstance(browser_context_id, str) and browser_context_id
+            for name in ("local-network", "loopback-network"):
+                await cdp.send(
+                    "Browser.setPermission",
+                    {
+                        "permission": {"name": name},
+                        "setting": "granted",
+                        "origin": BASE_URL,
+                        "browserContextId": browser_context_id,
+                    },
+                )
         try:
             await page.goto(f"{BASE_URL}/login", wait_until="networkidle")
             if await page.locator("input").count() >= 2:
@@ -169,25 +243,26 @@ async def run() -> dict[str, Any]:
                 await page.mouse.up()
                 await page.get_by_role("button", name=re.compile("登")).click()
                 await page.wait_for_url(re.compile(r"/chat/"))
+            dismiss = page.get_by_role("button", name="稍后再说")
+            if await dismiss.is_visible():
+                await dismiss.click()
             menu = page.get_by_role("button", name="浏览器", exact=True)
             if not await menu.is_visible():
                 await page.get_by_role("button", name="控制", exact=True).click()
             await menu.click()
             await page.wait_for_url(f"{BASE_URL}/browser")
             menu_label = await menu.inner_text()
-            dismiss = page.get_by_role("button", name="稍后再说")
-            if await dismiss.is_visible():
-                await dismiss.click()
 
-            created_session_ids: list[str] = []
             expired_ticket = True
 
-            async def observe_session_create(route: Any) -> None:
-                response = await route.fetch()
-                if response.ok:
+            async def observe_session_create(response: Any) -> None:
+                if (
+                    response.url == f"{BASE_URL}/api/browser-agent/sessions"
+                    and response.request.method == "POST"
+                    and response.ok
+                ):
                     body = await response.json()
                     created_session_ids.append(body["sessionId"])
-                await route.fulfill(response=response)
 
             async def expire_first_ticket(route: Any) -> None:
                 nonlocal expired_ticket
@@ -203,7 +278,7 @@ async def run() -> dict[str, Any]:
                     return
                 await route.continue_()
 
-            await page.route("**/api/browser-agent/sessions", observe_session_create)
+            page.on("response", observe_session_create)
             await page.route("**/api/browser-agent/sessions/*/tickets", expire_first_ticket)
             await page.get_by_role("button", name="启动浏览器").click()
             frame_element = page.locator('iframe[title="WebSkill"]')
@@ -234,11 +309,13 @@ async def run() -> dict[str, Any]:
             await fields.nth(0).fill("Local Qwen")
             await fields.nth(1).fill("qwen3.5:9b")
             await fields.nth(2).fill(model_url)
-            if model_server is not None:
-                await frame.get_by_test_id("console-model-apikey-input").fill("tls-fixture-key")
+            if model_server is not None or model_api_key:
+                await frame.get_by_test_id("console-model-apikey-input").fill(
+                    model_api_key or "tls-fixture-key"
+                )
             await frame.get_by_test_id("console-edit-dialog-model-save").click()
             await frame.get_by_role("button", name="助手", exact=True).click()
-            if model_server is None:
+            if model_server is None and not model_api_key:
                 await frame.locator(".local-model summary").click()
                 await frame.locator('.local-model input[type="checkbox"]').check()
             if os.environ.get("WEBSKILL_P1_LNA_DENY") == "1":
@@ -275,8 +352,9 @@ async def run() -> dict[str, Any]:
                     return states;
                 }""")
                 if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1":
-                    response = await page.request.get(f"{BASE_URL}/webskill/")
-                    policy = response.headers.get("permissions-policy", "")
+                    policy = await page.evaluate(
+                        """async () => (await fetch('/webskill/')).headers.get('permissions-policy') || ''"""
+                    )
                     assert "local-network=()" in policy and "loopback-network=()" in policy
                 else:
                     assert set(denied_states.values()) == {"denied"}, denied_states
@@ -305,7 +383,7 @@ async def run() -> dict[str, Any]:
             await (
                 frame.get_by_test_id("assistant-ui-assistant-message")
                 .get_by_text("P1_MODEL_OK", exact=True)
-                .wait_for(timeout=90_000)
+                .wait_for(timeout=MODEL_TIMEOUT_MS)
             )
             if os.environ.get("WEBSKILL_P1_UI_DEBUG") == "1":
                 return {
@@ -350,13 +428,13 @@ async def run() -> dict[str, Any]:
             )
             await composer.press("Enter")
             confirmation = frame.get_by_role("button", name="允许", exact=True)
-            await confirmation.wait_for(timeout=90_000)
+            await confirmation.wait_for(timeout=MODEL_TIMEOUT_MS)
             await confirmation.click()
             deadline = time.monotonic() + 15
             while counter.clicks < 1 and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
             assert counter.clicks == 1, f"Expected one page click, got {counter.clicks}"
-            await frame.get_by_text("CLICK_DONE", exact=False).wait_for(timeout=90_000)
+            await frame.get_by_text("CLICK_DONE", exact=False).wait_for(timeout=MODEL_TIMEOUT_MS)
 
             composer = frame.locator("textarea:visible").last
             await composer.fill(
@@ -364,13 +442,13 @@ async def run() -> dict[str, Any]:
             )
             await composer.press("Enter")
             confirmation = frame.get_by_role("button", name="允许", exact=True)
-            await confirmation.wait_for(timeout=90_000)
+            await confirmation.wait_for(timeout=MODEL_TIMEOUT_MS)
             await confirmation.click()
             deadline = time.monotonic() + 15
             while counter.clicks < 2 and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
             assert counter.clicks == 2, f"Expected two page clicks, got {counter.clicks}"
-            await frame.get_by_text("FRAME_DONE", exact=False).wait_for(timeout=90_000)
+            await frame.get_by_text("FRAME_DONE", exact=False).wait_for(timeout=MODEL_TIMEOUT_MS)
 
             composer = frame.locator("textarea:visible").last
             await composer.fill(
@@ -378,13 +456,13 @@ async def run() -> dict[str, Any]:
             )
             await composer.press("Enter")
             confirmation = frame.get_by_role("button", name="允许", exact=True)
-            await confirmation.wait_for(timeout=90_000)
+            await confirmation.wait_for(timeout=MODEL_TIMEOUT_MS)
             await confirmation.click()
             deadline = time.monotonic() + 15
             while counter.clicks < 3 and time.monotonic() < deadline:
                 await asyncio.sleep(0.05)
             assert counter.clicks == 3, f"Expected three page clicks, got {counter.clicks}"
-            await frame.get_by_text("OOPIF_DONE", exact=False).wait_for(timeout=90_000)
+            await frame.get_by_text("OOPIF_DONE", exact=False).wait_for(timeout=MODEL_TIMEOUT_MS)
             certificate_errors = [
                 error
                 for error in errors
@@ -419,8 +497,8 @@ async def run() -> dict[str, Any]:
             return {
                 "status": "failed",
                 "errorType": type(error).__name__,
-                "error": str(error)[:500],
-                "pageErrors": errors,
+                "error": safe_error(error),
+                "pageErrors": [safe_error(item) for item in errors],
                 "fixtureClickCount": counter.clicks,
                 "frames": [frame.url for frame in page.frames],
                 "createdSessionIds": created_session_ids,
@@ -442,7 +520,13 @@ async def run() -> dict[str, Any]:
 
 if __name__ == "__main__":
     result = asyncio.run(run())
-    result_name = "ui-result-https.json" if BASE_URL.startswith("https://") else "ui-result.json"
+    if BASE_URL.startswith("https://"):
+        scenario = "trusted" if os.environ.get("WEBSKILL_P1_TRUSTED_TLS") == "1" else "https"
+        if os.environ.get("WEBSKILL_P1_LNA_DENY") == "1":
+            scenario += "-lna-policy" if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1" else "-lna-permission"
+        result_name = f"ui-result-{scenario}.json"
+    else:
+        result_name = "ui-result.json"
     (OUT / result_name).write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )

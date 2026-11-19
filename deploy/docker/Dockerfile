@@ -127,6 +127,7 @@ WORKDIR /app
 # full：桌面、本地向量、OCR。lite：只留运行所需的 browser extra。
 ARG OCTOP_IMAGE_VARIANT=full
 COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY wheelhouse/ ./wheelhouse/
 RUN --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$PIP_INDEX_URL" ]; then \
         export UV_INDEX_URL="$PIP_INDEX_URL"; \

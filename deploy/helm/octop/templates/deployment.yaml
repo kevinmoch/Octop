@@ -1,3 +1,9 @@
+{{- if contains "*" .Values.config.forwardedAllowIps }}
+{{- fail "config.forwardedAllowIps must contain explicit proxy source CIDRs; wildcard is not allowed" }}
+{{- end }}
+{{- if and .Values.persistence.enabled (ne (int .Values.replicaCount) 1) }}
+{{- fail "Persistent Octop home requires replicaCount=1. Multi-replica browser profiles require per-Pod storage and sticky sessions." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -89,6 +95,10 @@ spec:
               value: {{ .Values.config.timezone | quote }}
             - name: OCTOP_CORS_ORIGINS
               value: {{ include "octop.corsOrigins" . | quote }}
+            {{- if .Values.config.forwardedAllowIps }}
+            - name: FORWARDED_ALLOW_IPS
+              value: {{ .Values.config.forwardedAllowIps | quote }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /api/health
@@ -120,7 +130,12 @@ spec:
             {{- end }}
       volumes:
         - name: home
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "octop.fullname" . }}-home
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         {{- if .Values.shm.enabled }}
         - name: shm
           emptyDir:

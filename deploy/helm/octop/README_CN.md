@@ -6,7 +6,7 @@
 
 每个 Pod 仍是一个进程。每个副本启动时都会加载已启用的专家。Dashboard 的 WebSocket 和轨迹推送留在该进程内存里。Ingress cookie `OCTOP_AFFINITY` 把同一个浏览器粘在同一个 Pod 上。该 Pod 消失后，下一次请求会落到存活副本。Service 不要设置 `sessionAffinity`。
 
-集群里的专家工作区使用 PostgreSQL、OpenSandbox 或其他可迁移 backend。每个 Pod 的 `OCTOP_HOME` 是 emptyDir，不是共享工作区。用用户策略 `allowed_backend_types` 限制新建专家不要走本机文件系统。飞书去重库也在本机。持有该通道的 Pod 被换掉后，短时间可能重复处理飞书补发的消息。这个空档可以接受。
+集群里的专家工作区使用 PostgreSQL、OpenSandbox 或其他可迁移 backend。默认每个 Pod 的 `OCTOP_HOME` 是 emptyDir，不是共享工作区。单副本可以设置 `persistence.enabled=true` 使用独立 PVC；多副本不能共用这份本地目录。Pod 重建后，保留的浏览器 profile 不代表旧的内存 PageAgent 会话仍可恢复。用用户策略 `allowed_backend_types` 限制新建专家不要走本机文件系统。飞书去重库也在本机。持有该通道的 Pod 被换掉后，短时间可能重复处理飞书补发的消息。这个空档可以接受。
 
 更完整的多副本说明见 [docs/cluster_CN.md](../../../docs/cluster_CN.md)。
 
@@ -42,7 +42,9 @@ helm upgrade --install octop oci://ghcr.io/tencentcloud/octop/charts/octop \
 | Secret `octop-tls` | `ingress.tls.enabled` 为 true 时必须 | 这张域名的 TLS 证书，默认名字是 `octop-tls` |
 | `image.tag` | 建议填写 | 留空则用 chart 的 `appVersion`。请写成仓库里真实存在的版本 |
 | `replicaCount` | 可选 | 默认 2。没有 HPA，要改副本数就改这个值再 upgrade |
+| `persistence.enabled` | 可选 | 默认 false。单副本设为 true 可持久化 `OCTOP_HOME`；多副本共用本地持久卷会被拒绝 |
 | `config.timezone` | 可选 | 默认 `Asia/Shanghai` |
+| `config.forwardedAllowIps` | 使用 HTTPS 代理时必须按需配置 | 逗号分隔的真实代理来源 CIDR，用于保留 HTTPS scheme；留空只信回环代理，禁止使用 `*` |
 | `postgresql.enabled` | 可选 | 默认 true，由 chart 部署 pgvector。托管库设为 false，并填写 `database.host` |
 | `shm.enabled` | 完整版镜像时打开 | 精简版保持 false。虚拟桌面、本地向量、OCR 需要 `<版本>-full`，并打开这项 |
 

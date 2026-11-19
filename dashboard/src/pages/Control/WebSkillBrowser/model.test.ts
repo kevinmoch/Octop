@@ -94,10 +94,14 @@ describe("WebSkill local no-auth host boundary", () => {
     );
   });
 
-  it("denies a loopback model request before fetch when LNA is blocked", async () => {
+  it.each([
+    "https://127.1:1234/v1",
+    "https://localhost.:1234/v1",
+    "https://[::ffff:127.0.0.1]:1234/v1",
+  ])("denies %s before fetch when loopback LNA is blocked", async (baseUrl) => {
     const config = {
       llm: {
-        entries: [model("https://127.0.0.1:1234/v1", "test-key")],
+        entries: [model(baseUrl, "test-key")],
         defaultId: "local-model",
       },
     } as Config;
@@ -122,5 +126,33 @@ describe("WebSkill local no-auth host boundary", () => {
     });
     expect(query).toHaveBeenCalledWith({ name: "loopback-network" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("classifies a mapped private IPv6 target as local network", async () => {
+    const config = {
+      llm: {
+        entries: [model("https://[::ffff:192.168.1.10]:1234/v1", "test-key")],
+        defaultId: "local-model",
+      },
+    } as Config;
+    const query = vi.fn().mockResolvedValue({ state: "denied" });
+    vi.stubGlobal("window", {
+      location: { href: "https://dashboard.example.com/browser" },
+    });
+    vi.stubGlobal("navigator", { permissions: { query } });
+    await expect(
+      createHostLlmClient(
+        {
+          load: async () => config,
+          save: async () => {},
+          reset: async () => {},
+          subscribe: () => () => {},
+        },
+        new LocalNoAuthRegistry(1),
+      ).complete({
+        messages: [{ role: "user", content: [{ type: "text", text: "test" }] }],
+      }),
+    ).rejects.toMatchObject({ code: "LLM_REQUEST_FAILED" });
+    expect(query).toHaveBeenCalledWith({ name: "local-network" });
   });
 });

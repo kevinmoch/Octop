@@ -306,6 +306,36 @@ async def test_origin_scheme_comes_only_from_a_trusted_proxy(
         assert error.value.code == "ORIGIN_INVALID"
 
 
+@pytest.mark.parametrize(
+    ("scope_scheme", "origin"),
+    [
+        ("ws", "http://testserver"),
+        ("wss", "https://testserver"),
+        ("https", "https://testserver"),
+        ("wsss", "https://testserver"),
+    ],
+)
+def test_websocket_origin_normalizes_proxy_schemes(scope_scheme: str, origin: str) -> None:
+    from fastapi import WebSocket
+
+    scope = {
+        "type": "websocket",
+        "asgi": {"version": "3.0"},
+        "scheme": scope_scheme,
+        "path": "/api/browser-agent/ws",
+        "raw_path": b"/api/browser-agent/ws",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"origin", origin.encode()),
+            (b"sec-fetch-site", b"same-origin"),
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("127.0.0.1", 8080),
+    }
+    webskill.check_websocket_origin(WebSocket(scope, None, None))
+
+
 def test_legacy_stream_jwt_has_a_versioned_removal_gate() -> None:
     import importlib
 

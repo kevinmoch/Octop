@@ -1,6 +1,6 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1 已完成（candidate）；🟡 P2 实施中；未支持生产。
+> 状态：🟢 P0/P1 已完成；🟡 P2 本地功能候选通过并允许启动 P3，普通受信 TLS 与最终冻结回归待收尾；不支持生产或上游正式发布。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。
 
@@ -13,6 +13,7 @@
 | [verification/00-p0-probes.md](verification/00-p0-probes.md) | P0 探针、真实环境、结果证据和退出条件                    |
 | [verification/01-p1-acceptance.md](verification/01-p1-acceptance.md) | P1 实现边界、真实命令、证据和未验证项               |
 | [verification/02-p2-acceptance.md](verification/02-p2-acceptance.md) | P2 实施项、真实命令、证据和未验证项               |
+| [verification/03-p3-acceptance.md](verification/03-p3-acceptance.md) | P3 候选、回放、技能执行的实施与证据             |
 
 ## 代码归属
 
@@ -48,6 +49,7 @@
 | 探针状态与 AC 状态分开记录                  | supported 只描述实测原语；acStatus 另记 gap/not-assessed，不冒充验收通过  | 技术评审（本轮裁决）       | 2026-11-16 | P0 起    |
 | 已撤回 npm 版本永不复用                     | npm 的 name@version 一经发布不可再使用                                    | 项目需求负责人（用户批准） | 2026-11-16 | 发布     |
 | 发布检查通过 gh 手动触发                    | 不因 push 自动启动发布流水线                                              | 项目需求负责人（用户批准） | 2026-11-16 | 发布     |
+| 本阶段采用本地 fork，撤回上游 PR            | 不再向远程推送或修改上游 PR；本地版本与非 editable 验证先行               | 项目需求负责人（用户批准） | 2026-11-18 | P2/发布  |
 
 ## 硬约束
 
@@ -56,7 +58,7 @@
 3. 不把截图当结构化 DOM，不用坐标或同名元素掩盖过期 ref。
 4. 不把 Octop 与 WebSkill 的技能、模型、Token、连接器或账本混用。
 5. 不把设计闭环、mock、单元测试或构建成功当成真实生产验收。
-6. 不将未列入兼容矩阵的组合标为支持；当前多副本 + `emptyDir` 为 `blocked`。
+6. 不将未列入兼容矩阵的组合标为支持；多副本 + `emptyDir` 仅为已有真实证据的 `candidate`，不承诺跨 Pod 共享写入或登录态恢复。
 
 ## 当前非承诺
 

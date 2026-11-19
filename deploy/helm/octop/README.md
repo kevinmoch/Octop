@@ -6,7 +6,7 @@ One release installs Octop and, by default, PostgreSQL with pgvector. Replicas s
 
 Each Pod is still one process. Every replica loads enabled experts at startup. Dashboard WebSocket delivery and trajectory updates stay in that process. The Ingress cookie `OCTOP_AFFINITY` pins one browser to one Pod. After that Pod disappears, the next request moves to a live replica. Leave Service `sessionAffinity` unset.
 
-Agent workspaces in this install use PostgreSQL, OpenSandbox, or another movable backend. `OCTOP_HOME` on each Pod is an emptyDir, so it is not a shared workspace. Use the user policy `allowed_backend_types` to keep new experts off the local filesystem. The Feishu dedup database is also local. After the Pod that held that channel is replaced, Feishu redelivery can be processed twice for a short time. That gap is accepted.
+Agent workspaces in this install use PostgreSQL, OpenSandbox, or another movable backend. By default, `OCTOP_HOME` on each Pod is an emptyDir, so it is not a shared workspace. A single replica can set `persistence.enabled=true` to use a dedicated PVC; replicas must not share this local directory. Preserving a browser profile across Pod replacement does not preserve its in-memory PageAgent session. Use the user policy `allowed_backend_types` to keep new experts off the local filesystem. The Feishu dedup database is also local. After the Pod that held that channel is replaced, Feishu redelivery can be processed twice for a short time. That gap is accepted.
 
 The longer multi-replica guide is [docs/cluster_CN.md](../../../docs/cluster_CN.md).
 
@@ -42,7 +42,9 @@ helm upgrade --install octop oci://ghcr.io/tencentcloud/octop/charts/octop \
 | Secret `octop-tls` | Yes when `ingress.tls.enabled` is true | TLS certificate for that hostname. Default name `octop-tls` |
 | `image.tag` | Set this | Empty uses the chart `appVersion`. Use a tag that exists in the registry |
 | `replicaCount` | Optional | Default 2. There is no HPA; change this value and upgrade |
+| `persistence.enabled` | Optional | Default false. Set true with one replica to persist `OCTOP_HOME`; sharing one local persistent volume across replicas is rejected |
 | `config.timezone` | Optional | Default `Asia/Shanghai` |
+| `config.forwardedAllowIps` | Configure for an HTTPS proxy | Comma-separated proxy source CIDRs used to preserve the HTTPS scheme. Empty trusts only loopback; `*` is forbidden |
 | `postgresql.enabled` | Optional | Default true deploys pgvector. Set false and set `database.host` for a managed database |
 | `shm.enabled` | On for the full image | Leave false for the lite image. The virtual desktop, local embeddings, and OCR need a `<version>-full` tag and this flag |
 

@@ -7,8 +7,12 @@ There is no HorizontalPodAutoscaler. Change replicaCount and upgrade the release
 to add Pods. The Ingress cookie OCTOP_AFFINITY pins one browser to one Pod.
 
 Agent workspaces in this cluster use PostgreSQL, OpenSandbox, or another
-movable backend. Each Pod's OCTOP_HOME is an emptyDir and is not a shared
-workspace. Use allowed_backend_types to keep experts off the local filesystem.
+movable backend. Use allowed_backend_types to keep experts off the local filesystem.
+{{- if .Values.persistence.enabled }}
+OCTOP_HOME uses a dedicated PVC. Pod replacement still invalidates in-memory sessions.
+{{- else }}
+Each Pod's OCTOP_HOME is an emptyDir and is not a shared workspace.
+{{- end }}
 
 {{- if and .Values.ingress.enabled .Values.ingress.tls.enabled }}
 

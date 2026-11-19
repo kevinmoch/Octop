@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "package": "octop-browser",
+  "version": "1.1.0+webskill.local.1",
+  "commit": "42d6f7c2c59e6617a84658d615a08ce2bfb5f0cf",
+  "releaseStatus": "local-fork",
+  "wheel": "octop_browser-1.1.0+webskill.local.1-py3-none-any.whl",
+  "wheelSha256": "d4861580231ecad869dba9ca22b17f719745d19d9e230dee8a6a28c339d12001"
+}

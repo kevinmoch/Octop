@@ -48,3 +48,4 @@ marketplace
 *.log
 logs
 agent-transcripts
+.artifacts

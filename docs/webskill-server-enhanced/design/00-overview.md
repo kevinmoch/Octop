@@ -1,6 +1,6 @@
 # Octop 服务端增强版设计
 
-> 状态：🟢 P0/P1 已完成（candidate）；🟡 P2 实施中；实际支持能力以对应 FR/AC 的真实证据为准。
+> 状态：🟢 P0/P1/P2 已完成（本地 fork candidate）；🟢 允许进入 P3；实际支持能力以对应 FR/AC 的真实证据为准。
 > 需求与编号见 [../00-requirements-overview.md](../00-requirements-overview.md)。
 
 ## 1. 设计目标
@@ -251,6 +251,9 @@ P1 新页面与 PageAgent 均使用一次性 ticket。旧工作台的 `?token=<J
 ## 10. 资源、观测与部署
 
 - 不可见工作区暂停抓图；同一 profile 单采集多订阅。
+- Helm 默认每 Pod 使用独立 `emptyDir`；单副本可通过 `persistence.enabled=true` 使用带 `helm.sh/resource-policy: keep` 的独立 PVC。多副本共用本地持久目录必须在模板渲染时拒绝。
+- 多副本沿用 Ingress cookie 会话亲和；跨 Pod 不承诺文件锁、旧 PageAgent 会话或浏览器登录态。Pod 替换后旧会话必须明确失效；PVC 只保留 profile，`emptyDir` 必须明确表现为需要重新登录。
+- Ingress 终止 HTTPS 时通过 `config.forwardedAllowIps` 配置真实代理来源 CIDR，让 Uvicorn 保留外部 scheme；默认只信回环代理，模板拒绝 `*`，不得靠放宽 Origin 校验解决。
 - 不每会话启动 Chrome；限制 Chrome、target、frame、连接和队列。
 - 后台 viewTarget 连续 60 秒出帧需实测；失败时显示暂停/切前台提示，不自动切页。
 - requestId 贯通客户端、HTTP/WS、Octop 和 octop-browser。
@@ -260,6 +263,7 @@ P1 新页面与 PageAgent 均使用一次性 ticket。旧工作台的 `?token=<J
 
 ## 11. 上游与发布
 
+- 本阶段经用户批准采用本地 fork 先行：上游 PR `#26` 已关闭，远程功能分支已删除，不再等待上游审批。依赖使用 `1.1.0+webskill.local.1`、固定 fork 提交和 `tool.uv.sources` 的非 editable wheel；`local-browser-fork.json` 绑定提交与 SHA-256，`uv.lock` 校验 wheel 内容，`build_local_browser.py` 从干净提交重建并核对。该本地构建不冒充上游正式发布。
 - 小 PR 上游优先，不维护长期私有 fork。
 - 发布顺序：octop-browser → octop-harness → Octop。
 - ReplayRunner 执行器注入是该库的显式接口改动，需要版本、行为测试和兼容说明。

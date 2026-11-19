@@ -103,16 +103,19 @@ async def test_browser_profile_blocks_placeholder_user_zero(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_browser_profile_blocks_writes_during_user_takeover(monkeypatch) -> None:
-    from octop.infra.control.browser.webskill.ownership import _CONTROL_OWNERS
+async def test_browser_profile_blocks_writes_during_user_takeover(monkeypatch, tmp_path) -> None:
+    from octop_browser.settings import settings as browser_settings
 
+    from octop.infra.control.browser.webskill import ownership
+
+    monkeypatch.setattr(browser_settings, "profiles_dir", tmp_path)
     monkeypatch.setattr(browser_profile, "browser_enabled", lambda: True)
     monkeypatch.setattr(
         browser_profile,
         "get_config",
         lambda: {"configurable": {"user": "42"}},
     )
-    monkeypatch.setitem(_CONTROL_OWNERS, "user-42", "user")
+    ownership.set_control_owner("user-42", "user")
     handler = AsyncMock(return_value=object())
     request = _request("browser_use", {"action": "eval_js", "expression": "1"})
 

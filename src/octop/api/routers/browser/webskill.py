@@ -27,6 +27,10 @@ from octop.infra.control.browser.webskill.sessions import (
     BrowserAgentSession,
     browser_agent_registry,
 )
+from octop.infra.control.browser.webskill.skill_drafts import (
+    RECORDING_ID_PATTERN,
+    create_recorded_skill_draft,
+)
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
@@ -45,6 +49,13 @@ class CreateBrowserAgentBody(BaseModel):
 class GrantBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request: dict[str, Any]
+
+
+class SkillDraftBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recording_id: str | None = Field(
+        default=None, alias="recordingId", min_length=1, max_length=128
+    )
 
 
 def _origin_parts(value: str) -> tuple[str, str, int | None]:
@@ -92,11 +103,21 @@ def check_request_origin(request: Request) -> None:
 
 
 def check_websocket_origin(websocket: WebSocket) -> None:
-    _check_origin(
-        websocket.headers.get("origin"),
-        scheme="https" if websocket.url.scheme == "wss" else "http",
-        host=websocket.headers.get("host", ""),
-    )
+    # Older Uvicorn releases rewrite https to wsss; newer ones may expose https.
+    secure = websocket.url.scheme in {"https", "wss", "wsss"}
+    try:
+        _check_origin(
+            websocket.headers.get("origin"),
+            scheme="https" if secure else "http",
+            host=websocket.headers.get("host", ""),
+        )
+    except BrowserAgentError as error:
+        logger.info(
+            "Browser WebSocket origin rejected: scheme=%s code=%s",
+            websocket.url.scheme,
+            error.code,
+        )
+        raise
     fetch_site = websocket.headers.get("sec-fetch-site")
     if fetch_site is not None and fetch_site != "same-origin":
         raise BrowserAgentError(
@@ -259,6 +280,41 @@ async def issue_grant(
             },
         )
         return {"grant": grant, "expiresIn": GRANT_TTL_SECONDS}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/skill-drafts",
+    summary="Create a fixed-template skill draft from an owned recording",
+)
+async def create_skill_draft(
+    session_id: str,
+    body: SkillDraftBody,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        if body.recording_id is not None and not RECORDING_ID_PATTERN.fullmatch(body.recording_id):
+            raise BrowserAgentError("RECORDING_NOT_FOUND", "Recording not found", status=404)
+        session = browser_agent_registry.get(session_id, user.id)
+        result = await asyncio.to_thread(create_recorded_skill_draft, session, body.recording_id)
+        provenance = result["provenance"]
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.skill-draft.created",
+            session.id,
+            {
+                "recordingId": provenance["recordingId"],
+                "sourceDigest": provenance["sourceDigest"],
+                "draftDigest": provenance["draftDigest"],
+                "evidence": "recording",
+            },
+        )
+        return result
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

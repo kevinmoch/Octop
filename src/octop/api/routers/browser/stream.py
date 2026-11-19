@@ -442,7 +442,8 @@ async def browser_stream_ws(
         if ticket is not None:
             stream_connection_id = browser_agent_registry.attach_stream(session)
             stream_session_id = session.id
-    except Exception:
+    except Exception as error:
+        logger.info("Browser-stream authentication failed: %s", type(error).__name__)
         await websocket.close(code=4001, reason="Browser-stream authentication failed")
         return
 
