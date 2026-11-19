@@ -1,6 +1,6 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate（`facb499b3`）；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）；🟢 R2A pageTabs 本地 candidate 已通过真实 UI+模型；🟡 pagePerceptionPaging 仅验证 segment，continuation 待补；R2B/R2C 未开始。普通受信 TLS、Docker 新构建、幻灯片原生 PDF 和依赖告警仍是已知未收尾项；不支持生产或上游正式发布。
+> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate（`facb499b3`）；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）；🟢 R2A pageTabs 与 pagePerceptionPaging 本地 candidate 已通过真实 UI+模型；R2B/R2C 未开始。普通受信 TLS、Docker 新构建、幻灯片原生 PDF 和依赖告警仍是已知未收尾项；不支持生产或上游正式发布。
 > R0 机器可读事实源：[capability-inventory.json](capability-inventory.json)；两宿主场景：[r0-two-host-scenarios.json](r0-two-host-scenarios.json)。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。

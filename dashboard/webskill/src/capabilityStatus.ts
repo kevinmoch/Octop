@@ -58,6 +58,12 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "page-paging",
+    zh: "大页面分段读取（R2A 本地候选）",
+    en: "Large-page perception paging (R2A local candidate)",
+    state: "available",
+  },
+  {
     id: "page-tabs",
     zh: "标签页 workset（R2A 本地候选）",
     en: "Tab workset (R2A local candidate)",
@@ -72,12 +78,6 @@ const available: CapabilityItem[] = [
 ];
 
 const inProgress: CapabilityItem[] = [
-  {
-    id: "page-paging",
-    zh: "大页面分段读取（R2A 实现中）",
-    en: "Large-page perception paging (R2A in progress)",
-    state: "in-progress",
-  },
   {
     id: "capability-ui",
     zh: "能力状态与不支持替代路径",

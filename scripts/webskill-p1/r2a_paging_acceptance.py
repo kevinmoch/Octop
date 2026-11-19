@@ -23,13 +23,59 @@ MODEL_URL = os.environ.get("WEBSKILL_P1_MODEL_URL", "http://localhost:1234/v1")
 MODEL_NAME = os.environ.get("WEBSKILL_P1_MODEL_NAME", "qwen3.5:9b")
 
 
+def _segment_indexes(value: Any) -> list[int]:
+    indexes: list[int] = []
+    if isinstance(value, str):
+        try:
+            return _segment_indexes(json.loads(value))
+        except (TypeError, json.JSONDecodeError):
+            return []
+    if isinstance(value, list):
+        for item in value:
+            indexes.extend(_segment_indexes(item))
+        return indexes
+    if isinstance(value, dict):
+        segment = value.get("segment")
+        if isinstance(segment, dict) and isinstance(segment.get("index"), int):
+            indexes.append(segment["index"])
+        for item in value.values():
+            indexes.extend(_segment_indexes(item))
+    return indexes
+
+
+def _cursor_calls(value: Any) -> bool:
+    if isinstance(value, str):
+        try:
+            return _cursor_calls(json.loads(value))
+        except (TypeError, json.JSONDecodeError):
+            return False
+    if isinstance(value, list):
+        return any(_cursor_calls(item) for item in value)
+    if isinstance(value, dict):
+        if value.get("role") == "assistant":
+            for call in value.get("tool_calls") or []:
+                function = call.get("function") if isinstance(call, dict) else None
+                if not isinstance(function, dict) or function.get("name") != "perceive_page":
+                    continue
+                try:
+                    arguments = json.loads(str(function.get("arguments") or "{}"))
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(arguments, dict) and isinstance(arguments.get("cursor"), str):
+                    return True
+        return any(_cursor_calls(item) for item in value.values())
+    return False
+
+
 class FixtureHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         return
 
     def do_GET(self) -> None:
-        items = "".join(f"<li>row {index:04d}</li>" for index in range(2200))
-        body = f"<!doctype html><title>Large</title><h1>Large page</h1><ul>{items}</ul>"
+        controls = "".join(
+            f"<button>row {index:03d} " + ("x" * 1400) + "</button>" for index in range(500)
+        )
+        body = f"<!doctype html><title>Large</title><h1>Large page</h1>{controls}"
         payload = body.encode()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -91,7 +137,8 @@ async def _configure(frame: Any, page: Any) -> None:
 
 async def run() -> dict[str, Any]:
     errors: list[str] = []
-    paging = False
+    segment_indexes: set[int] = set()
+    cursor_seen = False
     model_requests = 0
     fixture = ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler)
     threading.Thread(target=fixture.serve_forever, daemon=True).start()
@@ -104,12 +151,14 @@ async def run() -> dict[str, Any]:
         page.on("pageerror", lambda error: errors.append(safe_error(error)))
 
         def request_record(request: Any) -> None:
-            nonlocal paging, model_requests
-            if "/chat/completions" in request.url:
-                model_requests += 1
-                body = request.post_data or ""
-                if "segment" in body or "nodesRemaining" in body:
-                    paging = True
+            nonlocal cursor_seen, model_requests
+            if "/chat/completions" not in request.url:
+                return
+            model_requests += 1
+            body = request.post_data or ""
+            segment_indexes.update(_segment_indexes(body))
+            if _cursor_calls(body):
+                cursor_seen = True
 
         page.on("request", request_record)
         frame: Any = None
@@ -136,19 +185,29 @@ async def run() -> dict[str, Any]:
             handoff = page.get_by_role("button", name="交还助手", exact=True)
             if await handoff.count() and await handoff.is_visible():
                 await handoff.click()
-            composer = frame.locator("textarea:visible").last
-            await composer.fill(
-                "Call perceive_page once on the current large page. "
-                "If the result has a segment cursor, do not continue. Reply PERCEIVED."
-            )
-            await composer.press("Enter")
-            await page.wait_for_timeout(500)
-            await _idle(frame, timeout=300)
+            for _attempt in range(2):
+                composer = frame.locator("textarea:visible").last
+                await composer.fill(
+                    "Call perceive_page once on the current large page. "
+                    "If the result has segment.cursor, call perceive_page again "
+                    "with exactly that cursor. Do not continue beyond the second "
+                    "segment. Reply PERCEIVED_SECOND."
+                )
+                await composer.press("Enter")
+                await page.wait_for_timeout(500)
+                await _idle(frame, timeout=300)
+                if 2 in segment_indexes:
+                    break
             body = (await frame.locator("body").inner_text())[-3000:]
+            first = 1 in segment_indexes
+            second = 2 in segment_indexes
             return {
-                "status": "passed" if paging else "failed",
+                "status": "passed" if (first and second and cursor_seen) else "failed",
                 "model": MODEL_NAME,
-                "pagingSegmentObserved": paging,
+                "pagingSegmentObserved": first,
+                "pagingContinuationObserved": second,
+                "cursorCallObserved": cursor_seen,
+                "segmentIndexes": sorted(segment_indexes),
                 "modelRequests": model_requests,
                 "pageErrors": errors,
                 "body": body,
@@ -165,7 +224,10 @@ async def run() -> dict[str, Any]:
                 "errorType": type(error).__name__,
                 "error": safe_error(error),
                 "model": MODEL_NAME,
-                "pagingSegmentObserved": paging,
+                "pagingSegmentObserved": 1 in segment_indexes,
+                "pagingContinuationObserved": 2 in segment_indexes,
+                "cursorCallObserved": cursor_seen,
+                "segmentIndexes": sorted(segment_indexes),
                 "modelRequests": model_requests,
                 "pageErrors": errors,
                 "body": body,
