@@ -88,4 +88,10 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - 宿主 `DownloadedFileReader` 接 `downloads-list` / `downloads-read`；`Console hostCapabilities.downloadedFiles` 改为 `true`。
 - 单测覆盖 completed → list/read、未知 id、清理（2 passed）。
 - **仍缺**：真实浏览器下载点击 + 模型 `list_downloaded_files/read_downloaded_file` 验收；下载大小/过期/跨用户/删除矩阵未完成。因此 `downloads` 保持 `partial`。
-- 本轮 `r2b_downloads_acceptance.py` 的真实模型尝试失败在“模型没有执行下载点击”，未产出下载 artifact；脚本保留为诊断，不写成通过。
+- 本轮 `r2b_downloads_acceptance.py` 的真实模型尝试失败在“模型没有执行下载点击”，未产出下载 artifact；脚本保留为诊断。
+- 随后用**直连 PageAgent** 绕过模型点击，验证了服务端真实链路：
+  - 页面真实点击 Download report；
+  - session 下载列表出现 `report.txt`（27 bytes，text/plain）；
+  - 按 opaque id 读回 27 bytes，与控制面一致；无路径字段；
+  - 证据：`.artifacts/webskill-p1/ui/ui-result-r2b-downloads-backend.json`。
+  - 这证明服务端下载捕获/列表/读取，不证明 Chatbot 的 `list_downloaded_files` 模型工具已通过。
