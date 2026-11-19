@@ -104,6 +104,7 @@ async def list_workset_tabs(
                 "handle": handle,
                 "title": str(metadata.get("title") or "")[:300],
                 "url": str(metadata.get("url") or "")[:2048],
+                "active": bool(metadata.get("active")),
             }
         )
     if not output:

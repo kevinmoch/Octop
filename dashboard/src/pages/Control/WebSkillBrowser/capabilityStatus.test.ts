@@ -11,7 +11,7 @@ describe("capability status projection", () => {
         group.items.map((item) => [item.id, item.state] as const),
       ),
     );
-    expect(items.get("page-tabs")).toBe("in-progress");
+    expect(items.get("page-tabs")).toBe("available");
     expect(items.get("page-paging")).toBe("in-progress");
     expect(items.get("pdf-input")).toBe("planned");
     expect(items.get("downloads")).toBe("planned");

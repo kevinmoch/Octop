@@ -87,6 +87,11 @@ async def test_tabs_are_opaque_and_focus_does_not_switch_user_view(
         assert focused.json() == {"focused": detail["handle"]}
         assert session.model_target == "target-2"
         assert browser.switched == []
+        after_focus = await client.get(
+            f"/api/browser-agent/sessions/{session_id}/tabs", headers=auth
+        )
+        assert after_focus.json()["tabs"][0]["active"] is True
+        assert after_focus.json()["tabs"][1]["active"] is False
 
         base_close = await client.delete(
             f"/api/browser-agent/sessions/{session_id}/tabs/{origin['handle']}",

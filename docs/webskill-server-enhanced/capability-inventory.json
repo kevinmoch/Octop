@@ -104,12 +104,14 @@
         "pageTabs"
       ],
       "uiSurface": "Chatbot",
-      "status": "partial",
-      "decision": "implement",
+      "status": "candidate",
+      "decision": "keep",
       "phase": "R2A",
       "requiresSdkChange": false,
-      "currentEvidence": [],
-      "notes": "R2A 代码已接 tab workset API/Live UI 待验收。"
+      "currentEvidence": [
+        ".artifacts/webskill-p1/ui/ui-result-r2a-tabs-paging.json"
+      ],
+      "notes": "R2A 真实 UI+模型验收：open/focus/close；focus 后用户 active 页仍为 origin。"
     },
     {
       "id": "page-paging",
@@ -124,8 +126,10 @@
       "decision": "implement",
       "phase": "R2A",
       "requiresSdkChange": false,
-      "currentEvidence": [],
-      "notes": "R2A 已接 PerceptionPagingBudget；真实大页面验收待补。"
+      "currentEvidence": [
+        ".artifacts/webskill-p1/ui/ui-result-r2a-paging.json"
+      ],
+      "notes": "大页面 segment/cursor 已出现；continuation 与截断语义仍待单独验收。"
     },
     {
       "id": "target-workset",

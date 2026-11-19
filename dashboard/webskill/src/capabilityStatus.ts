@@ -58,6 +58,12 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "page-tabs",
+    zh: "标签页 workset（R2A 本地候选）",
+    en: "Tab workset (R2A local candidate)",
+    state: "available",
+  },
+  {
     id: "native-skill-generation",
     zh: "原生会话技能学习（R1 本地候选）",
     en: "Native session skill generation (R1 local candidate)",
@@ -66,12 +72,6 @@ const available: CapabilityItem[] = [
 ];
 
 const inProgress: CapabilityItem[] = [
-  {
-    id: "page-tabs",
-    zh: "标签页 workset（R2A 实现中）",
-    en: "Tab workset (R2A in progress)",
-    state: "in-progress",
-  },
   {
     id: "page-paging",
     zh: "大页面分段读取（R2A 实现中）",
