@@ -121,10 +121,14 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
 - 证据：`.artifacts/webskill-p1/ui/ui-result-pdf-render.json`、`pdf-render.png`。
 - 这验证 PDF.js 渲染路径，不等于 PDF 图片投放（图片进入模型上下文）已通过。
 
-### PDF 图片投放（未通过）
+### PDF 图片投放（通过）
 
-- 用含图片 XObject、无可读文本的 `bulletin-image.pdf` 上传，真实模型调用 `read_document`。
-- 结果：`pdfImageObserved=false`、`modelRequests=3`；请求中没有 `image_url`/PNG data。
-- 模型侧反馈“no extractable image content”。
+- 用含图片 XObject、无可读文本的 `bulletin-image.pdf` 上传。
+- 关键：模型必须调用 `read_document` 的 **`mode="images"`**；默认文本读取不会带图片。
+- 真实模型执行后：
+  - `pdfImageObserved=true`
+  - 5 次模型请求
+  - 模型回答“a single solid red square centered on a white background”
+  - 页面错误 0
 - 证据：`.artifacts/webskill-p1/ui/ui-result-r3-pdf-image-injection.json`。
-- 结论：**PDF 图片投放未支持**；不能把 `images()` 图片事实单测当成图片进入模型上下文的证据。
+- 结论：**PDF 图片投放已通过**（需要显式 images 模式）。

@@ -123,7 +123,7 @@ async def run() -> dict[str, Any]:
             await page.wait_for_timeout(2500)
             composer = frame.locator("textarea:visible").last
             await composer.fill(
-                "Read the attached PDF with read_document and describe the image in one sentence."
+                'Read the attached PDF with read_document mode="images" and describe the image in one sentence.'
             )
             await composer.press("Enter")
             await _idle(frame, timeout=240)
