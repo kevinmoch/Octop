@@ -516,6 +516,7 @@ async def execute_action(
     registry: BrowserAgentRegistry,
     resolver: SessionResolver,
     write_gate: WriteGate,
+    consume_scoped_grant: (Callable[[DocumentIdentity, str, dict[str, Any]], object] | None) = None,
 ) -> dict[str, Any]:
     browser = await resolve_browser(session, resolver)
     async with (
@@ -537,7 +538,10 @@ async def execute_action(
             )  # noqa: SLF001
             document = await document_identity(session, browser, client)
             previous_target_ids = await page_target_ids(browser._internal.client)  # noqa: SLF001
-            registry.consume_grant(session, grant_token, document=document, request=request)
+            if consume_scoped_grant is None:
+                registry.consume_grant(session, grant_token, document=document, request=request)
+            else:
+                consume_scoped_grant(document, str(request["action"]), request)
             if not write_gate():
                 raise BrowserAgentError(
                     "WRITE_BLOCKED",

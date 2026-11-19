@@ -172,6 +172,8 @@ ReplayRunner 消费 `StepsDocument`，在 Octop 主进程运行。它接受注�
 
 执行器注入是 octop-browser 接口变更；旧 CLI 可保留兼容行为，但增强路径不能使用默认 browser_tool 直连。
 
+page action 与 direct action 都使用绑定 replayId/actionIndex 的一次性 replay grant；当前 document 的 origin/target 必须处于授权范围。direct navigate/press 复用 modelTarget scoped client；switch_tab 只移动模型逻辑指针，不改变用户视图。非 base target 的旧 wait 明确不支持。每步检查原始录制归属与实际存在，自动清理、手动删除和跨进程删除均不得让旧回放继续后续动作。
+
 ### 5.5 技能执行
 
 技能执行由 agent 读取 SKILL.md，调用 `perceive_page` / `act_on_page`。`act_on_page` 只接受新鲜 ref，拒绝 selector。扩展宿主与增强版分别真实执行一次；不得用 ReplayRunner 冒充技能执行验收。

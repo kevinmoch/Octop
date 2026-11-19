@@ -136,6 +136,7 @@ async def start_replay(
             registry=browser_agent_registry,
             write_gate=lambda: control_owner_for(session.profile) != "user",
             audit=audit_action,
+            store=store,
         )
         await asyncio.to_thread(
             _audit,

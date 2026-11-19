@@ -69,6 +69,12 @@ class FakeClient:
     ) -> dict[str, Any]:
         if method in {"Page.enable", "DOM.enable", "Input.enable"}:
             return {}
+        if method == "Page.navigate":
+            for callback in self.context_listeners.get("Page.loadEventFired", []):
+                callback({})
+            return {}
+        if method == "Input.dispatchKeyEvent":
+            return {}
         if method == "Runtime.enable":
             for callback in self.context_listeners.get("Runtime.executionContextCreated", []):
                 callback(

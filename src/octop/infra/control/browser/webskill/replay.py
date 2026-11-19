@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import secrets
@@ -11,14 +12,16 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from octop_browser.actions import interact, navigate
+from octop_browser.dom.refs import RefCache
 from octop_browser.models import ActionMetrics, ToolResult
 from octop_browser.record.models import StepsDocument
+from octop_browser.record.store import RecordingStore
 
 from octop.infra.control.browser.webskill.lease import profile_lease
 from octop.infra.control.browser.webskill.page_agent import (
     document_identity,
     execute_action,
-    issue_action_grant,
     read_page,
     resolve_browser,
 )
@@ -27,7 +30,10 @@ from octop.infra.control.browser.webskill.sessions import (
     BrowserAgentSession,
     DocumentIdentity,
 )
-from octop.infra.control.browser.webskill.targets import admit_model_target
+from octop.infra.control.browser.webskill.targets import (
+    admit_model_target,
+    attach_model_target,
+)
 
 REPLAY_TTL_SECONDS = 300.0
 DIRECT_ACTIONS = frozenset({"navigate", "new_tab", "press", "switch_tab"})
@@ -111,6 +117,8 @@ class ReplayRegistry:
                 actions.add("navigate")
             elif step.kind in {"click", "fill", "select", "new_tab", "press"}:
                 actions.add(step.kind)
+        if any(step.target and step.target.get("_targetId") for step in steps.steps):
+            actions.add("switch_tab")
         origins = {
             origin
             for url in [steps.start_url, *(step.url for step in steps.steps)]
@@ -248,6 +256,7 @@ class ScopedReplayExecutor:
         registry: BrowserAgentRegistry,
         write_gate: Callable[[], bool],
         audit: Callable[[str, int, dict[str, Any]], Awaitable[None]] | None = None,
+        store: RecordingStore | None = None,
     ) -> None:
         self.session = session
         self.authorization = authorization
@@ -256,11 +265,17 @@ class ScopedReplayExecutor:
         self.registry = registry
         self.write_gate = write_gate
         self.audit = audit
+        self.store = store or RecordingStore()
 
     def _assert_active(self) -> ReplayAuthorization:
-        run = self.replays.get(self.authorization.id, self.session)
+        try:
+            run = self.replays.get(self.authorization.id, self.session)
+        except ValueError:
+            self.registry.revoke_grants(session_id=self.session.id)
+            raise
         if not self.write_gate():
             self.replays.cancel(run.id)
+            self.registry.revoke_grants(session_id=self.session.id)
             raise ValueError("User control took precedence; replay was cancelled")
         return run
 
@@ -277,8 +292,49 @@ class ScopedReplayExecutor:
             ),
         )
 
+    def _assert_target_scope(self, run: ReplayAuthorization, document: DocumentIdentity) -> None:
+        if (
+            document.target_id not in run.model_targets
+            or document.target_id != self.session.model_target
+        ):
+            raise ValueError("The replay document is outside the authorized target scope")
+
+    def _assert_scope(self, run: ReplayAuthorization, document: DocumentIdentity) -> None:
+        self._assert_target_scope(run, document)
+        if _origin(document.url) not in run.allowed_origins:
+            raise ValueError("The replay document is outside the authorized origin scope")
+
+    async def _current_document(self, run: ReplayAuthorization) -> DocumentIdentity:
+        browser = await resolve_browser(self.session, self.resolver)
+        attachment = await attach_model_target(self.session, browser)
+        try:
+            client = (
+                attachment.client if attachment is not None else browser._internal.client  # noqa: SLF001
+            )
+            document = await document_identity(self.session, browser, client)
+            self._assert_scope(run, document)
+            return document
+        finally:
+            if attachment is not None:
+                await attachment.close()
+
+    def _recording_available(self, run: ReplayAuthorization) -> bool:
+        try:
+            return self.store.read_manifest(run.recording_id).profile == run.profile
+        except (OSError, ValueError):
+            return False
+
+    async def _assert_available(self) -> ReplayAuthorization:
+        run = self._assert_active()
+        if not await asyncio.to_thread(self._recording_available, run):
+            self.replays.cancel_recording(run.recording_id, run.user_id)
+            self.registry.revoke_grants(session_id=self.session.id)
+            raise ValueError("The recording was deleted or is no longer available")
+        return run
+
     async def _read_dom(self) -> ToolResult:
-        self._assert_active()
+        run = await self._assert_available()
+        await self._current_document(run)
         reply = await read_page(
             self.session,
             {"scope": {"include": ["body"]}},
@@ -296,21 +352,18 @@ class ScopedReplayExecutor:
         return self._result("dom_tree", True, json.dumps({"elements": elements}))
 
     async def _page_action(self, action: str, kwargs: dict[str, Any]) -> ToolResult:
-        run = self._assert_active()
+        run = await self._assert_available()
+        document = await self._current_document(run)
         request: dict[str, Any] = {"ref": kwargs.get("ref"), "action": action}
         if action in {"fill", "select"}:
             value = kwargs.get("text") if action == "fill" else kwargs.get("value")
             if not isinstance(value, str):
                 return self._result(action, False, error="A replay input value is required")
             request["value"] = value
-        action_index = self.replays.next_action(run, action)
-        document_key = self.session.document.key if self.session.document is not None else ""
-        grant = await issue_action_grant(
-            self.session,
-            request,
-            registry=self.registry,
-            resolver=self.resolver,
-            write_gate=self.write_gate,
+        if self.session.document is None or self.session.document.key != document.key:
+            return self._result(action, False, error="The document changed before the replay grant")
+        grant, action_index = self.replays.issue_grant(
+            run, document=document, action=action, payload=request
         )
         self._assert_active()
         reply = await execute_action(
@@ -320,6 +373,13 @@ class ScopedReplayExecutor:
             registry=self.registry,
             resolver=self.resolver,
             write_gate=self.write_gate,
+            consume_scoped_grant=lambda current, action_name, payload: self.replays.consume_grant(
+                run,
+                grant,
+                document=current,
+                action=action_name,
+                payload=payload,
+            ),
         )
         outcome = reply["outcome"]
         if self.audit is not None:
@@ -327,7 +387,7 @@ class ScopedReplayExecutor:
                 action,
                 action_index,
                 {
-                    "document": _digest(document_key),
+                    "document": _digest(document.key),
                     "target": outcome.get("target", {}).get("role", "unknown"),
                     "ok": outcome.get("ok") is True,
                     "grantDigest": _digest(grant),
@@ -342,7 +402,7 @@ class ScopedReplayExecutor:
         return self._result(action, True)
 
     async def _direct_action(self, action: str, kwargs: dict[str, Any]) -> ToolResult:
-        run = self._assert_active()
+        run = await self._assert_available()
         if action not in DIRECT_ACTIONS:
             return self._result(
                 action,
@@ -354,24 +414,51 @@ class ScopedReplayExecutor:
             if not isinstance(target, str) or target not in run.model_targets:
                 return self._result(action, False, error="The replay target is outside its workset")
         browser = await resolve_browser(self.session, self.resolver)
-        document = await document_identity(self.session, browser)
-        payload = self._direct_payload(action, kwargs)
-        if action in {"navigate", "new_tab"} and _origin(payload["url"]) not in run.allowed_origins:
-            return self._result(
-                action,
-                False,
-                error="The replay URL is outside the authorized origin scope",
+        attachment = await attach_model_target(self.session, browser)
+        try:
+            client = (
+                attachment.client if attachment is not None else browser._internal.client  # noqa: SLF001
             )
-        async with profile_lease(self.session.profile):
-            self._assert_active()
-            grant, action_index = self.replays.issue_grant(
-                run, document=document, action=action, payload=payload
-            )
-            current = await document_identity(self.session, browser)
-            self.replays.consume_grant(run, grant, document=current, action=action, payload=payload)
-            self._assert_active()
-            method = getattr(browser, action)
-            result: ToolResult = await method(**payload)
+            document = await document_identity(self.session, browser, client)
+            if action in {"navigate", "new_tab"}:
+                self._assert_target_scope(run, document)
+            else:
+                self._assert_scope(run, document)
+            payload = self._direct_payload(action, kwargs)
+            if (
+                action in {"navigate", "new_tab"}
+                and _origin(payload["url"]) not in run.allowed_origins
+            ):
+                return self._result(
+                    action,
+                    False,
+                    error="The replay URL is outside the authorized origin scope",
+                )
+            async with profile_lease(self.session.profile):
+                self._assert_active()
+                grant, action_index = self.replays.issue_grant(
+                    run, document=document, action=action, payload=payload
+                )
+                current = await document_identity(self.session, browser, client)
+                if action in {"navigate", "new_tab"}:
+                    self._assert_target_scope(run, current)
+                else:
+                    self._assert_scope(run, current)
+                self.replays.consume_grant(
+                    run, grant, document=current, action=action, payload=payload
+                )
+                self._assert_active()
+                if action == "navigate":
+                    result = await navigate.navigate(client, RefCache(), str(payload["url"]))
+                elif action == "press":
+                    result = await interact.press_key(client, key=str(payload["key"]))
+                elif action == "switch_tab":
+                    result = self._result(action, True, content=str(payload["tab_id"]))
+                else:
+                    result = await browser.new_tab(**payload)
+        finally:
+            if attachment is not None:
+                await attachment.close()
         if self.audit is not None:
             await self.audit(
                 action,
@@ -425,7 +512,14 @@ class ScopedReplayExecutor:
         if action == "dom_tree":
             return await self._read_dom()
         if action == "wait":
-            self._assert_active()
+            run = await self._assert_available()
+            document = await self._current_document(run)
+            if document.target_id != self.session.base_target_id:
+                return self._result(
+                    action,
+                    False,
+                    error="Scoped wait on a non-base replay target is not supported",
+                )
             browser = await resolve_browser(self.session, self.resolver)
             allowed = {
                 key: value

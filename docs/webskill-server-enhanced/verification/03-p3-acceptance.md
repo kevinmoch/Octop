@@ -79,7 +79,7 @@
 - 本地 fork 的 `RecordingStore` 实现默认 30 天、每 profile 50 份（含进行中录制）的保留策略，进行中的录制必须先停止才允许删除。容量和过期清理由存储层统一执行，宿主只负责归属、权限与审计。
 - `DELETE /api/browser-agent/recordings/{recordingId}` 校验登录、browser 权限、Origin、Fetch Metadata 与 profile 归属。删除前取消该录制的活动回放与未用 grant；删除标记阻止同一进程内旧步骤重新建立回放授权。
 - fork 存储测试 7 项通过；完整 `UV_NO_SYNC=1 make all` 为 **267 passed、9 skipped**，Ruff、mypy 与提交钩子均通过。源码提交为 `641f57dcbdf1537dffa820741ecae4b9dc9d9ec8`，锁文件后续提交为 `43363a422894b0b2647b55e2a898e5aeb71616de`，均只在本地。
-- Octop `pyproject.toml` 与 `uv.lock` 固定到 `1.1.0+webskill.local.2` 的本地 wheel，SHA-256 为 `19e10c5b20ea0294d6401a48a50438a0ccbcabc6b0a25801d333c39960727f83`。该 wheel 已用于非 editable 宿主回归；不代表公开发布或 Docker 构建通过。
+- Octop `pyproject.toml` 与 `uv.lock` 固定到 `1.1.0+webskill.local.2` 的本地 wheel，SHA-256 为 `b66182b2970113c5b39c1c2bf8a60656cee6b7bbc4b42eb85bbbca2f2b5ba5f7`。该 wheel 已用于非 editable 宿主回归；不代表公开发布或 Docker 构建通过。
 - 真实 UI 删除验收通过：原始 steps/events/输入、截图、回放报告和录制目录均删除；删除后候选转换与回放不可用；tombstone 不含原始输入；OPFS 中独立受管技能原文保持不变；模型调用为 0。证据为 `.artifacts/webskill-p1/ui/ui-result-recording-lifecycle.json`，`status=passed`、`pageErrors=[]`。
 - 前序失败曾定位到“只重建嵌套包而主 Dashboard 仍过滤新消息”及测试服务残留。最终验收使用 `make build-frontend` 顺序重建两者、非 editable 重装、独立端口与独立录制目录，不能复用旧失败结果或残留进程冒充新验收。
 
@@ -97,3 +97,16 @@
 - 幻灯片验证覆盖 PPTX 和三页打印 DOM；**未单独宣称幻灯片原生 PDF 已通过**。测试曾尝试弹出独立打印页，但因固定 sandbox token 不允许 `allow-popups` 已撤回，没有为打印扩大 CSP。
 - viewer 图表、结构化模型导出与 Reveal 复用 WebSkill 既有扩展示例的宿主模块，固定 `docx@9.7.1`、`pptxgenjs@4.0.1`、`reveal.js@6.0.1`；WebSkill SDK、Chatbot、Console 源码和版本均未改变。
 - 只读 `npm audit --omit=dev` 发现 pptxgenjs 间接依赖 image-size 的 DoS 风险后，固定 `image-size@2.1.0` 并再次通过真实 PPTX/PPT 打印验收。复核日志 `.artifacts/webskill-p3/npm-audit-after-image-size.log` 中已无这两项 advisories；其余 15 项既有依赖告警未被强制升级或隐藏，当前不作为生产安全准入。
+
+## 10. P3 回放后端评审整改（2026-11-19）
+
+- page action 不再绕过录制 scope：当前 document 必须属于授权 origin、run.model_targets 与当前 modelTarget。DOM 读取、点击/填写/选择都经过该检查；direct 导航校验目标 origin，而非把起始页 origin 误当成目标 origin。
+- page action 使用 `ReplayRegistry.issue_grant` 生成带 replayId/actionIndex/document/target/actionDigest 的一次性授权；PageAgent 通过受限消费回调使用它。取消、接管、过期、会话失效会拒绝后续动作，不再依赖未绑定的普通 PageAgent grant。
+- direct navigate/press 复用 P2 `attach_model_target` 和 octop-browser 动作实现，写往 scoped modelTarget。switch_tab 仅改变模型逻辑指针，不调用会改变用户视图的 `browser.switch_tab`。非 base target 的旧 wait 明确失败，不读取 base 页面代替。
+- 多 target 录制允许受控 switch_tab；新标签成功创建并纳入工作集后才能继续。真实 `replay_target_acceptance.py` 完成第二标签导航与一次点击，初始 `/first` 保留，`modelCalls=0`、`pageErrors=[]`。证据为 `.artifacts/webskill-p1/ui/ui-result-replay-target.json`。
+- 每步都检查原始录制仍属于当前 profile 且实际存在；显式删除、自动保留清理及跨进程删除均 fail-closed。路由向执行器传入同一个 RecordingStore，避免读取/授权与删除检查使用不同来源。
+- 联合回归 `test_webskill_replay.py`、`test_webskill_page_agent.py`、`test_webskill_skill_drafts.py` 为 **46 passed**，相关 Ruff 和 mypy 通过。
+- `local-browser-fork.json` 固定 fork `43363a422894b0b2647b55e2a898e5aeb71616de` 和 wheel SHA-256 `b66182b2970113c5b39c1c2bf8a60656cee6b7bbc4b42eb85bbbca2f2b5ba5f7`。`build_local_browser.py` 已实际重建并验证哈希；wheelhouse 使用 allowlist 保留该 wheel 与 `.gitignore`，不再全部忽略。
+- 本整改仍是本地 candidate；普通受信 TLS、Docker 新构建、生产安全准入与外部 Office GUI 人工验收均不因本整改自动通过。
+- 整改后最终 `UV_NO_SYNC=1 make all PYTEST_JOBS=4` 为 **5976 passed、45 skipped**，耗时 340.61 秒；日志为 `.artifacts/webskill-p3/make-all-review-fix.log`。该数字对应新增回归后的代码，不与此前 5972 的历史结果混用。
+- 将完整暂存变更应用到干净 detached worktree 后，`uv sync --frozen --extra local-embedding` 成功安装提交内 wheel；完整非 live 测试再次为 **5976 passed、45 skipped**，耗时 366.57 秒。日志为 `.artifacts/webskill-p3/clean-install.log` 与 `.artifacts/webskill-p3/clean-full-test.log`。`git ls-files wheelhouse` 现在包含 `.gitignore` 和实际 `.2` wheel。

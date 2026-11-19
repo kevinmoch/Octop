@@ -126,15 +126,6 @@ async def prepare_executor(
     async def audit(action: str, index: int, data: dict[str, Any]) -> None:
         audits.append({"action": action, "index": index, **data})
 
-    executor = ScopedReplayExecutor(
-        session=current,
-        authorization=run,
-        replays=replays,
-        resolver=resolver,
-        registry=registry,
-        write_gate=lambda: True,
-        audit=audit,
-    )
     store = RecordingStore(RecordReplaySettings(base_dir=tmp_path))
     store.create(
         RecordingManifest(
@@ -146,6 +137,16 @@ async def prepare_executor(
         )
     )
     store.write_steps(source.recording_id, source)
+    executor = ScopedReplayExecutor(
+        session=current,
+        authorization=run,
+        replays=replays,
+        resolver=resolver,
+        registry=registry,
+        write_gate=lambda: True,
+        audit=audit,
+        store=store,
+    )
     return browser, current, replays, executor, audits
 
 
@@ -227,6 +228,181 @@ async def test_direct_navigation_rejects_non_http_urls(tmp_path: Path) -> None:
         await executor("navigate", url="javascript:alert(1)")
 
 
+class ScopedReplayClient:
+    def __init__(self, parent: Any, session_id: str, calls: list[tuple[str, str]]) -> None:
+        self.parent = parent
+        self.session_id = session_id
+        self.calls = calls
+
+    def on(self, event: str, callback: Any) -> None:
+        self.parent.on(event, callback)
+
+    def off(self, event: str, callback: Any) -> None:
+        self.parent.off(event, callback)
+
+    async def enable_domain(self, domain: str, *, session_id: str | None = None) -> None:
+        await self.parent.send(f"{domain}.enable", session_id=self.session_id)
+
+    async def send(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append((method, self.session_id))
+        if (
+            method == "Runtime.evaluate"
+            and params
+            and params.get("expression") == "document.readyState"
+        ):
+            return {"result": {"value": "complete"}}
+        result = await self.parent.send(method, params, session_id=self.session_id)
+        if method == "Page.navigate":
+            for callback in self.parent.context_listeners.get("Page.loadEventFired", []):
+                callback({})
+        return result
+
+    async def close(self) -> None:
+        await self.parent.send("Target.detachFromTarget", {"sessionId": self.session_id})
+
+
+def enable_target_scope_spy(browser: FakeBrowser) -> list[tuple[str, str]]:
+    calls: list[tuple[str, str]] = []
+    browser.client.with_session = lambda session_id: ScopedReplayClient(
+        browser.client, session_id, calls
+    )
+    return calls
+
+
+async def test_replay_page_action_rejects_changed_origin_and_target(
+    tmp_path: Path,
+) -> None:
+    browser, current, _replays, executor, _audits = await prepare_executor(tmp_path)
+    enable_target_scope_spy(browser)
+    dom = await executor("dom_tree", profile="user-1")
+    ref = json.loads(dom.content)["elements"][0]["ref"]
+    browser.client.url = "https://outside.example.test/"
+
+    with pytest.raises(ValueError, match="origin scope"):
+        await executor("click", ref=ref, profile="user-1")
+    assert browser.clicks == []
+
+    browser.client.url = "https://example.test/form"
+    browser.client.new_target_url = "https://example.test/second"
+    current.model_target = "target-2"
+    with pytest.raises(ValueError, match="target scope"):
+        await executor("click", ref=ref, profile="user-1")
+    assert browser.clicks == []
+
+
+async def test_direct_actions_use_the_model_target_client(tmp_path: Path) -> None:
+    source = StepsDocument(
+        recordingId="rec_scope",
+        startUrl="https://example.test/form",
+        steps=[
+            SemanticStep(id="step_navigate", kind="open", url="https://example.test/form"),
+            SemanticStep(id="step_press", kind="press", key="Enter"),
+        ],
+    )
+    browser, current, _replays, executor, _audits = await prepare_executor(
+        tmp_path, document=source
+    )
+    current.model_target = "target-2"
+    browser.client.new_target_url = "https://example.test/second"
+    executor.authorization.model_targets.add("target-2")
+    writes = enable_target_scope_spy(browser)
+
+    navigated = await executor("navigate", url="https://example.test/next", profile="user-1")
+    pressed = await executor("press", key="Enter", profile="user-1")
+
+    assert navigated.success and pressed.success
+    actual_writes = [
+        (method, target)
+        for method, target in writes
+        if method == "Page.navigate" or method == "Input.dispatchKeyEvent"
+    ]
+    assert actual_writes
+    assert {target for _method, target in actual_writes} == {"cross-session-1"}
+
+
+async def test_real_runner_switches_only_the_logical_replay_target(
+    tmp_path: Path,
+) -> None:
+    source = StepsDocument(
+        recordingId="rec_scope",
+        startUrl="https://example.test/first",
+        steps=[
+            SemanticStep(
+                id="step_new",
+                kind="new_tab",
+                url="https://example.test/second",
+                target={"_targetId": "recorded-second"},
+            ),
+            SemanticStep(
+                id="step_click",
+                kind="click",
+                target={
+                    "_targetId": "recorded-second",
+                    "role": "button",
+                    "name": "Run once",
+                },
+            ),
+        ],
+    )
+    browser, current, _replays, executor, _audits = await prepare_executor(
+        tmp_path, document=source
+    )
+    enable_target_scope_spy(browser)
+
+    async def new_tab(url: str, force_new: bool):
+        assert force_new
+        browser.client.new_target_url = url
+        return tool_result("target-2")
+
+    async def unexpected_switch(_tab_id: str):
+        raise AssertionError("The user's visible tab must not be switched")
+
+    browser.new_tab = new_tab  # type: ignore[method-assign]
+    browser.switch_tab = unexpected_switch  # type: ignore[method-assign]
+    runner = ReplayRunner(
+        executor=executor,
+        store=RecordingStore(RecordReplaySettings(base_dir=tmp_path)),
+    )
+    result = await runner.run("rec_scope", profile="user-1")
+
+    assert result["status"] == "passed", result.get("error") or result["steps"]
+    assert current.model_target == "target-2"
+    assert len(browser.clicks) == 1
+    assert "switch_tab" in executor.authorization.allowed_actions
+
+
+async def test_deleted_recording_invalidates_pending_page_grant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _browser, current, replays, executor, _audits = await prepare_executor(tmp_path)
+    dom = await executor("dom_tree", profile="user-1")
+    ref = json.loads(dom.content)["elements"][0]["ref"]
+    captured: dict[str, Any] = {}
+
+    async def execute(
+        _session: Any, _request: dict[str, Any], grant: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        captured["grant"] = grant
+        captured.update(kwargs)
+        return {"outcome": {"ok": True, "target": {"role": "button"}}}
+
+    monkeypatch.setattr("octop.infra.control.browser.webskill.replay.execute_action", execute)
+    result = await executor("click", ref=ref, profile="user-1")
+    assert result.success
+    replays.cancel(executor.authorization.id)
+    with pytest.raises(ValueError, match="invalid, stale or already used"):
+        captured["consume_scoped_grant"](current.document, "click", {"ref": ref, "action": "click"})
+    executor.store.delete("rec_scope", profile="user-1")
+    with pytest.raises(ValueError, match="cancelled|deleted"):
+        await executor("dom_tree", profile="user-1")
+
+
 def route_recording(tmp_path: Path, step_count: int = 1) -> RecordingStore:
     store = RecordingStore(RecordReplaySettings(base_dir=tmp_path))
     store.create(
@@ -286,8 +462,19 @@ async def test_replay_route_runs_real_runner_and_does_not_leak_inputs(
     from tests.support.app import octop_client
     from tests.support.auth import auth_header, bootstrap_admin
 
+    from octop.api.routers.browser import replay
+
     browser = FakeBrowser()
     patch_route(monkeypatch, tmp_path, browser)
+    reports: list[dict[str, Any]] = []
+    actual_run = replay.ReplayRunner.run
+
+    async def observe_run(self: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        report = await actual_run(self, *args, **kwargs)
+        reports.append(report)
+        return report
+
+    monkeypatch.setattr(replay.ReplayRunner, "run", observe_run)
     origin = {"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"}
     async with octop_client(tmp_path / "home") as (client, server):
         await bootstrap_admin(client, tmp_path / "home")
@@ -303,7 +490,7 @@ async def test_replay_route_runs_real_runner_and_does_not_leak_inputs(
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["status"] == "passed"
+        assert body["status"] == "passed", (body, reports)
         assert body["steps"] == [{"id": "step_1", "kind": "click", "status": "passed"}]
         assert len(browser.clicks) == 1
         assert "not-public" not in response.text

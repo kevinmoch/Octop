@@ -81,7 +81,7 @@
         "version": "1.1.0+webskill.local.2",
         "releaseStatus": "local-fork",
         "source": "wheelhouse/octop_browser-1.1.0+webskill.local.2-py3-none-any.whl",
-        "wheelSha256": "19e10c5b20ea0294d6401a48a50438a0ccbcabc6b0a25801d333c39960727f83",
+        "wheelSha256": "b66182b2970113c5b39c1c2bf8a60656cee6b7bbc4b42eb85bbbca2f2b5ba5f7",
         "editable": false
       },
       "sdk": "0.29.0",
