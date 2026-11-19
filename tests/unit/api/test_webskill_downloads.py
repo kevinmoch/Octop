@@ -135,3 +135,27 @@ def test_download_is_session_scoped_and_cleanup_removes_bytes(tmp_path: Path) ->
     cleanup_downloads(session)
     assert not path.exists()
     assert list_downloads(session) == []
+
+
+def test_oversize_download_is_deleted_and_not_listed(tmp_path: Path, monkeypatch) -> None:
+    import octop.infra.control.browser.webskill.downloads as downloads
+
+    session = _session()
+    directory = tmp_path / "downloads"
+    directory.mkdir()
+    session.download_dir = str(directory)
+    session.downloads_initialized = True
+    monkeypatch.setattr(downloads, "MAX_DOWNLOAD_BYTES", 5)
+    (directory / "large.bin").write_bytes(b"123456")
+
+    async def scenario() -> None:
+        await downloads._finish_download(
+            session,
+            "guid-large",
+            {"name": "large.bin", "at": "2026-11-19T00:00:00Z"},
+            directory,
+        )
+
+    asyncio.run(scenario())
+    assert list_downloads(session) == []
+    assert not (directory / "large.bin").exists()
