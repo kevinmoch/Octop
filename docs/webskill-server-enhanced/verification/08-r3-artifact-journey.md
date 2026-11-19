@@ -49,3 +49,40 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/viewer_acceptance.py
 R3 整体仍需：真实外部模型文档任务 + Console 审计串联 + 刷新/重开/重启恢复。
 
 > 未推送远端、未创建远端分支；未修改/发布 SDK。
+
+## 5. 真实外部模型文档任务（2026-11-19 补充）
+
+命令：
+
+```bash
+WEBSKILL_P1_UI_URL=http://127.0.0.1:18089 \
+WEBSKILL_P1_MODEL_URL=http://localhost:1234/v1 \
+UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
+```
+
+结果：
+
+```json
+{
+  "status": "passed",
+  "model": "qwen3.5:9b",
+  "modelMode": "external",
+  "modelRequests": 4,
+  "skill": "authored-bulletin",
+  "viewerOpened": true,
+  "markerVisible": true,
+  "pageErrors": []
+}
+```
+
+链路：
+
+1. 真实模型读取 `authored-bulletin` 的 `SKILL.md`。
+2. 模型触发 `ask_user` 表单，填写数据来源与内容要求。
+3. 模型调用技能 `publish`，生成 DOCX 文档。
+4. 用户确认打开文档；真实 viewer 中看到标题 `Octop real-model bulletin`。
+5. 页面错误为 0。
+
+这补上了“真实外部模型文档任务”的证据，但仍是单一 DOCX 场景，不是 Office GUI 人工验收。
+
+**R3 仍缺**：Console 运行/审计串联、刷新 Dashboard、重开 Console run、服务重启恢复。
