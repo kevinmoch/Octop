@@ -30,7 +30,9 @@ type HostRequest = {
     | "tabs-close"
     | "tabs-admit"
     | "tabs-reset"
-    | "pdf-extract";
+    | "pdf-extract"
+    | "downloads-list"
+    | "downloads-read";
   sessionId: string;
   payload?: unknown;
 };
@@ -56,7 +58,9 @@ function isRequest(value: unknown): value is HostRequest {
       data.api === "tabs-close" ||
       data.api === "tabs-admit" ||
       data.api === "tabs-reset" ||
-      data.api === "pdf-extract")
+      data.api === "pdf-extract" ||
+      data.api === "downloads-list" ||
+      data.api === "downloads-read")
   );
 }
 
@@ -229,6 +233,31 @@ export default function WebSkillFrame({
             respond({
               ok: true,
               result: await browserAgentApi.deleteRecording(recordingId),
+            });
+          } else if (data.api === "downloads-list") {
+            respond({
+              ok: true,
+              result: await browserAgentApi.listDownloads(sessionId),
+            });
+          } else if (data.api === "downloads-read") {
+            const payload = data.payload;
+            if (
+              typeof payload !== "object" ||
+              payload === null ||
+              Array.isArray(payload) ||
+              Object.keys(payload).some((key) => key !== "id") ||
+              typeof (payload as Record<string, unknown>).id !== "string" ||
+              !/^dl_[A-Za-z0-9_-]{20,80}$/.test(
+                (payload as Record<string, unknown>).id as string,
+              )
+            )
+              throw new Error("Invalid download id");
+            respond({
+              ok: true,
+              result: await browserAgentApi.readDownload(
+                sessionId,
+                (payload as Record<string, string>).id,
+              ),
             });
           } else if (data.api === "pdf-extract") {
             const payload = data.payload;

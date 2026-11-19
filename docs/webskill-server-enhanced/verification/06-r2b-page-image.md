@@ -84,4 +84,7 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 
 ## 7. downloads
 
-`downloads` 尚未实现；`Console hostCapabilities.downloadedFiles` 仍为 `false`。R2B 仍缺这一项。
+- 后端会话级下载目录：`Browser.setDownloadBehavior` 指向临时目录，监听 will-begin/progress；完成后移到 opaque id，列表/读取不暴露路径。
+- 宿主 `DownloadedFileReader` 接 `downloads-list` / `downloads-read`；`Console hostCapabilities.downloadedFiles` 改为 `true`。
+- 单测覆盖 completed → list/read、未知 id、清理（2 passed）。
+- **仍缺**：真实浏览器下载点击 + 模型 `list_downloaded_files/read_downloaded_file` 验收；下载大小/过期/跨用户/删除矩阵未完成。因此 `downloads` 保持 `partial`。

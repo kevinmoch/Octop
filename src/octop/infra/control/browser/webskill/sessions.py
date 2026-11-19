@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import secrets
+import shutil
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -58,6 +59,10 @@ class BrowserAgentSession:
     base_target_id: str | None = None
     model_targets: set[str] = field(default_factory=set)
     tab_handles: dict[str, str] = field(default_factory=dict)
+    downloads: dict[str, Any] = field(default_factory=dict)
+    download_guids: dict[str, dict[str, str]] = field(default_factory=dict)
+    download_dir: str | None = None
+    downloads_initialized: bool = False
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
     connection_id: str | None = None
@@ -236,6 +241,9 @@ class BrowserAgentRegistry:
     def close(self, session_id: str, user_id: int) -> None:
         session = self.get(session_id, user_id)
         session.active = False
+        if session.download_dir:
+            shutil.rmtree(session.download_dir, ignore_errors=True)
+            session.download_dir = None
         self._sessions.pop(session_id, None)
         self._tickets = {
             key: ticket for key, ticket in self._tickets.items() if ticket.session_id != session_id

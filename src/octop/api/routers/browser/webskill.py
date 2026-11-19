@@ -18,6 +18,11 @@ from pypdf import PdfReader
 
 from octop.api.deps import require_permission
 from octop.api.routers.browser.harness import control_owner_for, resolve_harness_session
+from octop.infra.control.browser.webskill.downloads import (
+    ensure_downloads,
+    list_downloads,
+    read_download,
+)
 from octop.infra.control.browser.webskill.page_agent import (
     capture_image,
     execute_action,
@@ -269,6 +274,10 @@ async def issue_grant(
     try:
         check_request_origin(request)
         session = browser_agent_registry.get(session_id, user.id)
+        try:
+            await ensure_downloads(session, resolver=resolve_harness_session)
+        except Exception:
+            logger.info("WebSkill download setup unavailable; continuing without downloads")
         grant = await issue_action_grant(
             session,
             body.request,
@@ -303,6 +312,44 @@ async def issue_grant(
             },
         )
         return {"grant": grant, "expiresIn": GRANT_TTL_SECONDS}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/browser-agent/sessions/{session_id}/downloads",
+    summary="List completed downloads for the current WebSkill session",
+)
+async def list_session_downloads(
+    session_id: str,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        session = browser_agent_registry.get(session_id, user.id)
+        await ensure_downloads(session, resolver=resolve_harness_session)
+        return {"downloads": list_downloads(session)}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/browser-agent/sessions/{session_id}/downloads/{download_id}/bytes",
+    summary="Read a completed download by opaque id",
+)
+async def read_session_download(
+    session_id: str,
+    download_id: str,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        session = browser_agent_registry.get(session_id, user.id)
+        await ensure_downloads(session, resolver=resolve_harness_session)
+        content_type, data = read_download(session, download_id)
+        return {
+            "contentType": content_type,
+            "bytes": len(data),
+            "data": base64.b64encode(data).decode("ascii"),
+        }
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

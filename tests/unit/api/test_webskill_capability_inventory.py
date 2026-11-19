@@ -45,7 +45,7 @@ def test_inventory_is_valid_and_covers_declared_ports() -> None:
     assert by_id["page-paging"]["status"] == "candidate"
     assert by_id["page-image"]["status"] == "candidate"
     assert by_id["pdf-input"]["status"] == "partial"
-    assert by_id["downloads"]["status"] == "missing"
+    assert by_id["downloads"]["status"] == "partial"
     assert by_id["remote-image"]["status"] == "unsupported"
     assert by_id["web-office"]["status"] == "unsupported"
     assert by_id["dwg"]["status"] == "unsupported"

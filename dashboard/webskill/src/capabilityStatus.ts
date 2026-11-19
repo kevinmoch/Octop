@@ -58,6 +58,12 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "downloads",
+    zh: "当前会话下载文件（R2B 实现中）",
+    en: "Current-session downloads (R2B in progress)",
+    state: "in-progress",
+  },
+  {
     id: "pdf-input",
     zh: "PDF 文本回退（R2B 实现中）",
     en: "PDF text fallback (R2B in progress)",
@@ -98,14 +104,7 @@ const inProgress: CapabilityItem[] = [
   },
 ];
 
-const planned: CapabilityItem[] = [
-  {
-    id: "downloads",
-    zh: "当前会话下载文件",
-    en: "Current-session downloads",
-    state: "planned",
-  },
-];
+const planned: CapabilityItem[] = [];
 
 const unsupported: CapabilityItem[] = [
   {

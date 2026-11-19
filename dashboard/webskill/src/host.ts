@@ -25,7 +25,7 @@ import {
   createRemoteTargetRegistry,
   explainResolution,
 } from "./sdkExports";
-import type { PageActionUi } from "@webskill/sdk/agent";
+import type { DownloadedFileReader, PageActionUi } from "@webskill/sdk/agent";
 import {
   OpfsProvider,
   createDocxBlockReader,
@@ -158,6 +158,54 @@ export async function createWebSkillHost(
     pagePerception,
   });
 
+  const downloadReader: DownloadedFileReader = {
+    async list() {
+      const result = await bridge.call("downloads-list");
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        !Array.isArray((result as Record<string, unknown>).downloads)
+      ) {
+        throw new Error("The host download list is invalid");
+      }
+      return (result as { downloads: Array<Record<string, unknown>> }).downloads
+        .filter(
+          (entry) =>
+            typeof entry.id === "string" &&
+            typeof entry.name === "string" &&
+            typeof entry.contentType === "string" &&
+            typeof entry.size === "number" &&
+            typeof entry.at === "string",
+        )
+        .map((entry) => ({
+          id: entry.id as string,
+          name: entry.name as string,
+          contentType: entry.contentType as string,
+          size: entry.size as number,
+          at: entry.at as string,
+        }));
+    },
+    async read(id: string) {
+      const result = await bridge.call("downloads-read", { id });
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        typeof (result as Record<string, unknown>).contentType !== "string" ||
+        typeof (result as Record<string, unknown>).data !== "string"
+      ) {
+        throw new Error("The host download read response is invalid");
+      }
+      const binary = atob((result as Record<string, string>).data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return {
+        contentType: (result as Record<string, string>).contentType,
+        bytes,
+      };
+    },
+  };
   const adapter: ChatbotHostAdapter = {
     ...bundle.chatbotAdapter,
     pagePerception,
@@ -168,6 +216,7 @@ export async function createWebSkillHost(
     linkedDocuments: createFetchLinkedDocumentReader(),
     pdfExtractor,
     pdfDocumentReader,
+    downloads: { reader: downloadReader },
     docxExtractor: extractDocxText,
     xlsxExtractor: extractXlsxText,
     pptxExtractor: extractPptxText,

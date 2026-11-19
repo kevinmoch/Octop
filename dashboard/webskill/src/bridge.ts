@@ -21,7 +21,9 @@ export type HostApi =
   | "tabs-close"
   | "tabs-admit"
   | "tabs-reset"
-  | "pdf-extract";
+  | "pdf-extract"
+  | "downloads-list"
+  | "downloads-read";
 
 type HostRequest = {
   channel: typeof HOST_CHANNEL;
@@ -82,7 +84,9 @@ export function isHostRequest(value: unknown): value is HostRequest {
     value.api !== "tabs-close" &&
     value.api !== "tabs-admit" &&
     value.api !== "tabs-reset" &&
-    value.api !== "pdf-extract"
+    value.api !== "pdf-extract" &&
+    value.api !== "downloads-list" &&
+    value.api !== "downloads-read"
   )
     return false;
   return typeof value.sessionId === "string" && value.sessionId.length <= 128;

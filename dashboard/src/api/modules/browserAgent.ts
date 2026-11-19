@@ -26,6 +26,14 @@ export interface BrowserAgentTab {
   url?: string;
 }
 
+export interface BrowserAgentDownload {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  at: string;
+}
+
 export function isBrowserAgentSessionMissing(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -114,5 +122,15 @@ export const browserAgentApi = {
     request<{ text: string; pages: number; truncated: boolean }>(
       "/browser-agent/pdf/extract",
       { method: "POST", body: JSON.stringify({ data }) },
+    ),
+  listDownloads: (sessionId: string) =>
+    request<{ downloads: BrowserAgentDownload[] }>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/downloads`,
+    ),
+  readDownload: (sessionId: string, downloadId: string) =>
+    request<{ contentType: string; bytes: number; data: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(
+        sessionId,
+      )}/downloads/${encodeURIComponent(downloadId)}/bytes`,
     ),
 };
