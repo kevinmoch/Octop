@@ -88,3 +88,4 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - 宿主 `DownloadedFileReader` 接 `downloads-list` / `downloads-read`；`Console hostCapabilities.downloadedFiles` 改为 `true`。
 - 单测覆盖 completed → list/read、未知 id、清理（2 passed）。
 - **仍缺**：真实浏览器下载点击 + 模型 `list_downloaded_files/read_downloaded_file` 验收；下载大小/过期/跨用户/删除矩阵未完成。因此 `downloads` 保持 `partial`。
+- 本轮 `r2b_downloads_acceptance.py` 的真实模型尝试失败在“模型没有执行下载点击”，未产出下载 artifact；脚本保留为诊断，不写成通过。
