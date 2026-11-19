@@ -39,7 +39,7 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/viewer_acceptance.py
 - 文档场景使用**脚本化模型**驱动真实工具链；没有用真实外部模型生成文档。
 - 没有覆盖 Word/PowerPoint/Excel 的 GUI 人工验收；文件可打开由 Python 解析器验证。
 - 没有把幻灯片原生 PDF 设为通过；只验证 PPTX + 3 页打印 DOM。
-- 没有完成刷新 Dashboard、重开 Console 运行、服务重启后的完整恢复旅程。
+- 已用固定持久化 profile 完成服务重启恢复；刷新/重开/Console 运行与审计也已通过。仍未完成多格式真实模型与 Office GUI 人工验收。
 - 没有把 R3 文档场景与 Console 审计/治理串联成同一真实模型任务。
 - R3 仍有 viewer CSP/关闭/资源清理的基础证据，但不等于完整产品旅程。
 
