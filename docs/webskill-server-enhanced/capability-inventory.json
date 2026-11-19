@@ -316,7 +316,7 @@
         "tests/unit/api/test_webskill_pdf.py",
         "dashboard/src/pages/Control/WebSkillBrowser/pdf.test.ts"
       ],
-      "notes": "真实附件 DOCX/PDF 文本进入模型；pdfjs text/images 单测与 Chromium 整页 render 通过；图片 XObject 事实已覆盖，图片投放仍未验收。"
+      "notes": "真实附件 DOCX/PDF 文本进入模型；pdfjs text/images 单测与 Chromium 整页 render 通过；图片 XObject 事实已覆盖；图片投放实测未通过。"
     },
     {
       "id": "page-image",
