@@ -80,7 +80,7 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - 宿主 `pdfExtractor` 通过 bridge 调用该端点；未接 `pdfDocumentReader`。
 - 测试：`tests/unit/api/test_webskill_pdf.py` 2 passed（文本、页数、坏 base64、跨源拒绝）。
 
-**仍缺**：PDF 逐页 reader/渲染、PDF 图片、真实附件 UI 验收。因此 `pdf-input` 保持 `partial`，R2B 不整体通过。
+**仍缺**：PDF 真实附件 UI/渲染验收。`pdfjs-dist@6.5.438` 客户端 `pdfDocumentReader` 已接（逐页 text/images/render），但本轮没有用真实 PDF 附件走 Chatbot 读取；服务端 pypdf 端点只证明文本回退。因此 `pdf-input` 保持 `partial`，R2B 不整体通过。
 
 ## 7. downloads
 

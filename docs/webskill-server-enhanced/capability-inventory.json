@@ -302,7 +302,8 @@
       "title": "PDF 直传、回退与逐页读取",
       "sdkSurface": "pdfExtractor / pdfDocumentReader",
       "hostWiring": [
-        "pdfExtractor"
+        "pdfExtractor",
+        "pdfDocumentReader"
       ],
       "uiSurface": "Chatbot",
       "status": "partial",
@@ -310,9 +311,10 @@
       "phase": "R2B",
       "requiresSdkChange": false,
       "currentEvidence": [
+        "dashboard/webskill/src/pdf.ts",
         "tests/unit/api/test_webskill_pdf.py"
       ],
-      "notes": "已接 pypdf 文本回退端点（每页文本、20MB/200k 限制）；pdfDocumentReader/渲染与真实附件验收未完成。"
+      "notes": "pdfjs-dist 6.5.438 客户端逐页 text/images/render 已接；pypdf 服务端文本端点保留；真实 PDF 附件/渲染验收未完成。"
     },
     {
       "id": "page-image",
