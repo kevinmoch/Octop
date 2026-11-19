@@ -1,6 +1,6 @@
 # R2B 页面图片：真实 UI + 模型验收
 
-> 状态：🟢 pageImage 本地 candidate；🟡 PDF/downloads 仍未完成。
+> 状态：🟢 **R2B 本地 candidate 通过**：pageImage、PDF、downloads 均有真实证据；高风险边界见 R2C。
 > 日期：2026-11-19
 > 模型：本地 `qwen3.5:9b`；证据：`.artifacts/webskill-p1/ui/ui-result-r2b-page-image.json`。
 
@@ -88,11 +88,13 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - 后端会话级下载目录：`Browser.setDownloadBehavior` 指向临时目录，监听 will-begin/progress；完成后移到 opaque id，列表/读取不暴露路径。
 - 宿主 `DownloadedFileReader` 接 `downloads-list` / `downloads-read`；`Console hostCapabilities.downloadedFiles` 改为 `true`。
 - 单测覆盖 completed → list/read、未知 id、清理（2 passed）。
-- **仍缺**：真实浏览器下载点击 + 模型 `list_downloaded_files/read_downloaded_file` 验收；下载大小/过期/跨用户/删除矩阵未完成。因此 `downloads` 保持 `partial`。
-- 本轮 `r2b_downloads_acceptance.py` 的真实模型尝试失败在“模型没有执行下载点击”，未产出下载 artifact；脚本保留为诊断。
-- 随后用**直连 PageAgent** 绕过模型点击，验证了服务端真实链路：
-  - 页面真实点击 Download report；
-  - session 下载列表出现 `report.txt`（27 bytes，text/plain）；
-  - 按 opaque id 读回 27 bytes，与控制面一致；无路径字段；
-  - 证据：`.artifacts/webskill-p1/ui/ui-result-r2b-downloads-backend.json`。
-  - 这证明服务端下载捕获/列表/读取，不证明 Chatbot 的 `list_downloaded_files` 模型工具已通过。
+- **真实下载 + Chatbot 工具**：
+  - 真实页面点击 Download report；
+  - 会话目录出现 `report.txt`（19 bytes，text/plain，opaque id）；
+  - 模型真实调用 `list_downloaded_files` 与 `read_downloaded_file`；
+  - 两次授权卡均提交；
+  - 下载文本进入模型上下文（`downloadTextObserved=true`）；
+  - 3 次模型请求，0 页面错误。
+  - 证据：`.artifacts/webskill-p1/ui/ui-result-r2b-downloads-host.json`。
+- 服务端直连证据另见 `ui-result-r2b-downloads-backend.json`（27 bytes 对账）。
+- 剩余边界：下载过期/跨用户/超大文件/删除矩阵仍未单独覆盖；当前只验证当前会话已完成项。

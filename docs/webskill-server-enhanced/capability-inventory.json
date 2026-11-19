@@ -344,14 +344,16 @@
         "downloads"
       ],
       "uiSurface": "Chatbot/Console",
-      "status": "partial",
-      "decision": "implement",
+      "status": "candidate",
+      "decision": "keep",
       "phase": "R2B",
       "requiresSdkChange": false,
       "currentEvidence": [
+        ".artifacts/webskill-p1/ui/ui-result-r2b-downloads-host.json",
+        ".artifacts/webskill-p1/ui/ui-result-r2b-downloads-backend.json",
         "tests/unit/api/test_webskill_downloads.py"
       ],
-      "notes": "会话级 Chrome 下载目录、opaque id、list/read、50MB/清理已接；真实下载 UI+模型验收未完成。"
+      "notes": "真实下载捕获 + Chatbot list_downloaded_files/read_downloaded_file 授权读取通过。"
     },
     {
       "id": "remote-image",

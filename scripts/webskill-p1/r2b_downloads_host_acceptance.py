@@ -271,11 +271,19 @@ async def run() -> dict[str, Any]:
                 "read_downloaded_file for its id. Reply DOWNLOAD_READ."
             )
             await composer.press("Enter")
-            for _attempt in range(8):
-                await _allow(frame, timeout=8)
-                await page.wait_for_timeout(300)
+            for _attempt in range(90):
+                body_now = await frame.locator("body").inner_text()
+                if "readDownloadedFile" in body_now or "允许助手读取" in body_now:
+                    cards = frame.get_by_test_id("interaction-card")
+                    for index in range(await cards.count()):
+                        allow = cards.nth(index).get_by_role("button", name="允许")
+                        with contextlib.suppress(Exception):
+                            if await allow.count() and await allow.first.is_visible():
+                                await allow.first.click(force=True)
+                        await page.wait_for_timeout(400)
                 if download_text_observed:
                     break
+                await page.wait_for_timeout(500)
             body = (await frame.locator("body").inner_text())[-2500:]
             return {
                 "status": "passed" if download_text_observed else "failed",

@@ -58,16 +58,16 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "downloads",
+    zh: "当前会话下载文件（R2B 本地候选）",
+    en: "Current-session downloads (R2B local candidate)",
+    state: "available",
+  },
+  {
     id: "pdf-input",
     zh: "PDF 附件读取（R2B 本地候选）",
     en: "PDF attachment reading (R2B local candidate)",
     state: "available",
-  },
-  {
-    id: "downloads",
-    zh: "当前会话下载文件（R2B 实现中）",
-    en: "Current-session downloads (R2B in progress)",
-    state: "in-progress",
   },
   {
     id: "page-image",
