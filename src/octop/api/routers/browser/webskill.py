@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from octop.api.deps import require_permission
 from octop.api.routers.browser.harness import control_owner_for, resolve_harness_session
 from octop.infra.control.browser.webskill.page_agent import (
+    capture_image,
     execute_action,
     issue_action_grant,
     public_error_code,
@@ -519,6 +520,17 @@ async def page_agent_ws(
                         message,
                         resolver=resolve_harness_session,
                         registry=browser_agent_registry,
+                    )
+                elif message.get("type") == "capture-image":
+                    if set(message) - {"type", "requestId", "ref", "maxBytes"}:
+                        raise BrowserAgentError(
+                            "REQUEST_INVALID", "Image capture contains unknown fields"
+                        )
+                    reply = await capture_image(
+                        live,
+                        message,
+                        registry=browser_agent_registry,
+                        resolver=resolve_harness_session,
                     )
                 elif message.get("type") == "execute":
                     if set(message) - {"type", "requestId", "request", "grant"}:

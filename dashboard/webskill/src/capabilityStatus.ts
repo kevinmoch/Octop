@@ -58,6 +58,12 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "page-image",
+    zh: "页面元素/区域图片（R2B 本地候选）",
+    en: "Page element/region images (R2B local candidate)",
+    state: "available",
+  },
+  {
     id: "page-paging",
     zh: "大页面分段读取（R2A 本地候选）",
     en: "Large-page perception paging (R2A local candidate)",
@@ -91,12 +97,6 @@ const planned: CapabilityItem[] = [
     id: "pdf-input",
     zh: "PDF 读取与逐页处理",
     en: "PDF reading and paging",
-    state: "planned",
-  },
-  {
-    id: "page-image",
-    zh: "页面元素/区域图片",
-    en: "Page element/region images",
     state: "planned",
   },
   {

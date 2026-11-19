@@ -44,6 +44,9 @@ function parseReply(value: unknown): PageAgentReply | undefined {
     if (value.document !== undefined && !isDocument(value.document)) return;
     return value as unknown as PageAgentReply;
   }
+  if (value.type === "capture-image-result" && isRecord(value.result)) {
+    return value as unknown as PageAgentReply;
+  }
   if (
     value.type === "execute-result" &&
     isRecord(value.outcome) &&

@@ -322,12 +322,15 @@
         "pageImage"
       ],
       "uiSurface": "Chatbot",
-      "status": "missing",
-      "decision": "implement",
+      "status": "candidate",
+      "decision": "keep",
       "phase": "R2B",
       "requiresSdkChange": false,
-      "currentEvidence": [],
-      "notes": "按 target/frame/ref 取图，预算与超时明确。"
+      "currentEvidence": [
+        ".artifacts/webskill-p1/ui/ui-result-r2b-page-image.json",
+        "tests/unit/api/test_webskill_capture.py"
+      ],
+      "notes": "R2B 真实 UI+模型 capture_page_image 返回 240x160 PNG；当前仅主文档，子 frame 取像仍不支持。"
     },
     {
       "id": "downloads",

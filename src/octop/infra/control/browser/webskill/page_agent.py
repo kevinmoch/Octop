@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import secrets
 from collections.abc import Awaitable, Callable
@@ -434,6 +435,123 @@ async def read_page(
     finally:
         if attached is not None:
             await attached.close()
+        if model_attachment is not None:
+            await model_attachment.close()
+
+
+async def capture_image(
+    session: BrowserAgentSession,
+    request: dict[str, Any],
+    *,
+    registry: BrowserAgentRegistry,
+    resolver: SessionResolver,
+) -> dict[str, Any]:
+    """Capture one already-authorized page reference as a normalized image payload.
+
+    The request carries only a ref from a fresh perception and a byte budget.
+    Coordinates and target identity stay in the host; no selector, URL or path is
+    accepted from the model.
+    """
+    ref = request.get("ref")
+    max_bytes = request.get("max_bytes", request.get("maxBytes"))
+    if not isinstance(ref, str) or not ref or len(ref) > 256:
+        raise BrowserAgentError("ACTION_INVALID", "A page reference is required")
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 1:
+        raise BrowserAgentError("ACTION_INVALID", "A positive image byte budget is required")
+    max_bytes = min(max_bytes, 10 * 1024 * 1024)
+
+    browser = await resolve_browser(session, resolver)
+    model_attachment = await attach_model_target(session, browser)
+    try:
+        client = (
+            model_attachment.client if model_attachment is not None else browser._internal.client
+        )  # noqa: SLF001
+        document = await document_identity(session, browser, client)
+        entry = registry.resolve_ref(session, ref, document)
+        if entry.frame != "self":
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": "Page images inside a child frame are not supported by this host yet",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
+        await client.send("DOM.scrollIntoViewIfNeeded", {"backendNodeId": entry.backend_node_id})
+        box = await client.send("DOM.getBoxModel", {"backendNodeId": entry.backend_node_id})
+        quad = box.get("model", {}).get("border", [])
+        if not isinstance(quad, list) or len(quad) != 8:
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": "The element has no visible box",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
+        xs = [float(quad[index]) for index in (0, 2, 4, 6)]
+        ys = [float(quad[index]) for index in (1, 3, 5, 7)]
+        x, y = min(xs), min(ys)
+        width, height = max(xs) - x, max(ys) - y
+        if width <= 0 or height <= 0:
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": "The element has an empty visible box",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
+        screenshot = await client.send(
+            "Page.captureScreenshot",
+            {
+                "format": "png",
+                "fromSurface": True,
+                "clip": {
+                    "x": x,
+                    "y": y,
+                    "width": width,
+                    "height": height,
+                    "scale": 1,
+                },
+            },
+        )
+        data = screenshot.get("data")
+        if not isinstance(data, str) or not data:
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": "The browser returned no screenshot bytes",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
+        try:
+            decoded = base64.b64decode(data, validate=True)
+        except Exception as error:
+            raise BrowserAgentError(
+                "TOOL_EXECUTION_FAILED", "The screenshot bytes are invalid"
+            ) from error
+        if len(decoded) > max_bytes:
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": f"The captured image is {len(decoded)} bytes, over the {max_bytes}-byte budget",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
+        return {
+            "type": "capture-image-result",
+            "result": {
+                "data": data,
+                "mimeType": "image/png",
+                "width": max(1, round(width)),
+                "height": max(1, round(height)),
+                "bytes": len(decoded),
+            },
+        }
+    finally:
         if model_attachment is not None:
             await model_attachment.close()
 

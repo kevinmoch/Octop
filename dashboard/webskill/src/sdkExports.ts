@@ -12,6 +12,7 @@ export {
 export {
   createBrowserChatbotHost,
   createRemotePageActionExecutor,
+  createRemotePageImageHost,
   createRemotePerceptionReader,
   createRemoteTargetRegistry,
   explainResolution,

@@ -1,6 +1,6 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate（`facb499b3`）；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）；🟢 R2A pageTabs 与 pagePerceptionPaging 本地 candidate 已通过真实 UI+模型；R2B/R2C 未开始。普通受信 TLS、Docker 新构建、幻灯片原生 PDF 和依赖告警仍是已知未收尾项；不支持生产或上游正式发布。
+> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate（`facb499b3`）；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）；🟢 R2A pageTabs 与 pagePerceptionPaging 本地 candidate 已通过真实 UI+模型；🟢 R2B pageImage 本地 candidate 已通过真实 UI+模型；PDF/downloads 未完成；R2C 未开始。普通受信 TLS、Docker 新构建、幻灯片原生 PDF 和依赖告警仍是已知未收尾项；不支持生产或上游正式发布。
 > R0 机器可读事实源：[capability-inventory.json](capability-inventory.json)；两宿主场景：[r0-two-host-scenarios.json](r0-two-host-scenarios.json)。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。
@@ -20,6 +20,7 @@
 | [r0-two-host-scenarios.json](r0-two-host-scenarios.json) | R0 扩展宿主/服务端宿主同场景验收合同            |
 | [verification/04-r1-native-skill-acceptance.md](verification/04-r1-native-skill-acceptance.md) | R1 原生技能生成、Console 发布、新会话执行证据 |
 | [verification/05-r2a-page-tabs-paging.md](verification/05-r2a-page-tabs-paging.md) | R2A pageTabs/分页实现与未完成验收 |
+| [verification/06-r2b-page-image.md](verification/06-r2b-page-image.md) | R2B pageImage 真实 UI+模型验收与未完成项 |
 
 ## 代码归属
 
