@@ -112,7 +112,13 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
 - 证据：`.artifacts/webskill-p1/ui/ui-result-r3-restart-phase2.json`。
 - 该恢复验收使用脚本化 bulletin fixture；真实模型 DOCX 已在同文档前文单独通过。
 
-**R3 本地 candidate 剩余边界**：多格式 DOCX/PPTX/XLSX 的真实外部模型验收、Office GUI 人工验收。
+**R3 本地 candidate 剩余边界**：真实外部模型 PPTX/大屏仍未通过，Office GUI 人工验收未做。
+
+### 真实模型 PPTX（未通过）
+
+- 模型读取 `authored-slides` 并多次调用 `authored-slides__publish`（9 次），但始终没有产生可打开的 PPTX artifact。
+- 没有把脚本化 PPTX 通过写成真实模型通过。
+- PPTX viewer/导出/重开仍只有脚本化 fixture 证据。
 
 ## 6. PDF 整页渲染（补充）
 
