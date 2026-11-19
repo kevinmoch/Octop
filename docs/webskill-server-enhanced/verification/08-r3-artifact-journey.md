@@ -85,4 +85,14 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
 
 这补上了“真实外部模型文档任务”的证据，但仍是单一 DOCX 场景，不是 Office GUI 人工验收。
 
-**R3 仍缺**：Console 运行/审计串联、刷新 Dashboard、重开 Console run、服务重启恢复。
+### Console / refresh 补充
+
+- `scripts/webskill-p1/r3_console_journey_acceptance.py` 使用同一真实模型 DOCX 场景，关闭 viewer 后打开 Console：
+  - `runsText` 出现 `authored-bulletin` 运行记录；
+  - `auditText` 出现 `document.surface.open` 审计事件；
+  - `page.reload` 后 Chatbot 仍可加载；
+  - `consoleRunsObserved=true`、`auditObserved=true`、`reloadObserved=true`、`pageErrors=[]`。
+- 证据：`.artifacts/webskill-p1/ui/ui-result-r3-console-journey.json`。
+- **服务重启恢复未通过**：`ui-result-r3-restart-recovery.json` 失败。原因是 Playwright 验收每次新建浏览器上下文，OPFS 随上下文销毁；不是服务端重启结论。需要固定持久化 user-data-dir 的 harness 才能判定，本轮不写成通过。
+
+**R3 仍缺**：固定持久化浏览器 profile 的“服务重启 + 重开 Dashboard”恢复验收，以及多格式真实模型验收。

@@ -161,7 +161,7 @@ async def run() -> dict[str, Any]:
             ) as navigated:
                 await allow.click()
             viewer = await navigated.value
-            await viewer.get_by_text(MARKER, exact=True).wait_for(timeout=30_000)
+            await viewer.get_by_text(MARKER, exact=True).first.wait_for(timeout=30_000)
             return {
                 "status": "passed" if state["requests"] > 0 else "failed",
                 "model": MODEL_NAME,
