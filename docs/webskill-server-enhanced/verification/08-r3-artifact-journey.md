@@ -1,8 +1,8 @@
 # R3 产物与隔离 viewer 旅程
 
-> 状态：🟡 **产物交付/隔离 viewer 本地 candidate 通过**；完整 R3 旅程尚未完全收口。  
-> 日期：2026-11-19  
-> 模型：本轮文档场景仍为脚本化模型（`modelMode=scripted`），不是外部模型文档生成验收。  
+> 状态：🟢 **R3 本地 candidate 通过**：产物/viewer、真实模型 DOCX、Console/审计/刷新、固定 profile 服务重启恢复均有证据。
+> 日期：2026-11-19
+> 模型：本轮文档场景仍为脚本化模型（`modelMode=scripted`），不是外部模型文档生成验收。
 > 证据：`.artifacts/webskill-p1/ui/ui-result-viewer.json`、`ui-result-document-bulletin.json`、`ui-result-document-slides.json`、`ui-result-document-spreadsheet.json`。
 
 ## 1. 本轮命令
@@ -45,7 +45,7 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/viewer_acceptance.py
 
 ## 4. 结论
 
-**R3 的产物交付与隔离 viewer 切片是本地 candidate**，但不能宣称 R3 整体完成。  
+**R3 的产物交付与隔离 viewer 切片是本地 candidate**，但不能宣称 R3 整体完成。
 R3 整体仍需：真实外部模型文档任务 + Console 审计串联 + 刷新/重开/重启恢复。
 
 > 未推送远端、未创建远端分支；未修改/发布 SDK。
@@ -93,6 +93,15 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
   - `page.reload` 后 Chatbot 仍可加载；
   - `consoleRunsObserved=true`、`auditObserved=true`、`reloadObserved=true`、`pageErrors=[]`。
 - 证据：`.artifacts/webskill-p1/ui/ui-result-r3-console-journey.json`。
-- **服务重启恢复未通过**：`ui-result-r3-restart-recovery.json` 失败。原因是 Playwright 验收每次新建浏览器上下文，OPFS 随上下文销毁；不是服务端重启结论。需要固定持久化 user-data-dir 的 harness 才能判定，本轮不写成通过。
+### 固定 profile 服务重启恢复
 
-**R3 仍缺**：固定持久化浏览器 profile 的“服务重启 + 重开 Dashboard”恢复验收，以及多格式真实模型验收。
+- `viewer_acceptance.py` 支持 `WEBSKILL_PERSISTENT_PROFILE`，用固定 `user-data-dir` 跑 bulletin 文档。
+- 停止 UI 服务、重启后，用同一 profile 运行 `r3_restart_phase2.py`：
+  - Console 运行记录：`run-eeffp1r2`，`completed`，`authored-bulletin`；
+  - 审计：`document.surface.open`；
+  - `installedSkillObserved=true`、`consoleRunObserved=true`、`auditObserved=true`；
+  - `pageErrors=[]`。
+- 证据：`.artifacts/webskill-p1/ui/ui-result-r3-restart-phase2.json`。
+- 该恢复验收使用脚本化 bulletin fixture；真实模型 DOCX 已在同文档前文单独通过。
+
+**R3 本地 candidate 剩余边界**：多格式 DOCX/PPTX/XLSX 的真实外部模型验收、Office GUI 人工验收。

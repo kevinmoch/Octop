@@ -127,10 +127,22 @@ async def run() -> dict[str, Any]:
             "dataSource": "fixture:local",
         }
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(
-            executable_path=find_chrome(), headless=True, args=["--no-proxy-server"]
-        )
-        context = await browser.new_context(locale="zh-CN")
+        profile = os.environ.get("WEBSKILL_PERSISTENT_PROFILE")
+        browser = None
+        if profile:
+            context = await playwright.chromium.launch_persistent_context(
+                user_data_dir=profile,
+                executable_path=find_chrome(),
+                headless=True,
+                args=["--no-proxy-server"],
+                locale="zh-CN",
+                viewport={"width": 1440, "height": 900},
+            )
+        else:
+            browser = await playwright.chromium.launch(
+                executable_path=find_chrome(), headless=True, args=["--no-proxy-server"]
+            )
+            context = await browser.new_context(locale="zh-CN")
         await context.add_init_script(
             """(config => {
               if (!['/webskill/', '/webskill/index.html'].includes(location.pathname)) return;
@@ -165,6 +177,7 @@ async def run() -> dict[str, Any]:
             })"""
         )
         page = await context.new_page()
+
         def on_page_error(error: Any) -> None:
             message = safe_error(error)
             if "WEBSKILL_TEST_PRINT_CAPTURE" not in message:
@@ -173,13 +186,16 @@ async def run() -> dict[str, Any]:
         page.on("pageerror", on_page_error)
         page.on(
             "console",
-            lambda message: console_errors.append(message.text)
-            if message.type == "error"
-            else None,
+            lambda message: (
+                console_errors.append(message.text) if message.type == "error" else None
+            ),
         )
-        await page.route(f"{LLM_URL}/models", lambda route: route.fulfill(
-            status=200, content_type="application/json", body='{"data":[]}'
-        ))
+        await page.route(
+            f"{LLM_URL}/models",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body='{"data":[]}'
+            ),
+        )
 
         async def model_reply(route: Any) -> None:
             nonlocal model_turns
@@ -231,9 +247,7 @@ async def run() -> dict[str, Any]:
                 assert box is not None
                 track = await page.get_by_test_id("slide-captcha-track").bounding_box()
                 assert track is not None
-                await page.mouse.move(
-                    box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-                )
+                await page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
                 await page.mouse.down()
                 await page.mouse.move(
                     track["x"] + track["width"],
@@ -255,9 +269,7 @@ async def run() -> dict[str, Any]:
             frame_element = page.locator('iframe[title="WebSkill"]')
             await frame_element.wait_for(state="attached", timeout=30000)
             await page.wait_for_timeout(1000)
-            frame = next(
-                (item for item in page.frames if item.url.endswith("/webskill/")), None
-            )
+            frame = next((item for item in page.frames if item.url.endswith("/webskill/")), None)
             assert frame is not None
             if CASE != "spreadsheet":
                 files = {
@@ -293,9 +305,7 @@ async def run() -> dict[str, Any]:
             await composer.fill(f"Produce the {CASE} fixture artifact.")
             await composer.press("Enter")
             if CASE == "spreadsheet":
-                await frame.get_by_text("ARTIFACT_READY", exact=True).wait_for(
-                    timeout=30000
-                )
+                await frame.get_by_text("ARTIFACT_READY", exact=True).wait_for(timeout=30000)
                 artifacts = await frame.evaluate(
                     """async () => {
                       const root = await navigator.storage.getDirectory();
@@ -391,9 +401,7 @@ async def run() -> dict[str, Any]:
                 await download.save_as(str(artifact))
                 if CASE == "bulletin":
                     document = Document(artifact)
-                    text = "\n".join(
-                        paragraph.text for paragraph in document.paragraphs
-                    )
+                    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
                 else:
                     presentation = Presentation(artifact)
                     text = "\n".join(
@@ -423,12 +431,8 @@ async def run() -> dict[str, Any]:
                     pdf = OUT / "bulletin.pdf"
                     pdf.write_bytes(base64.b64decode(printed["data"]))
                     reader = PdfReader(pdf)
-                    pdf_text = " ".join(
-                        (page.extract_text() or "") for page in reader.pages
-                    )
-                    normalized_pdf = re.sub(
-                        r"\s+", " ", unicodedata.normalize("NFKC", pdf_text)
-                    )
+                    pdf_text = " ".join((page.extract_text() or "") for page in reader.pages)
+                    normalized_pdf = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", pdf_text))
                     assert MARKER in normalized_pdf, normalized_pdf[:1000]
             channel = await frame.evaluate("() => window.__viewerTestChannel")
             assert isinstance(channel, str) and channel
@@ -492,23 +496,13 @@ async def run() -> dict[str, Any]:
                     {
                         "exportFormat": export_format,
                         "contentVerified": True,
-                        "reopenedWith": "python-docx"
-                        if CASE == "bulletin"
-                        else "python-pptx",
+                        "reopenedWith": "python-docx" if CASE == "bulletin" else "python-pptx",
                     }
                     if export_format is not None
                     else {}
                 ),
-                **(
-                    {"pdfVerified": True, "pdfReopenedWith": "pypdf"}
-                    if CASE == "bulletin"
-                    else {}
-                ),
-                **(
-                    {"printPagesVerified": print_pages}
-                    if CASE == "slides"
-                    else {}
-                ),
+                **({"pdfVerified": True, "pdfReopenedWith": "pypdf"} if CASE == "bulletin" else {}),
+                **({"printPagesVerified": print_pages} if CASE == "slides" else {}),
                 "wrongSourceRejected": True,
                 "wrongChannelRejected": True,
                 "closeRemovedDom": True,
@@ -523,9 +517,7 @@ async def run() -> dict[str, Any]:
                     await page.wait_for_timeout(100)
             except Exception:
                 pass
-            await page.screenshot(
-                path=str(OUT / f"viewer-{CASE}-failure.png"), full_page=True
-            )
+            await page.screenshot(path=str(OUT / f"viewer-{CASE}-failure.png"), full_page=True)
             current_viewer = next(
                 (item for item in page.frames if "/webskill/viewer/" in item.url),
                 None,
@@ -570,7 +562,8 @@ async def run() -> dict[str, Any]:
             }
         finally:
             await context.close()
-            await browser.close()
+            if browser is not None:
+                await browser.close()
 
 
 if __name__ == "__main__":

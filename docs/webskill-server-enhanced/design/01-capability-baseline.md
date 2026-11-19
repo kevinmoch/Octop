@@ -180,4 +180,4 @@ remoteImage、WebOffice、WebOfficeTemplate、DWG、页面声明技能/WebMCP �
 
 ## 10. R3 产物与 viewer
 
-DOCX/PPTX/XLSX/PDF/大屏与 isolated viewer 的切片证据见 [08-r3-artifact-journey.md](../verification/08-r3-artifact-journey.md)。文档场景仍为脚本化模型；真实模型文档任务、Console 审计串联、刷新/重开/重启恢复未完成。
+DOCX/PPTX/XLSX/PDF/大屏与 isolated viewer 的切片证据见 [08-r3-artifact-journey.md](../verification/08-r3-artifact-journey.md)。R3 本地 candidate 已覆盖真实模型 DOCX、Console/审计/刷新，以及固定 profile 的服务重启恢复；多格式真实模型与 Office GUI 人工验收仍是边界。
