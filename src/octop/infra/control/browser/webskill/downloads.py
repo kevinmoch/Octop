@@ -13,6 +13,7 @@ import shutil
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from .page_agent import resolve_browser
 from .sessions import BrowserAgentError, BrowserAgentSession
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+DOWNLOAD_TTL_SECONDS = 60 * 60
 
 
 @dataclass
@@ -129,7 +131,21 @@ async def _finish_download(
     )
 
 
+def _purge_expired(session: BrowserAgentSession) -> None:
+    now = datetime.now(UTC)
+    for download_id, record in list(session.downloads.items()):
+        try:
+            created = datetime.strptime(record.at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        except ValueError:
+            continue
+        if (now - created).total_seconds() <= DOWNLOAD_TTL_SECONDS:
+            continue
+        record.path.unlink(missing_ok=True)
+        session.downloads.pop(download_id, None)
+
+
 def list_downloads(session: BrowserAgentSession) -> list[dict[str, Any]]:
+    _purge_expired(session)
     return [
         {
             "id": record.id,
@@ -143,6 +159,7 @@ def list_downloads(session: BrowserAgentSession) -> list[dict[str, Any]]:
 
 
 def read_download(session: BrowserAgentSession, download_id: str) -> tuple[str, bytes]:
+    _purge_expired(session)
     record = session.downloads.get(download_id)
     if record is None or not record.path.is_file():
         raise BrowserAgentError("TOOL_EXECUTION_FAILED", "The download is not available")

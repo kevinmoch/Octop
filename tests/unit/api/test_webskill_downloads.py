@@ -159,3 +159,25 @@ def test_oversize_download_is_deleted_and_not_listed(tmp_path: Path, monkeypatch
     asyncio.run(scenario())
     assert list_downloads(session) == []
     assert not (directory / "large.bin").exists()
+
+
+def test_expired_download_is_purged(tmp_path: Path) -> None:
+    session = _session()
+    directory = tmp_path / "downloads"
+    directory.mkdir()
+    path = directory / "old.txt"
+    path.write_bytes(b"old")
+    from octop.infra.control.browser.webskill.downloads import DownloadRecord
+
+    session.download_dir = str(directory)
+    session.downloads_initialized = True
+    session.downloads["dl_old"] = DownloadRecord(
+        id="dl_old",
+        name="old.txt",
+        content_type="text/plain",
+        size=3,
+        at="2020-01-01T00:00:00Z",
+        path=path,
+    )
+    assert list_downloads(session) == []
+    assert not path.exists()

@@ -45,10 +45,11 @@
 
 ## 4. 本地可完成项（本轮）
 
-- downloads 会话隔离/清理：新增单测
+- downloads 会话隔离/清理/过期：新增单测
   - `read_download` 对另一个 session 的 id 返回不可用；
   - cleanup 删除字节文件与记录；
-  - 当前测试 **3 passed**。
+  - 超过 TTL 的记录在 list/read 时惰性删除；
+  - 当前测试 **5 passed**。
 - 多格式真实模型：
   - `authored-slides` 模型实际进入 `ask_user` 表单，但表单含复选框，脚本未完成表单提交；本轮不宣称 slides 真实模型通过。
   - DOCX 真实模型证据仍为有效切片；PPTX/XLSX/PDF 的真实模型验收仍未完成。
