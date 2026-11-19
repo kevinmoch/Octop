@@ -20,6 +20,12 @@ export interface PageActionRequest {
   value?: string;
 }
 
+export interface BrowserAgentTab {
+  handle: string;
+  title?: string;
+  url?: string;
+}
+
 export function isBrowserAgentSessionMissing(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -75,5 +81,33 @@ export const browserAgentApi = {
     request<{ deleted: boolean; recordingId: string }>(
       `/browser-agent/recordings/${encodeURIComponent(recordingId)}`,
       { method: "DELETE" },
+    ),
+  listTabs: (sessionId: string) =>
+    request<{ tabs: BrowserAgentTab[] }>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs`,
+    ),
+  focusTab: (sessionId: string, handle: string) =>
+    request<{ focused: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(
+        sessionId,
+      )}/tabs/${encodeURIComponent(handle)}/focus`,
+      { method: "POST" },
+    ),
+  closeTab: (sessionId: string, handle: string) =>
+    request<{ closed: string; focused?: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(
+        sessionId,
+      )}/tabs/${encodeURIComponent(handle)}`,
+      { method: "DELETE" },
+    ),
+  admitTab: (sessionId: string, opened: { title?: string; url?: string }) =>
+    request<{ handle: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs/admit`,
+      { method: "POST", body: JSON.stringify(opened) },
+    ),
+  resetTabs: (sessionId: string) =>
+    request<{ ok: boolean }>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs/reset`,
+      { method: "POST" },
     ),
 };

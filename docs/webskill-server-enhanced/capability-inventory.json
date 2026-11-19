@@ -104,12 +104,12 @@
         "pageTabs"
       ],
       "uiSurface": "Chatbot",
-      "status": "missing",
+      "status": "partial",
       "decision": "implement",
       "phase": "R2A",
       "requiresSdkChange": false,
       "currentEvidence": [],
-      "notes": "只允许不透明 handle；focus 只改 modelTarget，不改 viewTarget。"
+      "notes": "R2A 代码已接 tab workset API/Live UI 待验收。"
     },
     {
       "id": "page-paging",
@@ -120,12 +120,12 @@
         "pagePerceptionPaging"
       ],
       "uiSurface": "Chatbot",
-      "status": "missing",
+      "status": "partial",
       "decision": "implement",
       "phase": "R2A",
       "requiresSdkChange": false,
       "currentEvidence": [],
-      "notes": "使用 SDK 预算，不静默截断。"
+      "notes": "R2A 已接 PerceptionPagingBudget；真实大页面验收待补。"
     },
     {
       "id": "target-workset",

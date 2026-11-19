@@ -35,8 +35,8 @@ R0 不修改既有 FR/AC 的通过状态；新增/调整需求必须按需求变
 | Console 治理/候选 | candidate | 保留 | R1 |
 | 原生技能生成 `ToolStep → generate_skill` | **candidate：R1 真实外部模型本地闭环通过** | 保留 | R1 |
 | 已发布技能跨会话执行 | candidate（R1 新会话重新读取/执行） | 保留 | R1 |
-| `pageTabs` | missing | 实现 | R2A |
-| `pagePerceptionPaging` | missing | 实现 | R2A |
+| `pageTabs` | partial（代码/测试已接，真实 UI 待验收） | 实现 | R2A |
+| `pagePerceptionPaging` | partial（已接预算，真实大页面待验收） | 实现 | R2A |
 | PDF 直传/逐页 | missing | 实现 | R2B |
 | `pageImage` | missing | 实现 | R2B |
 | `downloads` | missing；Console `downloadedFiles=false` | 实现（仅当前会话已完成项） | R2B |

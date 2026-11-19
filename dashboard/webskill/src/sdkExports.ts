@@ -3,7 +3,12 @@ export {
   FsAuditLog,
   createCandidateSink,
 } from "@webskill/sdk/governance";
-export { PageActionPolicy, PagePerceptionPolicy } from "@webskill/sdk/agent";
+export {
+  PageActionPolicy,
+  PagePerceptionPolicy,
+  PERCEPTION_PAGING_DEFAULTS,
+  TabWorksetPolicy,
+} from "@webskill/sdk/agent";
 export {
   createBrowserChatbotHost,
   createRemotePageActionExecutor,

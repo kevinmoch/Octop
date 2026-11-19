@@ -15,7 +15,12 @@ export type HostApi =
   | "handoff"
   | "skill-draft"
   | "replay"
-  | "recording-delete";
+  | "recording-delete"
+  | "tabs-list"
+  | "tabs-focus"
+  | "tabs-close"
+  | "tabs-admit"
+  | "tabs-reset";
 
 type HostRequest = {
   channel: typeof HOST_CHANNEL;
@@ -70,7 +75,12 @@ export function isHostRequest(value: unknown): value is HostRequest {
     value.api !== "handoff" &&
     value.api !== "skill-draft" &&
     value.api !== "replay" &&
-    value.api !== "recording-delete"
+    value.api !== "recording-delete" &&
+    value.api !== "tabs-list" &&
+    value.api !== "tabs-focus" &&
+    value.api !== "tabs-close" &&
+    value.api !== "tabs-admit" &&
+    value.api !== "tabs-reset"
   )
     return false;
   return typeof value.sessionId === "string" && value.sessionId.length <= 128;

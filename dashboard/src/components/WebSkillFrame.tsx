@@ -24,7 +24,12 @@ type HostRequest = {
     | "handoff"
     | "skill-draft"
     | "replay"
-    | "recording-delete";
+    | "recording-delete"
+    | "tabs-list"
+    | "tabs-focus"
+    | "tabs-close"
+    | "tabs-admit"
+    | "tabs-reset";
   sessionId: string;
   payload?: unknown;
 };
@@ -44,7 +49,12 @@ function isRequest(value: unknown): value is HostRequest {
       data.api === "handoff" ||
       data.api === "skill-draft" ||
       data.api === "replay" ||
-      data.api === "recording-delete")
+      data.api === "recording-delete" ||
+      data.api === "tabs-list" ||
+      data.api === "tabs-focus" ||
+      data.api === "tabs-close" ||
+      data.api === "tabs-admit" ||
+      data.api === "tabs-reset")
   );
 }
 
@@ -217,6 +227,74 @@ export default function WebSkillFrame({
             respond({
               ok: true,
               result: await browserAgentApi.deleteRecording(recordingId),
+            });
+          } else if (data.api === "tabs-list") {
+            respond({
+              ok: true,
+              result: await browserAgentApi.listTabs(sessionId),
+            });
+          } else if (data.api === "tabs-reset") {
+            respond({
+              ok: true,
+              result: await browserAgentApi.resetTabs(sessionId),
+            });
+          } else if (data.api === "tabs-focus" || data.api === "tabs-close") {
+            const payload = data.payload;
+            if (
+              typeof payload !== "object" ||
+              payload === null ||
+              Array.isArray(payload) ||
+              typeof (payload as Record<string, unknown>).handle !== "string" ||
+              !/^tab_[A-Za-z0-9_-]{20,80}$/.test(
+                (payload as Record<string, unknown>).handle as string,
+              )
+            )
+              throw new Error("Invalid page handle");
+            const handle = (payload as Record<string, unknown>)
+              .handle as string;
+            respond({
+              ok: true,
+              result:
+                data.api === "tabs-focus"
+                  ? await browserAgentApi.focusTab(sessionId, handle)
+                  : await browserAgentApi.closeTab(sessionId, handle),
+            });
+          } else if (data.api === "tabs-admit") {
+            const payload = data.payload;
+            if (
+              payload !== undefined &&
+              (typeof payload !== "object" ||
+                payload === null ||
+                Array.isArray(payload) ||
+                Object.keys(payload).some(
+                  (key) => key !== "title" && key !== "url",
+                ) ||
+                ("title" in payload &&
+                  (typeof payload.title !== "string" ||
+                    payload.title.length > 300)) ||
+                ("url" in payload &&
+                  (typeof payload.url !== "string" ||
+                    payload.url.length > 2048)))
+            )
+              throw new Error("Invalid opened page");
+            respond({
+              ok: true,
+              result: await browserAgentApi.admitTab(
+                sessionId,
+                payload === undefined
+                  ? {}
+                  : {
+                      ...((payload as Record<string, unknown>).title !==
+                      undefined
+                        ? {
+                            title: (payload as Record<string, string>).title,
+                          }
+                        : {}),
+                      ...((payload as Record<string, unknown>).url !== undefined
+                        ? { url: (payload as Record<string, string>).url }
+                        : {}),
+                    },
+              ),
             });
           } else {
             const payload = data.payload;

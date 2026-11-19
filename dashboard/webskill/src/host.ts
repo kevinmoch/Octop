@@ -13,8 +13,10 @@ import type { ConsoleProps } from "@webskill/console";
 import {
   CandidateStore,
   FsAuditLog,
+  PERCEPTION_PAGING_DEFAULTS,
   PageActionPolicy,
   PagePerceptionPolicy,
+  TabWorksetPolicy,
   createBrowserChatbotHost,
   createRemotePageActionExecutor,
   createRemotePerceptionReader,
@@ -48,6 +50,7 @@ import {
   submitRecordedSkill,
 } from "./recordingSkills";
 import { OctopPageAgentTransport } from "./transport";
+import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
 
 export type ConsolePage = NonNullable<ConsoleProps["initialPage"]>;
 
@@ -109,7 +112,15 @@ export async function createWebSkillHost(
     audit,
   });
   const pageActionUi: { current?: PageActionUi } = {};
-  const pageActions = new PageActionPolicy({
+  const tabPort = new OctopTabWorksetPort(bridge);
+  let pageActions: PageActionPolicy | undefined;
+  const pageTabs = new TabWorksetPolicy({
+    port: tabPort,
+    enabled: () => pageActions?.enabled === true,
+    audit,
+    maxTabs: () => 8,
+  });
+  pageActions = new PageActionPolicy({
     scope: { include: ["body"] },
     executor: createRemotePageActionExecutor({ transport, targets }),
     ui: {
@@ -120,7 +131,19 @@ export async function createWebSkillHost(
     audit,
     diagnose: (ref) => explainResolution(targets.resolve(ref)),
     describePage: () => currentPage,
+    tabWatcher: createRemoteTabWatcher(tabPort),
+    workset: {
+      admit: async (opened) => {
+        const handle = await tabPort.admit(opened);
+        return { admitted: true, handle };
+      },
+    },
   });
+  const perceptionPaging = {
+    enabled: true,
+    maxNodes: PERCEPTION_PAGING_DEFAULTS.maxNodes,
+    maxChars: PERCEPTION_PAGING_DEFAULTS.maxChars,
+  };
   const bundle = createBrowserChatbotHost({
     fs,
     managedRoot: "/managed",
@@ -135,7 +158,9 @@ export async function createWebSkillHost(
   const adapter: ChatbotHostAdapter = {
     ...bundle.chatbotAdapter,
     pagePerception,
+    pagePerceptionPaging: perceptionPaging,
     pageActions,
+    pageTabs,
     linkedDocuments: createFetchLinkedDocumentReader(),
     docxExtractor: extractDocxText,
     xlsxExtractor: extractXlsxText,

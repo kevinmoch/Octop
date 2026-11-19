@@ -67,6 +67,18 @@ const available: CapabilityItem[] = [
 
 const inProgress: CapabilityItem[] = [
   {
+    id: "page-tabs",
+    zh: "标签页 workset（R2A 实现中）",
+    en: "Tab workset (R2A in progress)",
+    state: "in-progress",
+  },
+  {
+    id: "page-paging",
+    zh: "大页面分段读取（R2A 实现中）",
+    en: "Large-page perception paging (R2A in progress)",
+    state: "in-progress",
+  },
+  {
     id: "capability-ui",
     zh: "能力状态与不支持替代路径",
     en: "Capability status and unsupported paths",
@@ -75,18 +87,6 @@ const inProgress: CapabilityItem[] = [
 ];
 
 const planned: CapabilityItem[] = [
-  {
-    id: "page-tabs",
-    zh: "标签页枚举、聚焦与关闭",
-    en: "Tab enumeration, focus and close",
-    state: "planned",
-  },
-  {
-    id: "page-paging",
-    zh: "大页面分段读取",
-    en: "Large-page perception paging",
-    state: "planned",
-  },
   {
     id: "pdf-input",
     zh: "PDF 读取与逐页处理",

@@ -57,6 +57,7 @@ class BrowserAgentSession:
     model_target: str | None = None
     base_target_id: str | None = None
     model_targets: set[str] = field(default_factory=set)
+    tab_handles: dict[str, str] = field(default_factory=dict)
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
     connection_id: str | None = None
@@ -71,7 +72,7 @@ class BrowserAgentSession:
                 "frames": True,
                 "oopif": False,
                 "imageCapture": False,
-                "targetWorkset": False,
+                "targetWorkset": True,
                 "actions": sorted(SUPPORTED_ACTIONS),
             },
             **({"document": self.document.public()} if self.document is not None else {}),
@@ -172,6 +173,7 @@ class BrowserAgentRegistry:
         if disconnected is not None:
             disconnected.model_target = None
             disconnected.model_targets.clear()
+            disconnected.tab_handles.clear()
             disconnected.document = None
             disconnected.refs.clear()
             return disconnected

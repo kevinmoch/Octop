@@ -31,6 +31,13 @@ from octop.infra.control.browser.webskill.skill_drafts import (
     RECORDING_ID_PATTERN,
     create_recorded_skill_draft,
 )
+from octop.infra.control.browser.webskill.tabs import (
+    admit_workset_tab,
+    close_workset_tab,
+    focus_workset_tab,
+    list_workset_tabs,
+    reset_workset,
+)
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
@@ -56,6 +63,12 @@ class SkillDraftBody(BaseModel):
     recording_id: str | None = Field(
         default=None, alias="recordingId", min_length=1, max_length=128
     )
+
+
+class TabAdmitBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, max_length=300)
+    url: str | None = Field(default=None, max_length=2048)
 
 
 def _origin_parts(value: str) -> tuple[str, str, int | None]:
@@ -280,6 +293,128 @@ async def issue_grant(
             },
         )
         return {"grant": grant, "expiresIn": GRANT_TTL_SECONDS}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.get(
+    "/browser-agent/sessions/{session_id}/tabs",
+    summary="List the restricted model tab workset",
+)
+async def list_tabs(
+    session_id: str,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        session = browser_agent_registry.get(session_id, user.id)
+        tabs = await list_workset_tabs(session, resolver=resolve_harness_session)
+        return {"tabs": tabs}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/tabs/reset",
+    summary="Release the model tab workset without closing any page",
+)
+async def reset_tabs(
+    session_id: str,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, bool]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        reset_workset(session)
+        browser_agent_registry.revoke_grants(session_id=session.id)
+        return {"ok": True}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/tabs/{handle}/focus",
+    summary="Focus a page for the model without changing the user's view",
+)
+async def focus_tab(
+    session_id: str,
+    handle: str,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        result = await focus_workset_tab(session, handle, resolver=resolve_harness_session)
+        browser_agent_registry.revoke_grants(session_id=session.id)
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.tab.focused",
+            session.id,
+            {"handle": handle},
+        )
+        return result
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.delete(
+    "/browser-agent/sessions/{session_id}/tabs/{handle}",
+    summary="Close a page in the model tab workset",
+)
+async def close_tab(
+    session_id: str,
+    handle: str,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        result = await close_workset_tab(session, handle, resolver=resolve_harness_session)
+        browser_agent_registry.revoke_grants(session_id=session.id)
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.tab.closed",
+            session.id,
+            {"handle": handle},
+        )
+        return result
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/tabs/admit",
+    summary="Admit a page opened by a model action into the workset",
+)
+async def admit_tab(
+    session_id: str,
+    body: TabAdmitBody,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        handle = await admit_workset_tab(
+            session,
+            {"title": body.title, "url": body.url},
+            resolver=resolve_harness_session,
+        )
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.tab.admitted",
+            session.id,
+            {"handle": handle},
+        )
+        return {"handle": handle}
     except BrowserAgentError as error:
         raise _http_error(error) from error
 
