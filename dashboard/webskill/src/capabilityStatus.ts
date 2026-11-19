@@ -58,6 +58,12 @@ const available: CapabilityItem[] = [
     state: "available",
   },
   {
+    id: "pdf-input",
+    zh: "PDF 文本回退（R2B 实现中）",
+    en: "PDF text fallback (R2B in progress)",
+    state: "in-progress",
+  },
+  {
     id: "page-image",
     zh: "页面元素/区域图片（R2B 本地候选）",
     en: "Page element/region images (R2B local candidate)",
@@ -93,12 +99,6 @@ const inProgress: CapabilityItem[] = [
 ];
 
 const planned: CapabilityItem[] = [
-  {
-    id: "pdf-input",
-    zh: "PDF 读取与逐页处理",
-    en: "PDF reading and paging",
-    state: "planned",
-  },
   {
     id: "downloads",
     zh: "当前会话下载文件",

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
+import io
 import json
 import logging
 from typing import Any
@@ -11,6 +14,7 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field
+from pypdf import PdfReader
 
 from octop.api.deps import require_permission
 from octop.api.routers.browser.harness import control_owner_for, resolve_harness_session
@@ -70,6 +74,11 @@ class TabAdmitBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, max_length=300)
     url: str | None = Field(default=None, max_length=2048)
+
+
+class PdfExtractBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    data: str = Field(min_length=1, max_length=28_000_000)
 
 
 def _origin_parts(value: str) -> tuple[str, str, int | None]:
@@ -294,6 +303,57 @@ async def issue_grant(
             },
         )
         return {"grant": grant, "expiresIn": GRANT_TTL_SECONDS}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/pdf/extract",
+    summary="Extract text from PDF bytes without exposing a server path",
+)
+async def extract_pdf(
+    body: PdfExtractBody,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        try:
+            raw = base64.b64decode(body.data, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise BrowserAgentError(
+                "ACTION_INVALID", "PDF data is not valid base64", status=400
+            ) from error
+        if len(raw) > 20 * 1024 * 1024:
+            raise BrowserAgentError("ACTION_INVALID", "PDF exceeds the 20 MB limit", status=400)
+        try:
+            reader = PdfReader(io.BytesIO(raw))
+            if reader.is_encrypted:
+                raise BrowserAgentError(
+                    "ACTION_INVALID", "Encrypted PDFs are not supported", status=400
+                )
+            texts = []
+            for page in reader.pages:
+                texts.append(page.extract_text() or "")
+        except BrowserAgentError:
+            raise
+        except Exception as error:
+            raise BrowserAgentError(
+                "ACTION_INVALID", "The PDF could not be parsed", status=400
+            ) from error
+        text = "\n\n".join(texts)
+        truncated = len(text) > 200_000
+        if truncated:
+            text = text[:200_000] + "\n[PDF text truncated at 200000 characters]"
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.pdf.extracted",
+            "pdf",
+            {"bytes": len(raw), "pages": len(reader.pages), "truncated": truncated},
+        )
+        return {"text": text, "pages": len(reader.pages), "truncated": truncated}
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

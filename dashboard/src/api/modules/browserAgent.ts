@@ -110,4 +110,9 @@ export const browserAgentApi = {
       `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs/reset`,
       { method: "POST" },
     ),
+  extractPdf: (data: string) =>
+    request<{ text: string; pages: number; truncated: boolean }>(
+      "/browser-agent/pdf/extract",
+      { method: "POST", body: JSON.stringify({ data }) },
+    ),
 };

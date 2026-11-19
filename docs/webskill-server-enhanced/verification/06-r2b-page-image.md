@@ -68,3 +68,20 @@ UV_NO_SYNC=1 ... pytest tests/unit/api/test_webskill_capture.py -q
 - pageImage 是本地 candidate，不是 production/上游发布；
 - 只验证主文档 element screenshot；不能宣称任意 frame/图片格式已覆盖；
 - 未推送远端、未创建远端分支；未修改/发布 SDK。
+
+## 6. PDF 文本回退（部分）
+
+- 新增 `POST /api/browser-agent/pdf/extract`：
+  - 只接收 base64 字节，不接收路径/URL；
+  - same-origin + `browser` 权限；
+  - 20 MB 上限；
+  - pypdf 逐页 `extract_text()`，超过 200000 字符截断并明确标记；
+  - 返回 text/pages/truncated，不返回服务器路径。
+- 宿主 `pdfExtractor` 通过 bridge 调用该端点；未接 `pdfDocumentReader`。
+- 测试：`tests/unit/api/test_webskill_pdf.py` 2 passed（文本、页数、坏 base64、跨源拒绝）。
+
+**仍缺**：PDF 逐页 reader/渲染、PDF 图片、真实附件 UI 验收。因此 `pdf-input` 保持 `partial`，R2B 不整体通过。
+
+## 7. downloads
+
+`downloads` 尚未实现；`Console hostCapabilities.downloadedFiles` 仍为 `false`。R2B 仍缺这一项。

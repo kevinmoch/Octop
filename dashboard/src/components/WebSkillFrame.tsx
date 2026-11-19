@@ -29,7 +29,8 @@ type HostRequest = {
     | "tabs-focus"
     | "tabs-close"
     | "tabs-admit"
-    | "tabs-reset";
+    | "tabs-reset"
+    | "pdf-extract";
   sessionId: string;
   payload?: unknown;
 };
@@ -54,7 +55,8 @@ function isRequest(value: unknown): value is HostRequest {
       data.api === "tabs-focus" ||
       data.api === "tabs-close" ||
       data.api === "tabs-admit" ||
-      data.api === "tabs-reset")
+      data.api === "tabs-reset" ||
+      data.api === "pdf-extract")
   );
 }
 
@@ -227,6 +229,24 @@ export default function WebSkillFrame({
             respond({
               ok: true,
               result: await browserAgentApi.deleteRecording(recordingId),
+            });
+          } else if (data.api === "pdf-extract") {
+            const payload = data.payload;
+            if (
+              typeof payload !== "object" ||
+              payload === null ||
+              Array.isArray(payload) ||
+              Object.keys(payload).some((key) => key !== "data") ||
+              typeof (payload as Record<string, unknown>).data !== "string" ||
+              ((payload as Record<string, unknown>).data as string).length >
+                28_000_000
+            )
+              throw new Error("Invalid PDF payload");
+            respond({
+              ok: true,
+              result: await browserAgentApi.extractPdf(
+                (payload as Record<string, string>).data,
+              ),
             });
           } else if (data.api === "tabs-list") {
             respond({

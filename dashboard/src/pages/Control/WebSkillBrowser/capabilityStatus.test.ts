@@ -13,7 +13,7 @@ describe("capability status projection", () => {
     );
     expect(items.get("page-tabs")).toBe("available");
     expect(items.get("page-paging")).toBe("available");
-    expect(items.get("pdf-input")).toBe("planned");
+    expect(items.get("pdf-input")).toBe("in-progress");
     expect(items.get("downloads")).toBe("planned");
     expect(items.get("remote-image")).toBe("unsupported");
     expect(items.get("web-office")).toBe("unsupported");

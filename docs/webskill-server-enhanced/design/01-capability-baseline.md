@@ -37,7 +37,7 @@ R0 不修改既有 FR/AC 的通过状态；新增/调整需求必须按需求变
 | 已发布技能跨会话执行 | candidate（R1 新会话重新读取/执行） | 保留 | R1 |
 | `pageTabs` | candidate（R2A 真实 UI+模型通过） | 保留 | R2A |
 | `pagePerceptionPaging` | candidate（segment 1→cursor→segment 2 真实通过） | 保留 | R2A |
-| PDF 直传/逐页 | missing | 实现 | R2B |
+| PDF 直传/逐页 | partial（pypdf 文本回退；逐页/渲染待补） | 实现 | R2B |
 | `pageImage` | candidate（真实 UI+模型主文档取像） | 保留 | R2B |
 | `downloads` | missing；Console `downloadedFiles=false` | 实现（仅当前会话已完成项） | R2B |
 | `remoteImage` | unsupported | 默认不支持；独立 SSRF 评审后另议 | R2C |

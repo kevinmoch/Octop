@@ -156,6 +156,19 @@ export async function createWebSkillHost(
     },
     pagePerception,
   });
+  const pdfExtractor = async (bytes: Uint8Array): Promise<string> => {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    const result = await bridge.call("pdf-extract", { data: btoa(binary) });
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      typeof (result as Record<string, unknown>).text !== "string"
+    ) {
+      throw new Error("The host PDF extractor returned an invalid response");
+    }
+    return (result as Record<string, string>).text;
+  };
   const adapter: ChatbotHostAdapter = {
     ...bundle.chatbotAdapter,
     pagePerception,
@@ -164,6 +177,7 @@ export async function createWebSkillHost(
     pageImage: createRemotePageImageHost({ transport }),
     pageTabs,
     linkedDocuments: createFetchLinkedDocumentReader(),
+    pdfExtractor,
     docxExtractor: extractDocxText,
     xlsxExtractor: extractXlsxText,
     pptxExtractor: extractPptxText,
