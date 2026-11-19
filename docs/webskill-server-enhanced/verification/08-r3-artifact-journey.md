@@ -83,7 +83,15 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
 4. 用户确认打开文档；真实 viewer 中看到标题 `Octop real-model bulletin`。
 5. 页面错误为 0。
 
-这补上了“真实外部模型文档任务”的证据，但仍是单一 DOCX 场景，不是 Office GUI 人工验收。
+这补上了“真实外部模型文档任务”的证据，但当时仍是单一 DOCX 场景。随后补充了真实模型 XLSX：
+
+- 真实 `qwen3.5:9b` 调用 `export_spreadsheet`
+- 生成 `chat/artifacts/run-jg5pm7t7/octop-r3.xlsx`
+- openpyxl 重开得到 `[["Metric","Value"],["Octop real-model xlsx",42]]`
+- 2 次模型请求，0 页面错误
+- 证据：`.artifacts/webskill-p1/ui/ui-result-r3-real-model-spreadsheet.json`
+
+因此真实外部模型当前覆盖 **DOCX + XLSX**；PPTX/大屏仍是脚本化，Office GUI 人工验收仍未做。
 
 ### Console / refresh 补充
 

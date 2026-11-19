@@ -463,9 +463,14 @@
       "phase": "R3",
       "requiresSdkChange": false,
       "currentEvidence": [
-        "P3 document/viewer artifacts"
+        ".artifacts/webskill-p1/ui/ui-result-document-bulletin.json",
+        ".artifacts/webskill-p1/ui/ui-result-document-slides.json",
+        ".artifacts/webskill-p1/ui/ui-result-document-spreadsheet.json",
+        ".artifacts/webskill-p1/ui/ui-result-r3-real-model-document.json",
+        ".artifacts/webskill-p1/ui/ui-result-r3-real-model-spreadsheet.json",
+        ".artifacts/webskill-p1/ui/ui-result-viewer.json"
       ],
-      "notes": "幻灯片原生 PDF 未通过；脚本化模型与外部模型分栏。"
+      "notes": "真实模型 DOCX + XLSX 已通过；PPTX/大屏仍脚本化；viewer/导出/重开证据见 R3。"
     },
     {
       "id": "skill-governance",
