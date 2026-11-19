@@ -135,3 +135,45 @@ body {
   border: 0;
   background: var(--background);
 }
+
+.host-footer p {
+  margin: 0 0 4px;
+}
+.capability-status {
+  margin-top: 2px;
+}
+.capability-status > summary {
+  cursor: pointer;
+  color: var(--foreground);
+}
+.capability-group {
+  margin: 6px 0;
+}
+.capability-group h2 {
+  margin: 0 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.capability-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.capability-group li {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  line-height: 1.45;
+}
+.capability-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.capability-badge.unsupported {
+  color: var(--destructive);
+}

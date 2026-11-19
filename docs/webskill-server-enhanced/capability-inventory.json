@@ -1,0 +1,517 @@
+{
+  "schemaVersion": 1,
+  "baseline": {
+    "octopCommit": "facb499b3",
+    "octopVersion": "1.0.3b6",
+    "browserVersion": "1.1.0+webskill.local.2",
+    "browserCommit": "43363a4",
+    "browserWheelSha256": "b66182b2970113c5b39c1c2bf8a60656cee6b7bbc4b42eb85bbbca2f2b5ba5f7",
+    "sdk": "0.29.0",
+    "chatbot": "0.26.0",
+    "console": "0.22.5",
+    "status": "candidate"
+  },
+  "statusVocabulary": [
+    "supported",
+    "candidate",
+    "partial",
+    "missing",
+    "unsupported",
+    "not-applicable",
+    "blocked"
+  ],
+  "decisionVocabulary": [
+    "keep",
+    "implement",
+    "probe",
+    "defer",
+    "unsupported"
+  ],
+  "phaseVocabulary": [
+    "R0",
+    "R1",
+    "R2A",
+    "R2B",
+    "R2C",
+    "R3",
+    "R4"
+  ],
+  "capabilities": [
+    {
+      "id": "session-runtime",
+      "category": "runtime",
+      "title": "WebSkill 会话、OPFS、模型与 Token 独立运行时",
+      "sdkSurface": "Chatbot/Console runtimeConfig, llm, OPFS",
+      "hostWiring": [
+        "runtimeConfig",
+        "llm"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 ui-result-skill-execution.json"
+      ],
+      "notes": "不以 Octop 模型或 Token 账本替代；LNA 拒绝仍按独立边界记录。"
+    },
+    {
+      "id": "page-main-document",
+      "category": "page",
+      "title": "主文档感知与白名单动作",
+      "sdkSurface": "PagePerceptionPolicy/PageActionPolicy",
+      "hostWiring": [
+        "pagePerception",
+        "pageActions",
+        "targets"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P1/P2/P3 real browser artifacts"
+      ],
+      "notes": "ref/grant/文档身份已有真实证据。"
+    },
+    {
+      "id": "page-frame-oopif",
+      "category": "page",
+      "title": "同源 frame、跨源 OOPIF 与嵌套 frame",
+      "sdkSurface": "FrameRouter/PageAgent frame identity",
+      "hostWiring": [
+        "pagePerception",
+        "pageActions"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P2/P3 frame and OOPIF artifacts"
+      ],
+      "notes": "嵌套 OOPIF 已通过；后续按 R2A 回归。"
+    },
+    {
+      "id": "page-tabs",
+      "category": "page",
+      "title": "标签页枚举、聚焦与关闭",
+      "sdkSurface": "TabWorksetPort / LIST_PAGE_TABS_TOOL",
+      "hostWiring": [
+        "pageTabs"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "missing",
+      "decision": "implement",
+      "phase": "R2A",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "只允许不透明 handle；focus 只改 modelTarget，不改 viewTarget。"
+    },
+    {
+      "id": "page-paging",
+      "category": "page",
+      "title": "大页面分段读取",
+      "sdkSurface": "PagePerceptionPolicy paging budget",
+      "hostWiring": [
+        "pagePerceptionPaging"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "missing",
+      "decision": "implement",
+      "phase": "R2A",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "使用 SDK 预算，不静默截断。"
+    },
+    {
+      "id": "target-workset",
+      "category": "page",
+      "title": "viewTarget/modelTarget 双指针与新 target 工作集",
+      "sdkSurface": "TabWorksetPolicy / target envelope",
+      "hostWiring": [
+        "targets"
+      ],
+      "uiSurface": "Chatbot/Octop viewer",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R2A",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P2/P3 target artifacts"
+      ],
+      "notes": "P3 已修 target scope；R2A 做完整对等矩阵。"
+    },
+    {
+      "id": "action-grants",
+      "category": "security",
+      "title": "普通动作与回放步一次性 grant",
+      "sdkSurface": "PageActionRequest/grant",
+      "hostWiring": [
+        "pageActions"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P1/P3 grant tests/artifacts"
+      ],
+      "notes": "回放 page/direct 已绑定 replayId/actionIndex。"
+    },
+    {
+      "id": "takeover-write-lock",
+      "category": "security",
+      "title": "接管写拦截与 profile lease",
+      "sdkSurface": "host policy + octop-browser lease",
+      "hostWiring": [],
+      "uiSurface": "Chatbot/Octop viewer",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R4",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P2 writer/takeover artifacts"
+      ],
+      "notes": "多 worker owner 状态仍需 R4 硬化。"
+    },
+    {
+      "id": "native-skill-generation",
+      "category": "skill",
+      "title": "真实会话 ToolStep → generate_skill 原生技能生成",
+      "sdkSurface": "Chatbot agentCapabilities.skillGeneration / FsToolStepStore / GENERATE_SKILL_TOOL / SkillGenerator",
+      "hostWiring": [
+        "skillCandidates",
+        "governance"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "partial",
+      "decision": "implement",
+      "phase": "R1",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "当前固定模板候选不是原生学习证据；R1 必须用真实外部模型闭环。"
+    },
+    {
+      "id": "native-skill-execution",
+      "category": "skill",
+      "title": "已发布技能在另一会话重新感知执行",
+      "sdkSurface": "skill discovery/read_skill_file/PageAgent",
+      "hostWiring": [
+        "skillCandidates",
+        "governance"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "implement",
+      "phase": "R1",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 ui-result-skill-execution.json"
+      ],
+      "notes": "P3 已执行已发布候选；R1 要证明它来自原生生成，且无 ReplayRunner。"
+    },
+    {
+      "id": "recording-candidate",
+      "category": "recording",
+      "title": "人工录制转固定模板候选",
+      "sdkSurface": "StepsDocument → GeneratedSkillDraft",
+      "hostWiring": [
+        "createRecordedCandidate",
+        "skillCandidates"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 ui-result-skill-draft.json"
+      ],
+      "notes": "明确是 Octop 辅助，不冒充原生技能学习。"
+    },
+    {
+      "id": "recording-replay",
+      "category": "recording",
+      "title": "受限录制回放与逐步 grant",
+      "sdkSurface": "ReplayRunner + Octop replay scope",
+      "hostWiring": [
+        "replayRecorded"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 replay artifacts"
+      ],
+      "notes": "可选 Octop 辅助；不是技能执行或完整能力替代。"
+    },
+    {
+      "id": "recording-lifecycle",
+      "category": "recording",
+      "title": "录制 30 天/50 份生命周期与删除",
+      "sdkSurface": "RecordingStore retention/delete",
+      "hostWiring": [],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 ui-result-recording-lifecycle.json"
+      ],
+      "notes": "删除级联、tombstone 不含原始输入。"
+    },
+    {
+      "id": "docx-xlsx-pptx-read",
+      "category": "document",
+      "title": "DOCX/XLSX/PPTX 文本、块与模板读取",
+      "sdkSurface": "Docx/Xlsx/Pptx extractors and readers",
+      "hostWiring": [
+        "docxExtractor",
+        "xlsxExtractor",
+        "pptxExtractor",
+        "docxTemplateEngine",
+        "xlsxTemplateEngine"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R3",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 document artifacts"
+      ],
+      "notes": "真实文件重开；Office GUI 人工验收仍是边界。"
+    },
+    {
+      "id": "pdf-input",
+      "category": "document",
+      "title": "PDF 直传、回退与逐页读取",
+      "sdkSurface": "pdfExtractor / pdfDocumentReader",
+      "hostWiring": [
+        "pdfExtractor",
+        "pdfDocumentReader"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "missing",
+      "decision": "implement",
+      "phase": "R2B",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "只通过受控字节通道；不暴露路径。"
+    },
+    {
+      "id": "page-image",
+      "category": "resource",
+      "title": "页面元素/区域图片",
+      "sdkSurface": "PageImageCapture / createPageImageToolSource",
+      "hostWiring": [
+        "pageImage"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "missing",
+      "decision": "implement",
+      "phase": "R2B",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "按 target/frame/ref 取图，预算与超时明确。"
+    },
+    {
+      "id": "downloads",
+      "category": "resource",
+      "title": "当前会话下载文件读取",
+      "sdkSurface": "DownloadedFileReader / LIST_DOWNLOADED_FILES_TOOL",
+      "hostWiring": [
+        "downloads"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "missing",
+      "decision": "implement",
+      "phase": "R2B",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "Console downloadedFiles 仍为 false；只读当前会话已完成项，无路径。"
+    },
+    {
+      "id": "remote-image",
+      "category": "resource",
+      "title": "外链图片",
+      "sdkSurface": "RemoteImageFetch / createRemoteImageToolSource",
+      "hostWiring": [
+        "remoteImage"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "unsupported",
+      "decision": "probe",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "默认不在服务端抓取任意 URL；如做必须独立 SSRF 评审。"
+    },
+    {
+      "id": "web-office",
+      "category": "resource",
+      "title": "WebOffice 读取与截图",
+      "sdkSurface": "webOffice hook/relay",
+      "hostWiring": [
+        "webOffice"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "unsupported",
+      "decision": "probe",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "默认不支持；不得暴露 requestkey。"
+    },
+    {
+      "id": "web-office-template",
+      "category": "resource",
+      "title": "WebOffice 原件模板",
+      "sdkSurface": "webOfficeTemplateSource",
+      "hostWiring": [
+        "webOfficeTemplateSource"
+      ],
+      "uiSurface": "Chatbot",
+      "status": "unsupported",
+      "decision": "unsupported",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "默认不支持；不重建伪原件。"
+    },
+    {
+      "id": "dwg",
+      "category": "resource",
+      "title": "DWG 读取与投放",
+      "sdkSurface": "DwgDocumentReader / VIEW_DWG_TOOL",
+      "hostWiring": [
+        "dwg"
+      ],
+      "uiSurface": "Chatbot/Viewer",
+      "status": "unsupported",
+      "decision": "probe",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "默认不支持；如做需独立 Worker/安全/字体/几何评审。"
+    },
+    {
+      "id": "page-declared-skill",
+      "category": "skill",
+      "title": "页面声明技能 / WebMCP",
+      "sdkSurface": "not proven",
+      "hostWiring": [],
+      "uiSurface": "Chatbot",
+      "status": "unsupported",
+      "decision": "unsupported",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "默认不支持；不与 Octop 连接器合并；如做单独立项。"
+    },
+    {
+      "id": "remote-mcp",
+      "category": "skill",
+      "title": "远程 MCP 管理",
+      "sdkSurface": "WebSkill own",
+      "hostWiring": [],
+      "uiSurface": "Console",
+      "status": "not-applicable",
+      "decision": "unsupported",
+      "phase": "R2C",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "WebSkill 自有端点，不接 Octop 账本。"
+    },
+    {
+      "id": "document-export-viewer",
+      "category": "document",
+      "title": "DOCX/XLSX/PPTX/PDF/大屏导出与 opaque viewer",
+      "sdkSurface": "documentSurface/viewer/export",
+      "hostWiring": [
+        "documentSurface"
+      ],
+      "uiSurface": "Chatbot/Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R3",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 document/viewer artifacts"
+      ],
+      "notes": "幻灯片原生 PDF 未通过；脚本化模型与外部模型分栏。"
+    },
+    {
+      "id": "skill-governance",
+      "category": "skill",
+      "title": "Console 候选审核、发布、撤销与版本",
+      "sdkSurface": "CandidateStore/createGovernanceFacade",
+      "hostWiring": [
+        "governance",
+        "skillCandidates"
+      ],
+      "uiSurface": "Console",
+      "status": "candidate",
+      "decision": "keep",
+      "phase": "R1",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "P3 skill draft/execution artifacts"
+      ],
+      "notes": "R1 需真实轨迹候选走同一 sink。"
+    },
+    {
+      "id": "capability-ui",
+      "category": "ui",
+      "title": "UI 能力状态与不支持替代路径",
+      "sdkSurface": "hostCapabilities / Chatbot/Console",
+      "hostWiring": [],
+      "uiSurface": "Chatbot/Console",
+      "status": "partial",
+      "decision": "keep",
+      "phase": "R0",
+      "requiresSdkChange": false,
+      "currentEvidence": [
+        "dashboard/webskill/src/capabilityStatus.ts",
+        "dashboard/webskill/src/App.tsx"
+      ],
+      "notes": "R0 已提供简版能力状态投影；逐端口真实状态仍以 capability-inventory.json 与测试为准。"
+    },
+    {
+      "id": "ordinary-trusted-tls",
+      "category": "deployment",
+      "title": "普通受信 TLS 真实验收",
+      "sdkSurface": "n/a",
+      "hostWiring": [],
+      "uiSurface": "Octop",
+      "status": "blocked",
+      "decision": "implement",
+      "phase": "R4",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "P2/P3 仍为失败证据；不能用 LNA/denial 或 viewer 证据替代。"
+    },
+    {
+      "id": "docker-wheel",
+      "category": "deployment",
+      "title": "新 wheel 的 Docker 干净构建",
+      "sdkSurface": "n/a",
+      "hostWiring": [],
+      "uiSurface": "Octop",
+      "status": "blocked",
+      "decision": "implement",
+      "phase": "R4",
+      "requiresSdkChange": false,
+      "currentEvidence": [],
+      "notes": "本地 wheel 已入版本库；Docker 构建仍未通过。"
+    }
+  ]
+}

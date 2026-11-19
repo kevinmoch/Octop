@@ -1,7 +1,16 @@
 # Octop 服务端增强版设计
 
-> 状态：🟢 P0/P1/P2 已完成（本地 fork candidate）；🟢 允许进入 P3；实际支持能力以对应 FR/AC 的真实证据为准。
+> 状态：🟢 P0/P1/P2 本地候选；🟢 P3 本地 candidate；🟡 R0 能力整改基线已建立，R1 原生技能学习待验收。实际支持能力以 [R0 能力基线](01-capability-baseline.md)、[capability-inventory.json](../capability-inventory.json) 和对应证据为准。
 > 需求与编号见 [../00-requirements-overview.md](../00-requirements-overview.md)。
+
+## 0. R0 能力合同（2026-11-19）
+
+- 能力状态以 [capability-inventory.json](../capability-inventory.json) 为机器可读事实源；[01-capability-baseline.md](01-capability-baseline.md) 给出分层、端口合同、威胁模型和 R0 退出条件。
+- **原生技能学习是主路径**：真实会话 `ToolStep` → `generate_skill` → `SkillGenerator` → `CandidateStore` → Console 审核发布；固定模板人工录制和录制回放只能是 Octop 辅助，不冒充原生学习。
+- **R2 拆分**：R2A 页面对等（pageTabs/分页/target/frame），R2B 安全资源端口（PDF/pageImage/downloads），R2C 高风险探针（remoteImage/WebOffice/DWG/页面声明技能）默认 `unsupported`。
+- **不私造公共协议**：SDK 没有公开端口时按不支持处理；如必须新增端口，另立 SDK 需求、API snapshot 和版本评审。
+- **两宿主同场景**：扩展宿主和服务端宿主按 [r0-two-host-scenarios.json](../r0-two-host-scenarios.json) 记录输入、授权、语义结果和失败；不以截图比较替代。
+- **外部模型边界**：R1 必须用真实外部模型；脚本化模型只作回归。真实外部模型不可用时 R1 未完成，不能补绿。
 
 ## 1. 设计目标
 
@@ -114,9 +123,11 @@ BrowserSession、Dashboard 原始输入、harness、record daemon 和 ReplayRunn
 
 ### 5.1 模型生成
 
-复用 SDK 的 `GENERATE_SKILL_TOOL`、`SkillGenerator`、`GeneratedSkillDraft`、`SkillCandidateSink`。保留现有工具轨迹、frontmatter、输入与二进制校验，不新增宿主专用生成器。
+**这是 P3/R1 的主路径。** 复用 SDK 的 `GENERATE_SKILL_TOOL`、`SkillGenerator`、`GeneratedSkillDraft`、`SkillCandidateSink`。保留现有工具轨迹、frontmatter、输入与二进制校验，不新增宿主专用生成器。当前宿主已有候选 sink/governance，但真实外部模型的 `skillGeneration` → `FsToolStepStore` → `generate_skill` 闭环尚未验收；R1 必须补齐。
 
-### 5.2 人工录制
+### 5.2 人工录制（Octop 可选辅助）
+
+**人工录制不是原生技能学习。** 固定模板候选和受限回放不得作为 R1 证据。
 
 ```text
 octop-browser recorder

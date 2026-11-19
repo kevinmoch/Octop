@@ -9,6 +9,7 @@ import type { HostInit } from "./bridge";
 import type { ConsolePage, WebSkillHost } from "./host";
 import { isLoopbackNoAuthEndpoint, type RuntimeLlmEntry } from "./model";
 import { createSandboxExecutor } from "./scriptExecutor";
+import { HOST_CAPABILITY_GROUPS } from "./capabilityStatus";
 
 const Console = lazy(async () => {
   await import("./monaco").then(({ configureMonaco }) => configureMonaco());
@@ -333,11 +334,40 @@ export default function App({
         )}
       </main>
       <footer className="host-footer">
-        {copy(
-          locale,
-          "P3 正在验证候选、受限回放、技能执行与隔离文档产物；当前不是生产支持版本。",
-          "P3 is validating candidates, scoped replay, skill execution and isolated document delivery; this is not production support.",
-        )}
+        <p>
+          {copy(
+            locale,
+            "P3 本地候选：已具备的请见能力状态；当前不是生产支持版本。",
+            "P3 local candidate: see capability status for what is actually available; this is not production support.",
+          )}
+        </p>
+        <details className="capability-status" data-testid="capability-status">
+          <summary>
+            {copy(locale, "能力状态（R0）", "Capability status (R0)")}
+          </summary>
+          {HOST_CAPABILITY_GROUPS.map((group) => (
+            <section key={group.state} className="capability-group">
+              <h2>{copy(locale, group.zh, group.en)}</h2>
+              <ul>
+                {group.items.map((item) => (
+                  <li key={item.id}>
+                    <span className={`capability-badge ${group.state}`}>
+                      {copy(locale, group.zh, group.en)}
+                    </span>
+                    {copy(locale, item.zh, item.en)}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+          <p>
+            {copy(
+              locale,
+              "原生技能学习仍待真实外部模型闭环；录制/回放是 Octop 辅助能力，不等于完整 WebSkill。",
+              "Native skill generation still needs a real external-model loop; recording/replay is an Octop assistant capability, not full WebSkill parity.",
+            )}
+          </p>
+        </details>
       </footer>
     </div>
   );

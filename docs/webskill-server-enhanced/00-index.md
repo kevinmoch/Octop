@@ -1,6 +1,7 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1 已完成，P2 本地功能候选通过；🟡 P3 正在实施并验收，详见 `verification/03-p3-acceptance.md`。普通受信 TLS 与 Docker 新构建仍是已知未收尾项；不支持生产或上游正式发布。
+> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate（`facb499b3`）；🟡 R0 能力整改基线已建立，R1 原生技能学习待验收。普通受信 TLS、Docker 新构建、幻灯片原生 PDF 和依赖告警仍是已知未收尾项；不支持生产或上游正式发布。
+> R0 机器可读事实源：[capability-inventory.json](capability-inventory.json)；两宿主场景：[r0-two-host-scenarios.json](r0-two-host-scenarios.json)。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。
 
@@ -14,6 +15,9 @@
 | [verification/01-p1-acceptance.md](verification/01-p1-acceptance.md) | P1 实现边界、真实命令、证据和未验证项               |
 | [verification/02-p2-acceptance.md](verification/02-p2-acceptance.md) | P2 实施项、真实命令、证据和未验证项               |
 | [verification/03-p3-acceptance.md](verification/03-p3-acceptance.md) | P3 候选、回放、技能执行的实施与证据             |
+| [design/01-capability-baseline.md](design/01-capability-baseline.md) | R0 能力分层、端口合同、威胁模型与退出条件       |
+| [capability-inventory.json](capability-inventory.json) | R0 机器可读能力清单（状态/决策/阶段/证据）      |
+| [r0-two-host-scenarios.json](r0-two-host-scenarios.json) | R0 扩展宿主/服务端宿主同场景验收合同            |
 
 ## 代码归属
 
@@ -50,6 +54,11 @@
 | 已撤回 npm 版本永不复用                     | npm 的 name@version 一经发布不可再使用                                    | 项目需求负责人（用户批准） | 2026-11-16 | 发布     |
 | 发布检查通过 gh 手动触发                    | 不因 push 自动启动发布流水线                                              | 项目需求负责人（用户批准） | 2026-11-16 | 发布     |
 | 本阶段采用本地 fork，撤回上游 PR            | 不再向远程推送或修改上游 PR；本地版本与非 editable 验证先行               | 项目需求负责人（用户批准） | 2026-11-18 | P2/发布  |
+| 原生技能学习为主路径，录制回放为可选辅助 | 固定模板不是 ToolStep 原生学习；录制不能替代真实模型闭环 | 2026-11-19 R0 评审 | 2026-11-19 | P3/R1 |
+| 能力按端口逐项验收，允许明确不支持 | 不为“完整能力”开放任意 CDP/URL/路径；高风险端口默认 unsupported | 2026-11-19 R0 评审 | 2026-11-19 | R0–R4 |
+| R2 拆为页面/安全资源/高风险探针 | 避免把 core page 与 WebOffice/DWG/remoteImage 混在一个阶段 | 2026-11-19 R0 评审 | 2026-11-19 | R2 |
+| R1 必须使用真实外部模型 | 脚本化模型只能回归，不能替代原生技能学习验收 | 2026-11-19 R0 评审 | 2026-11-19 | R1 |
+| 公共 SDK 端口不足时按不支持处理 | 不在 Octop 私造协议；如必须扩展，另立 SDK 需求/API snapshot | 2026-11-19 R0 评审 | 2026-11-19 | R0–R4 |
 
 ## 硬约束
 
