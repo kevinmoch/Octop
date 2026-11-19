@@ -13,7 +13,7 @@
 | 两宿主完整能力对等 | 未做 R4 全矩阵 | R3 文档真实模型只覆盖 DOCX；扩展宿主文档能力未重验 | ❌ |
 | 普通受信 TLS | **失败** | `ui-result-trusted.json` 仍为 `status=failed`；证书/登录/推流已进入，模型回复等待超时 | ❌ |
 | LNA 拒绝 | 通过（隔离受信 TLS） | `ui-result-trusted-lna-permission.json`、`ui-result-trusted-lna-policy.json`，`modelRequests=0` | ✅（限定范围） |
-| Docker 新 wheel 构建 | **未完成** | 本次 `docker build -f deploy/docker/Dockerfile --build-arg OCTOP_IMAGE_VARIANT=lite` 在 `node:20-slim` 拉取阶段超过验收窗口，未进入 wheel 安装 | ❌ |
+| Docker 新 wheel 构建 | **未完成** | 本次 lite 构建在 `node:20-slim` 拉取阶段超窗；改用 `docker.1ms.run/library/node:20-slim` 镜像源仍失败于 `TLS handshake timeout`，未进入 wheel 安装 | ❌ |
 | K8s 单副本 PVC | 通过（P2 历史证据） | `k8s/persistent-result.json`：Pod UID 更换、旧会话 404、Cookie 保留、新会话可读/操作 | ✅（历史证据） |
 | K8s 双副本 emptyDir | 通过（P2 历史证据，限定） | `k8s/emptyDir-result.json`：affinity、Pod 删除后旧会话 404、另一副本 `anonymous` 可重登；`crossPodLockClaimed=false` | ✅（限定） |
 | 多 worker/多副本回放授权 | **未通过** | `ReplayRegistry`、control owner 仍是进程内状态；R4 未做跨 worker 共享/失效 | ❌ |
