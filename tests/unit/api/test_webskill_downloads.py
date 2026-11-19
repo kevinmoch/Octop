@@ -104,3 +104,34 @@ def test_download_rejects_unknown_id_and_cleans_up(tmp_path: Path) -> None:
     cleanup_downloads(session)
     assert session.download_dir is None
     assert not directory.exists()
+
+
+def test_download_is_session_scoped_and_cleanup_removes_bytes(tmp_path: Path) -> None:
+    session = _session()
+    directory = tmp_path / "downloads"
+    directory.mkdir()
+    path = directory / "secret.txt"
+    path.write_bytes(b"secret")
+    from octop.infra.control.browser.webskill.downloads import DownloadRecord, cleanup_downloads
+
+    session.download_dir = str(directory)
+    session.downloads_initialized = True
+    session.downloads["dl_test"] = DownloadRecord(
+        id="dl_test",
+        name="secret.txt",
+        content_type="text/plain",
+        size=6,
+        at="2026-11-19T00:00:00Z",
+        path=path,
+    )
+    other = _session()
+    other.id = "session-2"
+    try:
+        read_download(other, "dl_test")
+    except Exception as error:
+        assert "not available" in str(error)
+    else:
+        raise AssertionError("download must not cross sessions")
+    cleanup_downloads(session)
+    assert not path.exists()
+    assert list_downloads(session) == []

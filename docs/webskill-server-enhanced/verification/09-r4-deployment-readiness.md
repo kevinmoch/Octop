@@ -42,3 +42,34 @@
 5. 才进入发布评审。
 
 > 本文不改变既有 FR/AC，也不把未验证项写成通过。
+
+## 4. 本地可完成项（本轮）
+
+- downloads 会话隔离/清理：新增单测
+  - `read_download` 对另一个 session 的 id 返回不可用；
+  - cleanup 删除字节文件与记录；
+  - 当前测试 **3 passed**。
+- 多格式真实模型：
+  - `authored-slides` 模型实际进入 `ask_user` 表单，但表单含复选框，脚本未完成表单提交；本轮不宣称 slides 真实模型通过。
+  - DOCX 真实模型证据仍为有效切片；PPTX/XLSX/PDF 的真实模型验收仍未完成。
+- 两宿主矩阵：
+  - 服务端宿主已有 R1/R3 真实模型 DOCX 与技能执行；
+  - 扩展宿主已有 P3 已发布技能执行；
+  - **文档能力在扩展宿主上仍未重验**，不能称两宿主文档对等。
+
+## 5. 多 worker 契约（设计，未实现）
+
+多 worker 不是“把 ReplayRegistry 换成 Redis”这么小：
+
+1. `ReplayAuthorization`（replayId、recording digest、user/session、origin/action 白名单、TTL、step grant counter）必须落共享存储，并以原子 compare-and-consume 消费每步 grant。
+2. `control owner`/profile lease 需要共享 TTL lease；进程内缓存必须失效，不能以旧 owner 放行写入。
+3. 浏览器会话、target/ref 表与 WS 连接仍绑定执行 worker；共享回放授权不应让另一个 worker 直接操作不属于它的 PageAgent。
+4. 多 worker 需要 sticky session/affinity 或共享浏览器会话路由；当前只验证单副本和 limited emptyDir 会话语义，`crossPodLockClaimed=false` 仍是事实。
+5. 取消/过期/接管必须在共享层原子传播；否则另一个 worker 仍可能消费旧 grant。
+6. 在这些契约没有实现和真实 K8s 证据前，R4 多 worker gate 保持拒绝。
+
+## 6. R4 当前判定
+
+- 本地可完成项：downloads 边界单测、支持矩阵、两宿主证据清点、多 worker 契约设计。
+- 仍外部/基础设施阻塞：普通受信 TLS、Docker 基础镜像/新 wheel 安装、K8s 多副本、共享存储、依赖安全签核。
+- **R4 仍未通过；不宣称生产可用。**
