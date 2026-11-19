@@ -330,10 +330,10 @@
       "phase": "R2B",
       "requiresSdkChange": false,
       "currentEvidence": [
-        ".artifacts/webskill-p1/ui/ui-result-r2b-page-image.json",
-        "tests/unit/api/test_webskill_capture.py"
+        "tests/unit/api/test_webskill_capture.py",
+        ".artifacts/webskill-p1/ui/ui-result-r2b-page-image.json"
       ],
-      "notes": "R2B 真实 UI+模型 capture_page_image 返回 240x160 PNG；当前仅主文档，子 frame 取像仍不支持。"
+      "notes": "R2B 主文档真实取像通过；OOPIF 取像已接并单测，same-origin child frame 仍明确不支持。"
     },
     {
       "id": "downloads",

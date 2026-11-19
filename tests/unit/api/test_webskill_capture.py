@@ -119,3 +119,41 @@ def test_capture_image_rejects_stale_ref_and_over_budget() -> None:
     )
     assert result["result"]["id"] == "ws_ref"
     assert "over the 10-byte budget" in result["result"]["reason"]
+
+
+def test_capture_image_uses_oopif_client(monkeypatch) -> None:
+    from octop.infra.control.browser.webskill import page_agent
+
+    frame_client = FakeCaptureClient()
+    closed: list[bool] = []
+
+    class FakeAttachment:
+        client = frame_client
+
+        async def close(self) -> None:
+            closed.append(True)
+
+    async def attach(client: Any, expected: str) -> FakeAttachment:
+        assert expected == "oopif:target-2:loader-2"
+        return FakeAttachment()
+
+    monkeypatch.setattr(page_agent, "attach_frame_expected", attach)
+    current = _session()
+    key = current.document.key if current.document is not None else ""
+    current.refs = {
+        "ws_ref": PageRef(
+            backend_node_id=5,
+            document_key=key,
+            frame="oopif:target-2:loader-2",
+        )
+    }
+    result = asyncio.run(
+        capture_image(
+            current,
+            {"ref": "ws_ref", "maxBytes": 1024},
+            registry=BrowserAgentRegistry(),
+            resolver=_resolver(FakeCaptureBrowser(FakeCaptureClient())),
+        )
+    )
+    assert result["result"]["data"]
+    assert closed == [True]

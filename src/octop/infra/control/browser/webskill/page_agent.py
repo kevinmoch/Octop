@@ -462,18 +462,22 @@ async def capture_image(
 
     browser = await resolve_browser(session, resolver)
     model_attachment = await attach_model_target(session, browser)
+    attached: FrameAttachment | None = None
     try:
         client = (
             model_attachment.client if model_attachment is not None else browser._internal.client
         )  # noqa: SLF001
         document = await document_identity(session, browser, client)
         entry = registry.resolve_ref(session, ref, document)
-        if entry.frame != "self":
+        if entry.frame.startswith("oopif:"):
+            attached = await attach_frame_expected(client, entry.frame)
+            client = attached.client
+        elif entry.frame != "self":
             return {
                 "type": "capture-image-result",
                 "result": {
                     "id": ref,
-                    "reason": "Page images inside a child frame are not supported by this host yet",
+                    "reason": "Page images inside a same-origin child frame are not supported by this host yet",
                     "triedLevels": ["cdp-screenshot"],
                 },
             }
@@ -552,6 +556,8 @@ async def capture_image(
             },
         }
     finally:
+        if attached is not None:
+            await attached.close()
         if model_attachment is not None:
             await model_attachment.close()
 
