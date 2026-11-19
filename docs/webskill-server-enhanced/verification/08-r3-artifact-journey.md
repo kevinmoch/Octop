@@ -105,3 +105,10 @@ UV_NO_SYNC=1 ... python scripts/webskill-p1/r3_real_model_document_acceptance.py
 - 该恢复验收使用脚本化 bulletin fixture；真实模型 DOCX 已在同文档前文单独通过。
 
 **R3 本地 candidate 剩余边界**：多格式 DOCX/PPTX/XLSX 的真实外部模型验收、Office GUI 人工验收。
+
+## 6. PDF 整页渲染（补充）
+
+- `scripts/webskill-p1/pdf_render_acceptance.py` 使用真实 Chromium + 真实 PDF.js build。
+- 结果：`PDF_RENDER_OK`，canvas 600×400，非白像素 918，PNG 11538 bytes，页面错误 0。
+- 证据：`.artifacts/webskill-p1/ui/ui-result-pdf-render.json`、`pdf-render.png`。
+- 这验证 PDF.js 渲染路径，不等于 PDF 图片投放（图片进入模型上下文）已通过。
