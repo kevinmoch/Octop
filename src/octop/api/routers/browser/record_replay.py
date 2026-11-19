@@ -116,9 +116,9 @@ def _latest_recording_id(profile: str) -> str | None:
         from octop_browser.record.store import RecordingStore
     except ImportError:
         return None
-    recordings = [
-        manifest for manifest in RecordingStore().list_recordings() if manifest.profile == profile
-    ]
+    store = RecordingStore()
+    store.enforce_retention(profile)
+    recordings = [manifest for manifest in store.list_recordings() if manifest.profile == profile]
     if not recordings:
         return None
     latest = max(recordings, key=lambda m: m.created_at)

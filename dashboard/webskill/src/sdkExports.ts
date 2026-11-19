@@ -1,4 +1,8 @@
-export { FsAuditLog } from "@webskill/sdk/governance";
+export {
+  CandidateStore,
+  FsAuditLog,
+  createCandidateSink,
+} from "@webskill/sdk/governance";
 export { PageActionPolicy, PagePerceptionPolicy } from "@webskill/sdk/agent";
 export {
   createBrowserChatbotHost,

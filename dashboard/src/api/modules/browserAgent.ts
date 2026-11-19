@@ -55,4 +55,25 @@ export const browserAgentApi = {
         body: JSON.stringify({ request: action }),
       },
     ),
+  skillDraft: (sessionId: string, recordingId?: string) =>
+    request<unknown>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/skill-drafts`,
+      {
+        method: "POST",
+        body: JSON.stringify({ ...(recordingId ? { recordingId } : {}) }),
+      },
+    ),
+  replay: (sessionId: string, recordingId: string) =>
+    request<unknown>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/replays`,
+      {
+        method: "POST",
+        body: JSON.stringify({ recordingId }),
+      },
+    ),
+  deleteRecording: (recordingId: string) =>
+    request<{ deleted: boolean; recordingId: string }>(
+      `/browser-agent/recordings/${encodeURIComponent(recordingId)}`,
+      { method: "DELETE" },
+    ),
 };

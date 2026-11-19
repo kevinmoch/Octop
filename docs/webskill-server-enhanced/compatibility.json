@@ -4,8 +4,8 @@
     {
       "octop": {
         "version": "1.0.3b6",
-        "commit": "17401dfe",
-        "workingTree": "P2-10-local"
+        "commit": "32d44339",
+        "workingTree": "P2-frozen-local"
       },
       "harness": "1.0.10",
       "browser": {
@@ -34,15 +34,14 @@
       ],
       "pending": [
         "ordinary trusted TLS UI passed evidence",
-        "full regression on the frozen P2 commit",
         "real-user LNA and browser/network topology matrix"
       ]
     },
     {
       "octop": {
         "version": "1.0.3b6",
-        "commit": "17401dfe",
-        "workingTree": "P2-10-local"
+        "commit": "32d44339",
+        "workingTree": "P2-frozen-local"
       },
       "harness": "1.0.10",
       "browser": {
@@ -67,8 +66,47 @@
         ".artifacts/webskill-p1/k8s/emptyDir-result.json"
       ],
       "pending": [
-        "full regression on the frozen P2 commit",
         "cross-Pod shared writes are not supported"
+      ]
+    },
+    {
+      "octop": {
+        "version": "1.0.3b6",
+        "commit": "32d44339",
+        "workingTree": "P3-local-after-P2"
+      },
+      "harness": "1.0.10",
+      "browser": {
+        "commit": "641f57dcbdf1537dffa820741ecae4b9dc9d9ec8",
+        "version": "1.1.0+webskill.local.2",
+        "releaseStatus": "local-fork",
+        "source": "wheelhouse/octop_browser-1.1.0+webskill.local.2-py3-none-any.whl",
+        "wheelSha256": "19e10c5b20ea0294d6401a48a50438a0ccbcabc6b0a25801d333c39960727f83",
+        "editable": false
+      },
+      "sdk": "0.29.0",
+      "chatbot": "0.26.0",
+      "console": "0.22.5",
+      "chromium": "157.0.8103.79",
+      "deployment": {
+        "replicas": 1,
+        "storage": "local-temporary"
+      },
+      "status": "candidate",
+      "evidence": [
+        ".artifacts/webskill-p1/ui/ui-result-skill-draft.json",
+        ".artifacts/webskill-p1/ui/ui-result-replay.json",
+        ".artifacts/webskill-p1/ui/ui-result-skill-execution.json",
+        ".artifacts/webskill-p1/ui/ui-result-viewer.json",
+        ".artifacts/webskill-p1/ui/ui-result-document-bulletin.json",
+        ".artifacts/webskill-p1/ui/ui-result-document-slides.json",
+        ".artifacts/webskill-p1/ui/ui-result-document-spreadsheet.json",
+        ".artifacts/webskill-p1/ui/ui-result-recording-lifecycle.json"
+      ],
+      "pending": [
+        "ordinary trusted TLS UI evidence",
+        "Docker rebuild with the new wheel",
+        "production and upstream release are not approved"
       ]
     }
   ]

@@ -1,6 +1,6 @@
 # Octop × WebSkill 服务端增强版
 
-> 状态：🟢 P0/P1 已完成；🟡 P2 本地功能候选通过并允许启动 P3，普通受信 TLS 与最终冻结回归待收尾；不支持生产或上游正式发布。
+> 状态：🟢 P0/P1 已完成，P2 本地功能候选通过；🟡 P3 正在实施并验收，详见 `verification/03-p3-acceptance.md`。普通受信 TLS 与 Docker 新构建仍是已知未收尾项；不支持生产或上游正式发布。
 > 本目录是 Octop 服务端增强版的需求、设计和验证事实源。
 > 这是专项集成文档，不对应 SDK、Chatbot、Console 或其他 npm 包的新版本计划。
 
@@ -19,7 +19,7 @@
 
 - Octop 产品菜单、Dashboard、会话、权限和 HTTP/WS 接线属于 `Octop` 仓库。
 - target/frame、浏览器写入协调和 ReplayRunner 执行器属于 `octop-browser`；需要时先走上游独立变更。
-- Octop 专属 WebSkill 宿主参考代码只放 `examples/octop-adapter/`；通用 SDK 缺陷必须在所属包另行评审，不在本专项中假定发版。
+- Octop 专属 WebSkill 宿主代码位于 Octop 的 `dashboard/webskill/`；WebSkill 仓库的 `examples/octop-adapter/` 只保留确有必要的参考适配，不放当前产品实现。通用 SDK 缺陷必须在所属包另行评审，不在本专项中假定发版。
 - 本目录管理集成需求、设计、探针规范和证据索引，不创建 WebSkill 版本号、npm 包版本或 git 发布 tag；实际探针脚本位于 Octop 仓库的 `scripts/webskill-p0/`。
 
 ## 批准范围

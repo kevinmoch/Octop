@@ -18,7 +18,13 @@ type HostRequest = {
   channel: string;
   type: string;
   id: string;
-  api: "ticket" | "grant" | "handoff";
+  api:
+    | "ticket"
+    | "grant"
+    | "handoff"
+    | "skill-draft"
+    | "replay"
+    | "recording-delete";
   sessionId: string;
   payload?: unknown;
 };
@@ -33,7 +39,12 @@ function isRequest(value: unknown): value is HostRequest {
     typeof data.id === "string" &&
     data.id.length <= 128 &&
     typeof data.sessionId === "string" &&
-    (data.api === "ticket" || data.api === "grant" || data.api === "handoff")
+    (data.api === "ticket" ||
+      data.api === "grant" ||
+      data.api === "handoff" ||
+      data.api === "skill-draft" ||
+      data.api === "replay" ||
+      data.api === "recording-delete")
   );
 }
 
@@ -124,6 +135,88 @@ export default function WebSkillFrame({
                 sessionId,
                 payload.request as PageActionRequest,
               ),
+            });
+          } else if (data.api === "skill-draft") {
+            const payload = data.payload;
+            if (
+              payload !== undefined &&
+              (typeof payload !== "object" ||
+                payload === null ||
+                Array.isArray(payload) ||
+                Object.keys(payload).some((key) => key !== "recordingId") ||
+                ("recordingId" in payload &&
+                  (typeof payload.recordingId !== "string" ||
+                    !/^[A-Za-z0-9_-]{1,128}$/.test(payload.recordingId))))
+            )
+              throw new Error("Invalid recording skill request");
+            const recordingId =
+              typeof payload === "object" &&
+              payload !== null &&
+              "recordingId" in payload &&
+              typeof payload.recordingId === "string"
+                ? payload.recordingId
+                : undefined;
+            respond({
+              ok: true,
+              result: await browserAgentApi.skillDraft(sessionId, recordingId),
+            });
+          } else if (data.api === "replay") {
+            const payload = data.payload;
+            if (
+              payload !== undefined &&
+              (typeof payload !== "object" ||
+                payload === null ||
+                Array.isArray(payload) ||
+                Object.keys(payload).some((key) => key !== "recordingId") ||
+                ("recordingId" in payload &&
+                  (typeof payload.recordingId !== "string" ||
+                    !/^[A-Za-z0-9_-]{1,128}$/.test(payload.recordingId))))
+            )
+              throw new Error("Invalid replay request");
+            const requestedId =
+              typeof payload === "object" &&
+              payload !== null &&
+              "recordingId" in payload &&
+              typeof payload.recordingId === "string"
+                ? payload.recordingId
+                : undefined;
+            const recordingId =
+              requestedId ??
+              (await browserApi.recordReplayStatus()).latestRecordingId;
+            if (!recordingId)
+              throw new Error("No stopped recording is available");
+            respond({
+              ok: true,
+              result: await browserAgentApi.replay(sessionId, recordingId),
+            });
+          } else if (data.api === "recording-delete") {
+            const payload = data.payload;
+            if (
+              payload !== undefined &&
+              (typeof payload !== "object" ||
+                payload === null ||
+                Array.isArray(payload) ||
+                Object.keys(payload).some((key) => key !== "recordingId") ||
+                ("recordingId" in payload &&
+                  (typeof payload.recordingId !== "string" ||
+                    !/^[A-Za-z0-9_-]{1,128}$/.test(payload.recordingId))))
+            )
+              throw new Error("Invalid recording deletion request");
+            const requestedId =
+              typeof payload === "object" &&
+              payload !== null &&
+              "recordingId" in payload &&
+              typeof payload.recordingId === "string"
+                ? payload.recordingId
+                : undefined;
+            const recordingId =
+              requestedId ??
+              (await browserApi.recordReplayStatus()).latestRecordingId;
+            if (!recordingId)
+              throw new Error("No stopped recording is available");
+            respond({
+              ok: true,
+              result: await browserAgentApi.deleteRecording(recordingId),
             });
           } else {
             const payload = data.payload;

@@ -9,7 +9,13 @@ export interface HostInit {
   theme: HostTheme;
 }
 
-export type HostApi = "ticket" | "grant" | "handoff";
+export type HostApi =
+  | "ticket"
+  | "grant"
+  | "handoff"
+  | "skill-draft"
+  | "replay"
+  | "recording-delete";
 
 type HostRequest = {
   channel: typeof HOST_CHANNEL;
@@ -61,7 +67,10 @@ export function isHostRequest(value: unknown): value is HostRequest {
   if (
     value.api !== "ticket" &&
     value.api !== "grant" &&
-    value.api !== "handoff"
+    value.api !== "handoff" &&
+    value.api !== "skill-draft" &&
+    value.api !== "replay" &&
+    value.api !== "recording-delete"
   )
     return false;
   return typeof value.sessionId === "string" && value.sessionId.length <= 128;

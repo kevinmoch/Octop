@@ -8,6 +8,7 @@ import { useHostAppearance } from "./appearance";
 import type { HostInit } from "./bridge";
 import type { ConsolePage, WebSkillHost } from "./host";
 import { isLoopbackNoAuthEndpoint, type RuntimeLlmEntry } from "./model";
+import { createSandboxExecutor } from "./scriptExecutor";
 
 const Console = lazy(async () => {
   await import("./monaco").then(({ configureMonaco }) => configureMonaco());
@@ -37,6 +38,12 @@ export default function App({
   const [view, setView] = useState<"chat" | "console">("chat");
   const [consolePage, setConsolePage] = useState<ConsolePage | undefined>();
   const [focusRunId, setFocusRunId] = useState<string | undefined>();
+  const [focusCandidateId, setFocusCandidateId] = useState<
+    string | undefined
+  >();
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const [recordingError, setRecordingError] = useState("");
+  const [recordingStatus, setRecordingStatus] = useState("");
   const [activeModel, setActiveModel] = useState<RuntimeLlmEntry | undefined>();
   const [, setNoAuthRevision] = useState(0);
   const [settingsError, setSettingsError] = useState("");
@@ -74,12 +81,96 @@ export default function App({
   const openConsole = (page?: SettingsSectionId) => {
     setConsolePage(page);
     setFocusRunId(undefined);
+    setFocusCandidateId(undefined);
     setView("console");
   };
   host.navigation.openConsole = openConsole;
   host.navigation.openTrace = (runId) => {
+    setFocusCandidateId(undefined);
     setFocusRunId(runId);
     setView("console");
+  };
+  host.navigation.openConsoleCandidate = (candidateId) => {
+    setFocusRunId(undefined);
+    setFocusCandidateId(candidateId);
+    setConsolePage("governance.review");
+    setView("console");
+  };
+  const createRecordedCandidate = async () => {
+    setRecordingBusy(true);
+    setRecordingError("");
+    setRecordingStatus("");
+    try {
+      const result = await host.createRecordedCandidate();
+      if (result.status === "submitted")
+        host.navigation.openConsoleCandidate(result.candidateId);
+    } catch {
+      setRecordingError(
+        copy(
+          locale,
+          "无法转换录制。请先完成并停止一段浏览器录制，然后重试。",
+          "Could not convert the recording. Complete and stop a browser recording, then retry.",
+        ),
+      );
+    } finally {
+      setRecordingBusy(false);
+    }
+  };
+  const replayRecording = async () => {
+    setRecordingBusy(true);
+    setRecordingError("");
+    setRecordingStatus("");
+    try {
+      const result = await host.replayRecorded();
+      if (result.status === "passed")
+        setRecordingStatus(
+          copy(locale, "录制回放已完成。", "Recording replay completed."),
+        );
+      else if (result.status === "failed")
+        setRecordingError(
+          copy(
+            locale,
+            "回放已停止。请检查页面变化或重新录制；不会自动重放后续步骤。",
+            "Replay stopped. Review the page changes or record again; subsequent steps are not replayed automatically.",
+          ),
+        );
+    } catch {
+      setRecordingError(
+        copy(
+          locale,
+          "无法回放。请先完成并停止一段录制，并确认当前浏览器会话有效。",
+          "Could not replay. Complete and stop a recording, and check that the browser session is still active.",
+        ),
+      );
+    } finally {
+      setRecordingBusy(false);
+    }
+  };
+  const deleteRecording = async () => {
+    setRecordingBusy(true);
+    setRecordingError("");
+    setRecordingStatus("");
+    try {
+      const result = await host.deleteRecorded();
+      if (result.status === "deleted")
+        setRecordingStatus(
+          copy(
+            locale,
+            "录制及其原始数据已删除；已发布技能未改变。",
+            "The recording and its source data were deleted; published skills were not changed.",
+          ),
+        );
+    } catch {
+      setRecordingError(
+        copy(
+          locale,
+          "无法删除录制。请先停止录制，并确认仍存在可删除的录制。",
+          "Could not delete the recording. Stop it first and confirm that a deletable recording exists.",
+        ),
+      );
+    } finally {
+      setRecordingBusy(false);
+    }
   };
   const localNoAuth = activeModel ? host.noAuth.has(activeModel.id) : false;
 
@@ -107,8 +198,45 @@ export default function App({
             {copy(locale, "控制台", "Console")}
           </button>
         </nav>
-        <span className="host-stage">P2 candidate</span>
+        <button
+          type="button"
+          className="host-tab"
+          data-testid="recording-skill-create"
+          disabled={recordingBusy}
+          onClick={() => void createRecordedCandidate()}
+        >
+          {copy(locale, "录制转技能", "Recording to skill")}
+        </button>
+        <button
+          type="button"
+          className="host-tab"
+          data-testid="recording-replay"
+          disabled={recordingBusy}
+          onClick={() => void replayRecording()}
+        >
+          {copy(locale, "回放录制", "Replay recording")}
+        </button>
+        <button
+          type="button"
+          className="host-tab"
+          data-testid="recording-delete"
+          disabled={recordingBusy}
+          onClick={() => void deleteRecording()}
+        >
+          {copy(locale, "删除录制", "Delete recording")}
+        </button>
+        <span className="host-stage">P3 candidate</span>
       </header>
+      {recordingError && (
+        <p role="alert" className="host-error">
+          {recordingError}
+        </p>
+      )}
+      {recordingStatus && (
+        <p role="status" className="host-status">
+          {recordingStatus}
+        </p>
+      )}
       {view === "chat" && activeModel && (
         <details className="local-model">
           <summary>
@@ -167,6 +295,8 @@ export default function App({
               chatRoot: "/chat",
               runtimeConfig: host.runtimeConfig,
               llm: host.llm,
+              skillCandidates: host.skillCandidates,
+              executorFactory: createSandboxExecutor,
             }}
             layout="embedded"
             sessionList="collapsed"
@@ -183,15 +313,21 @@ export default function App({
             }
           >
             <Console
-              key={focusRunId ?? consolePage ?? "console"}
+              key={focusRunId ?? focusCandidateId ?? consolePage ?? "console"}
               backend={host.backend}
+              governance={host.governance}
               runtimeConfig={host.runtimeConfig}
               hostCapabilities={{ downloadedFiles: false }}
               initialPage={
-                focusRunId !== undefined ? "runs.inspector" : consolePage
+                focusRunId !== undefined
+                  ? "runs.inspector"
+                  : focusCandidateId !== undefined
+                  ? "governance.review"
+                  : consolePage
               }
               onNavigate={setConsolePage}
               {...(focusRunId !== undefined ? { focusRunId } : {})}
+              {...(focusCandidateId !== undefined ? { focusCandidateId } : {})}
             />
           </Suspense>
         )}
@@ -199,8 +335,8 @@ export default function App({
       <footer className="host-footer">
         {copy(
           locale,
-          "P2 正在验证 frame 和多标签；技能录制回放与文档产物尚未开放，当前不是生产支持版本。",
-          "P2 is validating frames and multiple targets. Skill recording, replay and document delivery are not open; this is not production support.",
+          "P3 正在验证候选、受限回放、技能执行与隔离文档产物；当前不是生产支持版本。",
+          "P3 is validating candidates, scoped replay, skill execution and isolated document delivery; this is not production support.",
         )}
       </footer>
     </div>

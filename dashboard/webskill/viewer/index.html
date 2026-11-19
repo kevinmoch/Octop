@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebSkill document viewer</title>
+    <style id="viewer-skill-style"></style>
+    <style>
+      :root {
+        color-scheme: light dark;
+        print-color-adjust: exact;
+      }
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+        background: Canvas;
+        color: CanvasText;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+      }
+      #viewer-content {
+        min-height: 100vh;
+        overflow: auto;
+        padding: 24px;
+      }
+      #viewer-content img {
+        max-width: 100%;
+      }
+      #viewer-blocked:empty {
+        display: none;
+      }
+      html.viewer-slides body,
+      html.viewer-slides #viewer-content {
+        height: 100%;
+        padding: 0;
+      }
+      html.viewer-slides .reveal .slide-number {
+        right: auto;
+        left: 8px;
+      }
+      #viewer-chrome {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 5px 8px;
+        background: #1f2329;
+        color: #e5e7eb;
+        font:
+          12px/1.5 system-ui,
+          sans-serif;
+        border-radius: 999px;
+        box-shadow: 0 4px 16px rgb(0 0 0 / 0.28);
+        z-index: 10;
+      }
+      #viewer-chrome button {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid #4b5563;
+        background: #374151;
+        color: #f9fafb;
+        border-radius: 999px;
+        padding: 2px 10px;
+        cursor: pointer;
+        font: inherit;
+      }
+      #viewer-chrome button[disabled] {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      #viewer-toast {
+        position: fixed;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: min(64ch, calc(100vw - 240px));
+        display: flex;
+        gap: 10px;
+        padding: 8px 10px;
+        background: #1f2329;
+        color: #e5e7eb;
+        font:
+          12px/1.5 system-ui,
+          sans-serif;
+        border-radius: 10px;
+        z-index: 11;
+      }
+      #viewer-export-note {
+        margin: 0;
+      }
+      #viewer-toast-close,
+      #viewer-chrome-hide {
+        border-color: transparent;
+        background: transparent;
+        color: #9ca3af;
+        padding: 2px 6px;
+        cursor: pointer;
+        font: inherit;
+      }
+      #viewer-chrome-restore {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        width: 30px;
+        height: 30px;
+        border: 1px solid #4b5563;
+        border-radius: 50%;
+        background: #1f2329;
+        color: #e5e7eb;
+        cursor: pointer;
+        z-index: 10;
+      }
+      #viewer-chrome[hidden],
+      #viewer-chrome button[hidden],
+      #viewer-chrome-restore[hidden],
+      #viewer-toast[hidden] {
+        display: none;
+      }
+      @media print {
+        #viewer-chrome,
+        #viewer-chrome-restore,
+        #viewer-toast {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer-chrome">
+      <p id="viewer-blocked" data-testid="viewer-blocked-notice"></p>
+      <button
+        id="viewer-export"
+        type="button"
+        data-testid="viewer-export"
+        hidden
+      >
+        <span id="viewer-export-label"></span>
+      </button>
+      <button
+        id="viewer-print"
+        type="button"
+        data-testid="viewer-print"
+        disabled
+      >
+        <span id="viewer-print-label"></span>
+      </button>
+      <button id="viewer-chrome-hide" type="button">×</button>
+    </div>
+    <div
+      id="viewer-toast"
+      role="status"
+      aria-live="polite"
+      data-testid="viewer-toast"
+      hidden
+    >
+      <p id="viewer-export-note" data-testid="viewer-export-note"></p>
+      <button
+        id="viewer-toast-close"
+        type="button"
+        data-testid="viewer-toast-close"
+      >
+        ×
+      </button>
+    </div>
+    <button id="viewer-chrome-restore" type="button" hidden>↗</button>
+    <main id="viewer-content" data-testid="viewer-content"></main>
+    <script type="module" src="../src/viewer.ts"></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -48,21 +49,80 @@ def dashboard_cache_control(full_path: str) -> str | None:
     return None
 
 
-def _dashboard_response(path: Path, full_path: str) -> FileResponse:
+def _viewer_host_origin(request: Request) -> str:
+    from octop.api.routers.browser.webskill import _origin_parts
+
+    scheme, host, port = _origin_parts(f"{request.url.scheme}://{request.headers.get('host', '')}")
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{scheme}://{host}:{port}"
+
+
+def _dashboard_response(path: Path, full_path: str, request: Request | None = None) -> FileResponse:
     response = FileResponse(path)
     cache_control = dashboard_cache_control(full_path)
     if cache_control is not None:
         response.headers["Cache-Control"] = cache_control
-    if full_path == "webskill" or full_path.startswith("webskill/"):
+    viewer_paths = {
+        "webskill/viewer",
+        "webskill/viewer/",
+        "webskill/viewer/index.html",
+    }
+    if full_path in {
+        "webskill/sandbox",
+        "webskill/sandbox/",
+        "webskill/sandbox/index.html",
+    }:
+        if request is None:
+            raise OctopError(
+                ErrorCode.INTERNAL_ERROR, "Sandbox request context is required", status=503
+            )
+        origin = _viewer_host_origin(request)
+        response.headers["Content-Security-Policy"] = (
+            "sandbox allow-scripts; default-src 'none'; "
+            f"script-src {origin} data:; worker-src blob:; connect-src 'none'"
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    elif full_path in viewer_paths:
+        if request is None:
+            raise OctopError(
+                ErrorCode.INTERNAL_ERROR, "Viewer request context is required", status=503
+            )
+        try:
+            policy = json.loads((path.parent / "viewer-policy.json").read_text(encoding="utf-8"))
+            template = policy["contentSecurityPolicy"]
+            if not isinstance(template, str):
+                raise ValueError("Invalid viewer policy")
+            origin = _viewer_host_origin(request)
+            response.headers["Content-Security-Policy"] = template.replace(
+                "https://webskill.invalid", origin
+            )
+        except (OSError, ValueError, KeyError) as error:
+            raise OctopError(
+                ErrorCode.INTERNAL_ERROR, "The viewer security policy is unavailable", status=503
+            ) from error
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+    elif full_path == "webskill" or full_path.startswith("webskill/"):
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data: blob: http: https:; font-src 'self' data:; "
             "connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; "
             "object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'"
         )
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    if full_path.startswith("webskill/"):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    if (
+        (full_path.startswith("webskill/assets/") or full_path == "webskill/sandbox.js")
+        and request is not None
+        and request.headers.get("origin") == "null"
+    ):
+        response.headers["Access-Control-Allow-Origin"] = "null"
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        response.headers["Vary"] = "Origin"
     return response
 
 
@@ -76,7 +136,9 @@ def is_dashboard_asset_path(full_path: str) -> bool:
     return full_path.startswith(("assets/", "monaco/", "webskill/assets/"))
 
 
-def _dashboard_fallback(index_file: Path, full_path: str) -> FileResponse:
+def _dashboard_fallback(
+    index_file: Path, full_path: str, request: Request | None = None
+) -> FileResponse:
     """Serve the SPA shell for routes; 404 for a missing hashed asset.
 
     Answering ``/assets/index.<old-hash>.js`` with ``index.html`` makes the
@@ -85,11 +147,25 @@ def _dashboard_fallback(index_file: Path, full_path: str) -> FileResponse:
     """
     if is_dashboard_asset_path(full_path):
         raise HTTPException(status_code=404, detail="Not Found")
+    if full_path in {"webskill/sandbox", "webskill/sandbox/"}:
+        sandbox_index = index_file.parent / "webskill" / "sandbox" / "index.html"
+        if not sandbox_index.is_file():
+            raise OctopError(
+                ErrorCode.INTERNAL_ERROR, "The WebSkill sandbox is not built", status=503
+            )
+        return _dashboard_response(sandbox_index, full_path, request)
+    if full_path in {"webskill/viewer", "webskill/viewer/"}:
+        viewer_index = index_file.parent / "webskill" / "viewer" / "index.html"
+        if not viewer_index.is_file():
+            raise OctopError(
+                ErrorCode.INTERNAL_ERROR, "The WebSkill viewer is not built", status=503
+            )
+        return _dashboard_response(viewer_index, full_path, request)
     if full_path == "webskill" or full_path.startswith("webskill/"):
         webskill_index = index_file.parent / "webskill" / "index.html"
         if webskill_index.is_file():
-            return _dashboard_response(webskill_index, full_path)
-    return _dashboard_response(index_file, "")
+            return _dashboard_response(webskill_index, full_path, request)
+    return _dashboard_response(index_file, "", request)
 
 
 def _mount_routers(app: FastAPI, mounts: Sequence[_RouterMount]) -> None:
@@ -356,7 +432,7 @@ def build_app(server: OctopServer) -> FastAPI:
         if index_file.exists():
 
             @app.get("/{full_path:path}", include_in_schema=False)
-            async def spa_fallback(full_path: str) -> FileResponse:
+            async def spa_fallback(full_path: str, request: Request) -> FileResponse:
                 if full_path.startswith(("api/", "ws/")):
                     raise HTTPException(status_code=404, detail="Not Found")
 
@@ -365,14 +441,14 @@ def build_app(server: OctopServer) -> FastAPI:
                     # Reject absolute paths and parent-dir references before
                     # joining, so user input never drives a path expression.
                     if raw_path.is_absolute() or ".." in raw_path.parts:
-                        return _dashboard_fallback(index_file, full_path)
+                        return _dashboard_fallback(index_file, full_path, request)
                     candidate = (dashboard_dir / Path(*raw_path.parts)).resolve()
                     try:
                         candidate.relative_to(dashboard_dir.resolve())
                     except ValueError:
-                        return _dashboard_fallback(index_file, full_path)
+                        return _dashboard_fallback(index_file, full_path, request)
                     if candidate.is_file():
-                        return _dashboard_response(candidate, full_path)
-                return _dashboard_fallback(index_file, full_path)
+                        return _dashboard_response(candidate, full_path, request)
+                return _dashboard_fallback(index_file, full_path, request)
 
     return app

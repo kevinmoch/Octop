@@ -4,23 +4,49 @@ import type {
   ChatbotHostAdapter,
   SettingsSectionId,
 } from "@webskill/chatbot";
-import { createFsConsoleBackend, createFsTraceSource } from "@webskill/console";
+import {
+  createFsConsoleBackend,
+  createFsTraceSource,
+  createGovernanceFacade,
+} from "@webskill/console";
 import type { ConsoleProps } from "@webskill/console";
 import {
+  CandidateStore,
   FsAuditLog,
   PageActionPolicy,
   PagePerceptionPolicy,
   createBrowserChatbotHost,
   createRemotePageActionExecutor,
   createRemotePerceptionReader,
+  createCandidateSink,
   createRemoteTargetRegistry,
   explainResolution,
 } from "./sdkExports";
 import type { PageActionUi } from "@webskill/sdk/agent";
-import { OpfsProvider } from "@webskill/sdk/browser";
+import {
+  OpfsProvider,
+  createDocxBlockReader,
+  createFetchLinkedDocumentReader,
+  createPptxBlockReader,
+  createXlsxBlockReader,
+  createXlsxTableReader,
+  extractDocxText,
+  extractPptxText,
+  extractXlsxText,
+  fillDocxTemplate,
+  fillXlsxTemplate,
+  readDocxTemplate,
+  readXlsxTemplate,
+} from "@webskill/sdk/browser";
 import type { HostInit } from "./bridge";
 import { OctopHostBridge } from "./bridge";
+import { createHostDocumentSurface } from "./documentSurface";
 import { LocalNoAuthRegistry, createHostLlmClient } from "./model";
+import {
+  deleteRecordedSteps,
+  replayRecordedSteps,
+  submitRecordedSkill,
+} from "./recordingSkills";
 import { OctopPageAgentTransport } from "./transport";
 
 export type ConsolePage = NonNullable<ConsoleProps["initialPage"]>;
@@ -32,9 +58,11 @@ export async function createWebSkillHost(
   const navigation: {
     openConsole: (page?: SettingsSectionId) => void;
     openTrace: (runId: string) => void;
+    openConsoleCandidate: (candidateId: string) => void;
   } = {
     openConsole: () => {},
     openTrace: () => {},
+    openConsoleCandidate: () => {},
   };
   const fs = new OpfsProvider({
     rootName: `octop-webskill-user-${init.userId}`,
@@ -61,6 +89,10 @@ export async function createWebSkillHost(
   }
   const noAuth = new LocalNoAuthRegistry(init.userId);
   const audit = new FsAuditLog({ root: "/managed", fs });
+  const skillCandidates = createCandidateSink({
+    store: new CandidateStore({ root: "/managed", fs }),
+    audit,
+  });
   const targets = createRemoteTargetRegistry();
   const transport = new OctopPageAgentTransport(bridge);
   let currentPage: { key: string; url?: string; title?: string } | undefined;
@@ -96,6 +128,7 @@ export async function createWebSkillHost(
     navigation: {
       openConsole: () => navigation.openConsole(),
       openConsoleTrace: navigation.openTrace,
+      openConsoleCandidate: navigation.openConsoleCandidate,
     },
     pagePerception,
   });
@@ -103,6 +136,28 @@ export async function createWebSkillHost(
     ...bundle.chatbotAdapter,
     pagePerception,
     pageActions,
+    linkedDocuments: createFetchLinkedDocumentReader(),
+    docxExtractor: extractDocxText,
+    xlsxExtractor: extractXlsxText,
+    pptxExtractor: extractPptxText,
+    docxDocumentReader: createDocxBlockReader(),
+    xlsxDocumentReader: createXlsxBlockReader(),
+    xlsxTableReader: createXlsxTableReader(),
+    pptxDocumentReader: createPptxBlockReader(),
+    docxTemplateEngine: {
+      read: readDocxTemplate,
+      fill: fillDocxTemplate,
+    },
+    xlsxTemplateEngine: {
+      read: readXlsxTemplate,
+      fill: fillXlsxTemplate,
+    },
+    documentAudit: audit,
+    documentSurface: createHostDocumentSurface({
+      runtimeConfig,
+      pageActionUi,
+      audit,
+    }),
   };
   const backend = createFsConsoleBackend({
     fs,
@@ -112,15 +167,51 @@ export async function createWebSkillHost(
     versionStoreRoot: "/managed",
     chatRoot: "/chat",
   });
+  const governance = createGovernanceFacade({
+    fs,
+    manager: bundle.chatbotAdapter.skillManager,
+    governanceRoot: "/managed",
+    chatRoot: "/chat",
+  });
   return {
     fs,
     runtimeConfig,
     noAuth,
     llm: createHostLlmClient(runtimeConfig, noAuth),
     adapter,
+    skillCandidates,
     pageActionUi,
     backend,
+    governance,
     navigation,
+    createRecordedCandidate: async (recordingId?: string) => {
+      const config = await runtimeConfig.load();
+      return submitRecordedSkill({
+        bridge,
+        ui: pageActionUi.current,
+        sink: skillCandidates,
+        locale: config.appearance.locale,
+        ...(recordingId !== undefined ? { recordingId } : {}),
+      });
+    },
+    replayRecorded: async (recordingId?: string) => {
+      const config = await runtimeConfig.load();
+      return replayRecordedSteps({
+        bridge,
+        ui: pageActionUi.current,
+        locale: config.appearance.locale,
+        ...(recordingId !== undefined ? { recordingId } : {}),
+      });
+    },
+    deleteRecorded: async (recordingId?: string) => {
+      const config = await runtimeConfig.load();
+      return deleteRecordedSteps({
+        bridge,
+        ui: pageActionUi.current,
+        locale: config.appearance.locale,
+        ...(recordingId !== undefined ? { recordingId } : {}),
+      });
+    },
     connectEngine: (engine: ChatEngine) => {
       pageActionUi.current = engine.bridge;
     },

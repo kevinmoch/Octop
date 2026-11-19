@@ -180,7 +180,7 @@ ReplayRunner 消费 `StepsDocument`，在 Octop 主进程运行。它接受注�
 
 复用 `privacy.py`，补 Cookie、Authorization、API key、OTP、支付信息、PII、输入变量化与截图默认关闭。候选预览前再次检查脱敏。
 
-初始建议每用户最多 50 份、默认保留 30 天，P0 评估后锁定。用户可删除原始步骤、截图、输入和回放报告；删除后不能回放或转换。已发布技能在 Console 单独处理，审计只保留无敏感原文的 tombstone，保持链完整。
+每用户最多 50 份（含进行中的录制）、默认保留 30 天，由 `BROWSER_RECORD_MAX_PER_PROFILE` / `BROWSER_RECORD_RETENTION_DAYS` 固定配置。用户可删除原始步骤、截图、输入和回放报告；删除后不能回放或转换，进行中的录制须先停止。已发布技能在 Console 单独处理，审计只保留无敏感原文的 tombstone，保持链完整。
 
 ## 7. 文档产物与 opaque viewer
 
@@ -190,12 +190,13 @@ ReplayRunner 消费 `StepsDocument`，在 Octop 主进程运行。它接受注�
 - 固定 allow-scripts/allow-modals/allow-downloads；不允许宿主自行扩大。
 - viewerCspHeader 和 sandbox token 保持单一来源。
 - 静态模块资源处理 Origin:null 与 CORS，不关闭脚本 CSP。
-- 使用真实 HTMLIFrameElement.contentWindow 与 source/channel 校验，不能用代理伪造握手。
+- 使用真实 HTMLIFrameElement.contentWindow 与 source/channel 校验，不能用代理或自定义窗口包装对象伪造握手。SDK 的 `event.source === target` 必须拿真实窗口才能成立。
 - 内嵌 iframe 的 `ViewerShellHost.opener` 在宿主外壳绑定真实 `window.parent`；不得直接传 `window` 后依赖为 null 的 `opener`。该适配复用现有端口，不改变公共 WindowLike。
-- 内嵌 iframe 的删除、监听器 dispose 和 viewer 会话回收由 Octop 宿主负责；不能依赖 `contentWindow.close()` 删除宿主拥有的 DOM。
+- 内嵌 iframe 的删除、监听器 dispose 和 viewer 会话回收由 Octop 宿主负责；真实窗口的 `close` 委托给删除宿主 iframe 的函数，不能依赖原生 `contentWindow.close()` 删除宿主拥有的 DOM。
+- 静态技能沙箱只允许受信宿主脚本和技能模块所需的 `data:`，不开放 `unsafe-inline` / `unsafe-eval`；Reveal 使用 viewer 私有的内存 sessionStorage，不读宿主持久化存储。
 - 若需修改 WindowLike/握手公共契约，先回需求与 API snapshot；无法可靠实现时本阶段不开放产物投放。
 
-复用文档解析、模板、图片、链接文档、审计和下载端口。PPT/DOCX/XLSX/大屏需真实生成并打开验收，不能只检查技能列表。
+复用文档解析、模板、图片、链接文档、审计和下载端口。viewer 的图表、结构化模型导出与 Reveal 适配来自 WebSkill 既有扩展示例的宿主模块，Octop 侧固定 `docx@9.7.1`、`pptxgenjs@4.0.1`、`reveal.js@6.0.1`，不修改 SDK 包。针对 pptxgenjs 的间接依赖风险，显式覆盖 `image-size@2.1.0` 并重新执行真实 PPTX 验收；不采用强制降级。PPT/DOCX/XLSX/大屏需真实生成并打开验收，不能只检查技能列表。
 
 ## 8. UI、静态构建与同源信任
 
@@ -218,6 +219,9 @@ ReplayRunner 消费 `StepsDocument`，在 Octop 主进程运行。它接受注�
 | `POST /api/browser-agent/sessions/{id}/tickets`      | 实际连接前签发一次性 ticket |
 | `POST /api/browser-agent/sessions/{id}/grants`       | 签发普通动作 grant          |
 | `POST /api/browser-agent/sessions/{id}/skill-drafts` | 返回人工录制模板草稿        |
+| `POST /api/browser-agent/sessions/{id}/replays`      | 在受限授权范围内回放录制    |
+| `DELETE /api/browser-agent/replays/{replayId}`       | 取消回放并禁止后续步骤      |
+| `DELETE /api/browser-agent/recordings/{recordingId}` | 删除录制及其全部原始数据    |
 | `WS /api/browser-agent/ws?ticket=...`                | 受限 PageAgent 请求与事件   |
 
 ### 9.2 既有接口迁移

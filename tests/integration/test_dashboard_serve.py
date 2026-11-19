@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -69,3 +70,90 @@ async def test_path_traversal_is_blocked(tmp_octop_home: Path) -> None:
                 r = c.get(encoded)
                 assert r.status_code in (200, 404)
                 assert "root:" not in r.text
+
+
+def test_viewer_response_uses_generated_sandbox_policy(tmp_path: Path) -> None:
+    from starlette.requests import Request
+
+    from octop.api.app import _dashboard_response
+
+    viewer = tmp_path / "viewer"
+    viewer.mkdir()
+    (viewer / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    (viewer / "viewer-policy.json").write_text(
+        json.dumps(
+            {
+                "contentSecurityPolicy": (
+                    "sandbox allow-scripts allow-modals allow-downloads; "
+                    "default-src 'none'; script-src https://webskill.invalid; "
+                    "connect-src 'none'"
+                )
+            }
+        ),
+        encoding="utf-8",
+    )
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "https",
+            "method": "GET",
+            "path": "/webskill/viewer/",
+            "headers": [(b"host", b"dashboard.example:8443")],
+        }
+    )
+    response = _dashboard_response(viewer / "index.html", "webskill/viewer/", request)
+    policy = response.headers["content-security-policy"]
+    assert "https://dashboard.example:8443" in policy
+    assert "https://webskill.invalid" not in policy
+    assert "allow-same-origin" not in policy
+    assert "allow-scripts allow-modals allow-downloads" in policy
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_viewer_assets_accept_only_the_opaque_null_origin(tmp_path: Path) -> None:
+    from starlette.requests import Request
+
+    from octop.api.app import _dashboard_response
+
+    asset = tmp_path / "viewer.js"
+    asset.write_text("export {};", encoding="utf-8")
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "https",
+            "method": "GET",
+            "path": "/webskill/assets/viewer.js",
+            "headers": [(b"origin", b"null")],
+        }
+    )
+    response = _dashboard_response(asset, "webskill/assets/viewer.js", request)
+    assert response.headers["access-control-allow-origin"] == "null"
+    assert response.headers["cross-origin-resource-policy"] == "cross-origin"
+    assert response.headers["vary"] == "Origin"
+
+
+def test_static_script_sandbox_has_no_same_origin_access(tmp_path: Path) -> None:
+    from starlette.requests import Request
+
+    from octop.api.app import _dashboard_response
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    (sandbox / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "method": "GET",
+            "path": "/webskill/sandbox/",
+            "headers": [(b"host", b"127.0.0.1:18088")],
+        }
+    )
+    response = _dashboard_response(sandbox / "index.html", "webskill/sandbox/", request)
+    policy = response.headers["content-security-policy"]
+    assert policy.startswith("sandbox allow-scripts;")
+    assert "allow-same-origin" not in policy
+    assert "worker-src blob:" in policy
+    assert "connect-src 'none'" in policy
+    assert "script-src http://127.0.0.1:18088 data:" in policy
+    assert "unsafe-inline" not in policy

@@ -17,5 +17,12 @@ export default defineConfig({
     outDir: resolve(import.meta.dirname, "../../src/octop/dashboard/webskill"),
     emptyOutDir: true,
     chunkSizeWarningLimit: 2000,
+    rolldownOptions: {
+      input: {
+        index: resolve(import.meta.dirname, "index.html"),
+        viewer: resolve(import.meta.dirname, "viewer/index.html"),
+        sandbox: resolve(import.meta.dirname, "sandbox/index.html"),
+      },
+    },
   },
 });
