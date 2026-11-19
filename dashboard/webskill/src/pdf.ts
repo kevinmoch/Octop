@@ -12,7 +12,7 @@ import type {
 } from "@webskill/sdk/agent";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-GlobalWorkerOptions.workerSrc = workerSrc;
+if (!GlobalWorkerOptions.workerSrc) GlobalWorkerOptions.workerSrc = workerSrc;
 
 function withDestroy(
   pdf: PDFDocumentProxy,
