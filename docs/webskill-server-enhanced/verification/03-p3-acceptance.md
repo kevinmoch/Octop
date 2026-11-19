@@ -1,7 +1,7 @@
 # P3 实施与真实验证记录
 
 > 状态：🟡 P3 本地候选。人工候选、受限回放、两宿主技能执行、隔离 viewer、XLSX 与大屏已有真实证据；其余条目按本文件逐项验收，不是生产支持声明。
-> R0 能力基线：原生技能学习仍是主路径且真实外部模型闭环待 R1 验收；固定模板录制/回放仅为 Octop 辅助。见 [design/01-capability-baseline.md](../design/01-capability-baseline.md) 与 [capability-inventory.json](../capability-inventory.json)。
+> R0 能力基线：原生技能学习是主路径；R1 已用真实 `qwen3.5:9b` 完成本地 candidate 闭环。固定模板录制/回放仅为 Octop 辅助。见 [design/01-capability-baseline.md](../design/01-capability-baseline.md) 与 [capability-inventory.json](../capability-inventory.json)。
 
 ## 1. 录制转候选（2026-11-18）
 

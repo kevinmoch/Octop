@@ -57,15 +57,15 @@ const available: CapabilityItem[] = [
     en: "Document artifacts and isolated viewer",
     state: "available",
   },
+  {
+    id: "native-skill-generation",
+    zh: "原生会话技能学习（R1 本地候选）",
+    en: "Native session skill generation (R1 local candidate)",
+    state: "available",
+  },
 ];
 
 const inProgress: CapabilityItem[] = [
-  {
-    id: "native-skill-generation",
-    zh: "原生会话技能学习（真实模型闭环）",
-    en: "Native session skill generation (real-model loop)",
-    state: "in-progress",
-  },
   {
     id: "capability-ui",
     zh: "能力状态与不支持替代路径",

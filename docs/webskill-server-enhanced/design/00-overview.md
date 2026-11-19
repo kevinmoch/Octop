@@ -1,6 +1,6 @@
 # Octop 服务端增强版设计
 
-> 状态：🟢 P0/P1/P2 本地候选；🟢 P3 本地 candidate；🟡 R0 能力整改基线已建立，R1 原生技能学习待验收。实际支持能力以 [R0 能力基线](01-capability-baseline.md)、[capability-inventory.json](../capability-inventory.json) 和对应证据为准。
+> 状态：🟢 P0/P1/P2 本地候选；🟢 P3 本地 candidate；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）。实际支持能力以 [R0 能力基线](01-capability-baseline.md)、[capability-inventory.json](../capability-inventory.json) 和对应证据为准。
 > 需求与编号见 [../00-requirements-overview.md](../00-requirements-overview.md)。
 
 ## 0. R0 能力合同（2026-11-19）
@@ -123,7 +123,7 @@ BrowserSession、Dashboard 原始输入、harness、record daemon 和 ReplayRunn
 
 ### 5.1 模型生成
 
-**这是 P3/R1 的主路径。** 复用 SDK 的 `GENERATE_SKILL_TOOL`、`SkillGenerator`、`GeneratedSkillDraft`、`SkillCandidateSink`。保留现有工具轨迹、frontmatter、输入与二进制校验，不新增宿主专用生成器。当前宿主已有候选 sink/governance，但真实外部模型的 `skillGeneration` → `FsToolStepStore` → `generate_skill` 闭环尚未验收；R1 必须补齐。
+**这是 P3/R1 的主路径。** 复用 SDK 的 `GENERATE_SKILL_TOOL`、`SkillGenerator`、`GeneratedSkillDraft`、`SkillCandidateSink`。保留现有工具轨迹、frontmatter、输入与二进制校验，不新增宿主专用生成器。R1 已用本地 `qwen3.5:9b` 完成 `skillGeneration` → `FsToolStepStore` → `generate_skill` → Console 发布 → 新会话执行的本地 candidate 验收；证据见 [04-r1-native-skill-acceptance.md](../verification/04-r1-native-skill-acceptance.md)。
 
 ### 5.2 人工录制（Octop 可选辅助）
 

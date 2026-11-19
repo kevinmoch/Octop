@@ -189,12 +189,14 @@
         "governance"
       ],
       "uiSurface": "Chatbot/Console",
-      "status": "partial",
-      "decision": "implement",
+      "status": "candidate",
+      "decision": "keep",
       "phase": "R1",
       "requiresSdkChange": false,
-      "currentEvidence": [],
-      "notes": "当前固定模板候选不是原生学习证据；R1 必须用真实外部模型闭环。"
+      "currentEvidence": [
+        ".artifacts/webskill-p1/ui/ui-result-native-skill.json"
+      ],
+      "notes": "R1 本地 candidate 已用真实 qwen3.5:9b 完成 ToolStep→generate_skill→Console 发布→新会话执行；不是 production。"
     },
     {
       "id": "native-skill-execution",
@@ -207,13 +209,13 @@
       ],
       "uiSurface": "Chatbot/Console",
       "status": "candidate",
-      "decision": "implement",
+      "decision": "keep",
       "phase": "R1",
       "requiresSdkChange": false,
       "currentEvidence": [
-        "P3 ui-result-skill-execution.json"
+        ".artifacts/webskill-p1/ui/ui-result-native-skill.json"
       ],
-      "notes": "P3 已执行已发布候选；R1 要证明它来自原生生成，且无 ReplayRunner。"
+      "notes": "R1 新会话读取已发布技能、重新感知并执行；ReplayRunner=0。"
     },
     {
       "id": "recording-candidate",

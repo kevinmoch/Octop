@@ -1,6 +1,6 @@
 # Octop 服务端增强版需求基线
 
-> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate；🟡 R0 能力基线已建立，R1 原生技能学习待验收。
+> 状态：🟢 P0/P1/P2 本地候选已完成；🟢 P3 本地 candidate；🟢 R0 能力基线已建立；🟢 R1 原生技能学习本地 candidate 通过（真实 qwen3.5:9b）。
 > 本专项不规划 WebSkill 的 npm 新版本；P0/P1/P2/P3 均为集成阶段。
 > 阶段与实施边界见 [00-index.md](00-index.md)，技术设计见 [design/00-overview.md](design/00-overview.md) 与 [R0 能力基线](design/01-capability-baseline.md)，验证见 [P0 探针](verification/00-p0-probes.md) 与 [P1 实施及真实验证记录](verification/01-p1-acceptance.md)。
 
@@ -25,7 +25,7 @@
 - **能力按端口逐项验收**：主页面、pageTabs、分页、PDF、pageImage、downloads 等分别有状态；remoteImage、WebOffice、DWG、页面声明技能默认 `unsupported`，不得以“完整能力”名义开放任意 URL、requestkey、路径或脚本。
 - **R2 拆分**：R2A 页面对等、R2B 安全资源端口、R2C 高风险探针/不支持；R1 原生技能先于 R2。
 - **公共 SDK 端口不足时按不支持处理**：不在 Octop 私造协议；如必须扩展，另立 SDK 需求、API snapshot 和版本评审，不夹带发版。
-- **真实外部模型不可替代**：R1 必须有真实外部模型闭环；脚本化模型只用于回归，不补绿。
+- **真实外部模型不可替代**：R1 已用本地 `qwen3.5:9b` 完成真实闭环（本地 candidate）；脚本化模型只用于回归，不补绿。
 - **两宿主同场景**：每个能力至少按 [r0-two-host-scenarios.json](r0-two-host-scenarios.json) 记录 extension / octop-server 的输入、授权、结果和失败；不以截图像素代替语义对等。
 
 ## 3. FR 基线与阶段映射
@@ -83,7 +83,7 @@
 
 ### 4.5 技能候选、人工录制与模板
 
-- **原生技能学习是主路径**：真实会话工具轨迹 → `generate_skill` → `SkillGenerator` → 候选 sink；固定模板人工录制只能作为 Octop 辅助，不得冒充该路径。
+- **原生技能学习是主路径**：真实会话工具轨迹 → `generate_skill` → `SkillGenerator` → 候选 sink；R1 本地 candidate 已验证“生成 → Console 发布 → 新会话执行”，固定模板人工录制只能作为 Octop 辅助，不得冒充该路径。
 - 模型会话生成技能复用 `SkillGenerator` / `GENERATE_SKILL_TOOL` 和 `SkillCandidateSink`。
 - 人工录制使用 octop-browser 的 `StepsDocument`，经固定模板转换为 `GeneratedSkillDraft`。
 - 人工录制草稿省略 `steps`；不伪造本会话工具轨迹，不写跨会话陈旧 ref。

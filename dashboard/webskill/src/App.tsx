@@ -363,8 +363,8 @@ export default function App({
           <p>
             {copy(
               locale,
-              "原生技能学习仍待真实外部模型闭环；录制/回放是 Octop 辅助能力，不等于完整 WebSkill。",
-              "Native skill generation still needs a real external-model loop; recording/replay is an Octop assistant capability, not full WebSkill parity.",
+              "原生技能学习已在 R1 本地候选用真实外部模型闭环；录制/回放仍是 Octop 辅助能力，不等于完整 WebSkill。",
+              "Native skill generation passed the R1 local candidate with a real external model; recording/replay remains an Octop assistant capability, not full WebSkill parity.",
             )}
           </p>
         </details>

@@ -39,8 +39,8 @@ def test_inventory_is_valid_and_covers_declared_ports() -> None:
         "page-declared-skill",
     }
     assert required <= by_id.keys()
-    assert by_id["native-skill-generation"]["status"] == "partial"
-    assert by_id["native-skill-generation"]["decision"] == "implement"
+    assert by_id["native-skill-generation"]["status"] == "candidate"
+    assert by_id["native-skill-generation"]["decision"] == "keep"
     assert by_id["page-tabs"]["status"] == "missing"
     assert by_id["downloads"]["status"] == "missing"
     assert by_id["remote-image"]["status"] == "unsupported"

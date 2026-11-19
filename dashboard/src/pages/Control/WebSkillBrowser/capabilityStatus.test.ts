@@ -4,7 +4,7 @@ import {
   HOST_CAPABILITY_ITEM_COUNT,
 } from "../../../../webskill/src/capabilityStatus";
 
-describe("R0 capability status projection", () => {
+describe("capability status projection", () => {
   it("keeps planned and unsupported ports from being presented as available", () => {
     const items = new Map(
       HOST_CAPABILITY_GROUPS.flatMap((group) =>
@@ -18,7 +18,7 @@ describe("R0 capability status projection", () => {
     expect(items.get("remote-image")).toBe("unsupported");
     expect(items.get("web-office")).toBe("unsupported");
     expect(items.get("dwg")).toBe("unsupported");
-    expect(items.get("native-skill-generation")).toBe("in-progress");
+    expect(items.get("native-skill-generation")).toBe("available");
     expect(HOST_CAPABILITY_ITEM_COUNT).toBeGreaterThan(10);
   });
 });

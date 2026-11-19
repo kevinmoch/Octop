@@ -1,8 +1,8 @@
 # R0 能力基线与合同
 
-> 状态：🟡 R0 技术基线已建立，待需求/设计评审确认；不是生产、不是完整能力声明。  
-> 基线：Octop `facb499b3`、browser fork `1.1.0+webskill.local.2`（wheel SHA-256 `b66182b2…`）、SDK `0.29.0` / Chatbot `0.26.0` / Console `0.22.5`。  
-> 机器可读事实源：[../capability-inventory.json](../capability-inventory.json)。  
+> 状态：🟢 R0 技术基线已建立；🟢 R1 原生技能学习本地 candidate 通过；不是生产、不是完整能力声明。
+> 基线：Octop `facb499b3`、browser fork `1.1.0+webskill.local.2`（wheel SHA-256 `b66182b2…`）、SDK `0.29.0` / Chatbot `0.26.0` / Console `0.22.5`。
+> 机器可读事实源：[../capability-inventory.json](../capability-inventory.json)。
 > 两宿主场景合同：[../r0-two-host-scenarios.json](../r0-two-host-scenarios.json)。
 
 ## 1. R0 目标
@@ -33,8 +33,8 @@ R0 不修改既有 FR/AC 的通过状态；新增/调整需求必须按需求变
 | DOCX/XLSX/PPTX/图片读取/模板 | candidate | 保留 | R3 |
 | 文档产物、大屏、opaque viewer | candidate；原生 PDF 未通过 | 保留 | R3 |
 | Console 治理/候选 | candidate | 保留 | R1 |
-| 原生技能生成 `ToolStep → generate_skill` | **partial：真实外部模型闭环未验收** | 必须实现 | R1 |
-| 已发布技能跨会话执行 | candidate（P3 为已发布候选执行） | R1 证明来源为原生生成 | R1 |
+| 原生技能生成 `ToolStep → generate_skill` | **candidate：R1 真实外部模型本地闭环通过** | 保留 | R1 |
+| 已发布技能跨会话执行 | candidate（R1 新会话重新读取/执行） | 保留 | R1 |
 | `pageTabs` | missing | 实现 | R2A |
 | `pagePerceptionPaging` | missing | 实现 | R2A |
 | PDF 直传/逐页 | missing | 实现 | R2B |
@@ -132,7 +132,7 @@ ResourceHandle
 - 同输入同语义，不比截图；
 - artifact 带 commit、wheel hash、环境。
 
-R1 的 `native-skill-generate-reuse` 必须 `modelKind=external`；R4 的 `trusted-tls`、`docker-wheel` 仍为 blocked，不能由 P3 viewer/文档证据替代。
+R1 的 `native-skill-generate-reuse` 已用 `modelKind=external` 通过本地 candidate；R4 的 `trusted-tls`、`docker-wheel` 仍为 blocked，不能由 P3 viewer/文档证据替代。
 
 ## 6. 威胁模型
 
@@ -159,19 +159,17 @@ R1 的 `native-skill-generate-reuse` 必须 `modelKind=external`；R4 的 `trust
 - [x] 两宿主场景合同 `r0-two-host-scenarios.json`。
 - [x] 简版 UI 能力状态投影（`capabilityStatus.ts`）。
 - [x] 需求/设计/索引增加 R0 决策和链接（见对应文档）。
-- [ ] R1 原生技能真实外部模型闭环（下一阶段）。
+- [x] R1 原生技能真实外部模型本地 candidate 闭环（`qwen3.5:9b`；见 04）。
 - [ ] R2A/R2B/R2C 端口实现/探针（后续阶段）。
 - [ ] R4 TLS/Docker/K8s/发布准入。
 
-> R0 技术基线就绪不等于 R1/R2/R3/R4 通过；任何新增能力必须更新本矩阵、场景合同和证据后才改变状态。
+> R0 技术基线就绪不等于 R2/R3/R4 通过；R1 已单独用真实模型验收。任何新增能力必须更新本矩阵、场景合同和证据后才改变状态。
 
 ## 8. 下一阶段入口
 
-R1 进入条件：
+R1 已完成本地 candidate（真实 `qwen3.5:9b`）。R2A 进入条件：
 
-- R0 矩阵/场景合同评审通过；
-- 明确外部模型服务与测试账号/密钥，且不写入仓库或审计；
-- Chatbot `agentCapabilities.skillGeneration` 开关、`FsToolStepStore`、`generate_skill`、`SkillGenerator`、`CandidateStore` 接线路径已在设计中确认；
-- 固定模板候选、录制回放不得作为 R1 的证据。
-
-R2A/R2B/R2C 进入条件分别见 R0 决策；R2C 默认不支持，不得因“完整能力”跳过安全评审。
+- R1 证据与 R0 矩阵评审确认；
+- `pageTabs`、`pagePerceptionPaging`、target/frame 矩阵的端口合同和安全边界确认；
+- 固定模板候选、录制回放不得作为 R2A 的证据；
+- R2B/R2C 按 R0 决策和独立安全评审进入；R2C 默认不支持。
