@@ -63,6 +63,8 @@ class PageRef:
     signature: str = ""
     # JSON include/exclude selectors that gated this ref at issuance.
     action_scope: str = ""
+    # True when this PageRef was restored by signature after a re-render.
+    recovered: bool = False
 
 
 @dataclass

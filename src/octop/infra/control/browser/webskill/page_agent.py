@@ -11,7 +11,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from octop_browser.actions import interact, navigate
 from octop_browser.cdp.client import CDPSessionError
@@ -434,6 +434,10 @@ def _node(element: dict[str, Any], ref: str | None) -> dict[str, Any]:
     if role == "link" and isinstance(href, str) and href:
         node["href"] = href
     return node
+
+
+def _absolute_href(base_url: str, href: str) -> str:
+    return urljoin(base_url, href) if href else ""
 
 
 def _target(element: dict[str, Any], ref: str) -> dict[str, Any]:
@@ -1325,6 +1329,14 @@ async def read_page(
             if isinstance(element, dict)
             and isinstance(element.get("node_id"), int)
             and element.get("node_id") not in excluded
+            and (
+                _capturable_image(element)
+                or (
+                    str(element.get("tag") or "") == "input"
+                    and str(element.get("type") or "").lower() == "file"
+                )
+                or not _hidden_by_ancestor(element["node_id"], projected_root, parents)
+            )
         ]
         if subtree_root_id is not None:
             elements = [
@@ -1382,6 +1394,8 @@ async def read_page(
             )
             needs_ref = action_ref or image_target or scrollable_ref
             node = _node(element, None)
+            if "href" in node:
+                node["href"] = _absolute_href(selected_url, str(node["href"]))
             node_ref: str | None = None
             if needs_ref:
                 signature = json.dumps(
@@ -1389,7 +1403,7 @@ async def read_page(
                         "role": node.get("role"),
                         "tag": str(element.get("tag") or "").lower(),
                         **({"name": node.get("name")} if node.get("name") else {}),
-                        **({"href": node.get("href")} if node.get("href") else {}),
+                        **({"href": str(element.get("href"))} if element.get("href") else {}),
                         "path": node_paths.get(element["node_id"], []),
                         "frame": selected_frame,
                     },
@@ -2007,7 +2021,7 @@ async def _recover_ref(
         if not expected_tag or tag == expected_tag:
             backend_node_id = node.get("backendNodeId")
             if isinstance(backend_node_id, int) and backend_node_id > 0:
-                return replace(entry, backend_node_id=backend_node_id)
+                return replace(entry, backend_node_id=backend_node_id, recovered=True)
     signature.pop("path", None)
     candidates = _find_signature_nodes(root, signature)
     if len(candidates) != 1:
@@ -2015,7 +2029,7 @@ async def _recover_ref(
     backend_node_id = candidates[0].get("backendNodeId")
     if not isinstance(backend_node_id, int) or backend_node_id <= 0:
         return None
-    return replace(entry, backend_node_id=backend_node_id)
+    return replace(entry, backend_node_id=backend_node_id, recovered=True)
 
 
 async def _ensure_ref(
@@ -2920,6 +2934,8 @@ async def execute_action(
             current = await client.send("Runtime.evaluate", evaluation)
             current_url = str(current.get("result", {}).get("value") or "")
             outcome: dict[str, Any] = {"ok": True, "target": target}
+            if entry.recovered:
+                outcome["recovered"] = True
             if noop:
                 outcome["noop"] = True
             if scrolled_payload is not None:

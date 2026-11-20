@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   34 项  71%
-🟡 部分对齐    9 项  19%
+✅ 完全对齐   36 项  75%
+🟡 部分对齐    7 项  15%
 ❌ 未实现      4 项   8%
 ➖ 宿主特有     1 项   2%
 ```
@@ -32,7 +32,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 5 | 隐藏/零尺寸不发放 action ref | ✅ | `_action_visible`、`_hidden_by_ancestor` | — |
 | 6 | 敏感/私有子树排除 | ✅ | `_sensitive_subtrees`、scope exclude | — |
 | 7 | 独立 actionScope | ✅ | `actionScope` + `_assert_ref_in_action_scope` | host UI 仍需配置入口 |
-| 8 | 链接绝对 href | 🟡 | `_node` 透传 href | 未显式验证相对 URL 绝对化 |
+| 8 | 链接绝对 href | ✅ | `_absolute_href` + `urljoin`；测试覆盖相对 URL/query | — |
 | 9 | 页面图片 capturable / capture | ✅ | `_image_elements`、`capture_image` | — |
 | 10 | scrollable directions | ✅ | `_scrollable_backends`、`_scrollable_elements` | 只做自身容器，不上溯 |
 | 11 | cursor:pointer 提升 | ✅ | 父级差分探针 | 不做 CSS 级 hover 差分 |
@@ -64,7 +64,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 32 | attach | 🟡 | Octop 文件桥 + DataTransfer；真实隐藏 input 已验证 | 不是跨宿主协议；SDK/extension 用系统选择器 |
 | 33 | back | ✅ | navigate.go_back | — |
 | 34 | noop / changes 元数据 | 🟡 | set 有 noop；有 navigated | 无 changes 摘要 |
-| 35 | recovered outcome 标记 | 🟡 | 恢复成功会静默改 backend | 不总是回填 `recovered` |
+| 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ❌ | 无 | 与感知模态提升同缺口 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
 | 38 | tab workset / 新页 | ✅ | target admit/switch、stream 跟随 | — |
@@ -146,4 +146,10 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 
 详见 [14-sdk-verify-environment.md](14-sdk-verify-environment.md)。
 
-**没有临时修改 SDK 代码**；`git -C /Users/mochunhui/Git/web-skill-sdk status --porcelain` 为空。
+**没有临时修改 SDK 代码**；验证时的 SDK 工作区已恢复干净。
+
+## 8. verify delta 已落地
+
+`/Users/mochunhui/Git/web-skill-sdk/verify/agent/30-page-semantics-0.29.md` 已新增
+A-354 ~ A-363；`00-overview`、`01-environment/A-03`、`09-page-actions/A-70` 和
+`verify/README.md` 已加 0.29.0 delta 注解。旧 229 条仍作为 legacy 基线，不声称整体已升级。

@@ -8,6 +8,7 @@ import json
 import pytest
 
 from octop.infra.control.browser.webskill.page_agent import (
+    _absolute_href,
     _action_visible,
     _assert_ref_in_action_scope,
     _click_dropdown_option,
@@ -80,6 +81,13 @@ def test_refs_are_reused_only_for_the_same_signature_frame_and_document() -> Non
     assert registry.issue_ref(session, 13, "frame-1", '{"path":[0],"role":"button"}') != first
 
 
+def test_links_are_resolved_against_the_page_url() -> None:
+    assert (
+        _absolute_href("https://example.test/orders/detail", "../note.pdf?share=1")
+        == "https://example.test/note.pdf?share=1"
+    )
+
+
 def test_signature_recovery_uses_dom_path_and_tag() -> None:
     entry = PageRef(
         backend_node_id=999,
@@ -91,6 +99,7 @@ def test_signature_recovery_uses_dom_path_and_tag() -> None:
     recovered = asyncio.run(_recover_ref(client, entry))
     assert recovered is not None
     assert recovered.backend_node_id == 20
+    assert recovered.recovered is True
     assert "DOM.getDocument" in client.calls
 
 
