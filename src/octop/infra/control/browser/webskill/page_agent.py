@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
@@ -51,6 +52,37 @@ from .targets import (
 SessionResolver = Callable[..., Awaitable[Any]]
 WriteGate = Callable[[], bool]
 MAX_P1_NODES = 1500
+ACTIONABLE_ROLES = {
+    "button",
+    "checkbox",
+    "combobox",
+    "form",
+    "link",
+    "radio",
+    "searchbox",
+    "switch",
+    "textbox",
+}
+PROMOTABLE_ROLES = {
+    "generic",
+    "img",
+    "cell",
+    "listitem",
+    "columnheader",
+    "gridcell",
+    "rowheader",
+    "option",
+    "treeitem",
+    "tab",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+}
+INTERACTIVE_TOKEN = re.compile(
+    r"(?:^|[^a-z])(btn|button|actions?|click(?:able)?|link|menu|nav|tabs?|trigger|"
+    r"operate|operations?|handle|entry|toolbar|option)(?:[^a-z]|$)",
+    re.IGNORECASE,
+)
 
 
 def public_error_code(code: str) -> str:
@@ -243,7 +275,7 @@ def _image_capture_options(request: dict[str, Any]) -> dict[str, int] | None:
     }
 
 
-def _node(element: dict[str, Any], ref: str) -> dict[str, Any]:
+def _node(element: dict[str, Any], ref: str | None) -> dict[str, Any]:
     role = _role(element)
     name = (
         ""
@@ -256,7 +288,9 @@ def _node(element: dict[str, Any], ref: str) -> dict[str, Any]:
             or ""
         )
     )
-    node: dict[str, Any] = {"role": role, "ref": ref}
+    node: dict[str, Any] = {"role": role}
+    if ref:
+        node["ref"] = ref
     if name:
         node["name"] = name
     href = element.get("href")
@@ -432,14 +466,18 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
                 node.get("attributes", [])[::2], node.get("attributes", [])[1::2], strict=False
             )
         }
-        role = attrs.get("role", "").lower()
+        role = attrs.get("role", "").lower() or "generic"
         title = attrs.get("title", "").strip()
         aria = attrs.get("aria-label", "").strip()
         tabindex = attrs.get("tabindex", "")
         # The nodeValue is usually on #text children, not the element; use the
         # element's title/aria as the stable accessible name for these cards.
-        name = title or aria
         classes = str(attrs.get("class", ""))
+        class_and_id = f"{classes} {attrs.get('id', '')}"
+        href = attrs.get("href", "")
+        interactive_token = INTERACTIVE_TOKEN.search(class_and_id) is not None
+        text = _text_content(node)
+        name = title or aria or text
         title_context = (
             in_field_title or "kd-cq-field-title-wrap" in classes or "_3wxkawCQ" in classes
         )
@@ -448,12 +486,20 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
             and name
             and tag not in {"html", "body", "iframe", "frame", "img", "input", "textarea", "select"}
             and role not in {"button", "link", "tab", "menuitem", "option", "checkbox", "radio"}
-            and (title or aria or tabindex in {"0", "true"} or role in {"button", "link"})
+            and role in PROMOTABLE_ROLES
+            and (
+                title
+                or aria
+                or tabindex not in {"", "-1"}
+                or interactive_token
+                or href
+                or role in {"button", "link", "option", "tab", "menuitem"}
+            )
         ):
             promoted.append(
                 {
                     "node_id": node.get("nodeId"),
-                    "role": "link" if title else "button",
+                    "role": "link" if href else "button",
                     "name": name[:300],
                 }
             )
@@ -480,6 +526,45 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
 
     visit(root)
     return [node for node in promoted if isinstance(node.get("node_id"), int)]
+
+
+_LIVE_VALUE_FUNCTION = r"""function() {
+    const tag = this.tagName.toLowerCase();
+    if (tag === 'select') {
+        return String(this.selectedOptions?.[0]?.label || this.value || '');
+    }
+    if (tag === 'input' && (this.type === 'checkbox' || this.type === 'radio')) {
+        return this.checked ? 'true' : 'false';
+    }
+    if (tag === 'input' || tag === 'textarea') return String(this.value || '');
+    if (this.getAttribute('role') === 'combobox' || String(this.getAttribute('class') || '').includes('kd-cq-select')) {
+        return String(this.innerText || this.getAttribute('data-value') || '').replace(/\s+/g, ' ').trim();
+    }
+    return '';
+}"""
+
+
+async def _live_value(client: Any, backend_node_id: int) -> str | None:
+    try:
+        resolved = await client.send("DOM.resolveNode", {"backendNodeId": backend_node_id})
+        object_id = resolved.get("object", {}).get("objectId")
+        if not isinstance(object_id, str) or not object_id:
+            return None
+        result = await client.send(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": object_id,
+                "functionDeclaration": _LIVE_VALUE_FUNCTION,
+                "returnByValue": True,
+            },
+        )
+    except Exception:  # noqa: BLE001 - value is supplemental perception information
+        return None
+    value = result.get("result", {}).get("value")
+    if not isinstance(value, str):
+        return None
+    value = " ".join(value.split())
+    return value[:200] if value else None
 
 
 async def read_page(
@@ -602,14 +687,22 @@ async def read_page(
         known_nodes = {
             element.get("node_id") for element in raw_elements if isinstance(element, dict)
         }
-        raw_elements = [
-            *raw_elements,
-            *[
-                element
-                for element in _promoted_elements(projected_root)
-                if element.get("node_id") not in known_nodes
-            ],
-        ]
+        promoted = _promoted_elements(projected_root)
+        by_node = {
+            element.get("node_id"): element
+            for element in raw_elements
+            if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+        }
+        for element in promoted:
+            node_id = element.get("node_id")
+            existing = by_node.get(node_id)
+            if existing is not None:
+                if existing.get("role") in {None, "", "generic", "div", "span"}:
+                    existing["role"] = element["role"]
+                if not existing.get("accessibleName") and not existing.get("name"):
+                    existing["accessibleName"] = element.get("name")
+            elif node_id not in known_nodes:
+                raw_elements.append(element)
         excluded = _sensitive_subtrees(projected_root)
         field_controls = _field_controls(projected_root, excluded)
         by_node = {
@@ -693,13 +786,28 @@ async def read_page(
                     "PERCEPTION_FAILED",
                     "Could not bind a visible control to its backend node identity",
                 )
-            ref = registry.issue_ref(session, backend_node_id, selected_frame)
-            node = _node(element, ref)
+            role = _role(element)
+            if _capturable_image(element):
+                role = "img"
+            needs_ref = role in ACTIONABLE_ROLES or _capturable_image(element)
+            node_ref: str | None = (
+                registry.issue_ref(session, backend_node_id, selected_frame) if needs_ref else None
+            )
+            node = _node(element, node_ref)
+            if (
+                node_ref
+                and role in {"textbox", "searchbox", "combobox", "checkbox", "radio", "switch"}
+                and not _secret(element)
+            ):
+                value = await _live_value(client, backend_node_id)
+                if value is not None:
+                    node["value"] = value
             if _capturable_image(element):
                 node["capturable"] = True
-                image_candidates.append((node, ref))
+                image_candidates.append((node, node_ref or ""))
             nodes.append(node)
-            targets.append(_target(element, ref))
+            if node_ref:
+                targets.append(_target(element, node_ref))
         result: dict[str, Any] = {
             "nodes": nodes,
             "page": {
@@ -1159,14 +1267,40 @@ async def _actual_target(
         "Runtime.callFunctionOn",
         {
             "objectId": object_id,
-            "functionDeclaration": """function () {
+            "functionDeclaration": r"""function () {
                 const tag = this.tagName.toLowerCase();
                 const type = String(this.getAttribute('type') || '').toLowerCase();
                 const declared = this.getAttribute('role') || '';
-                const role = declared || (tag === 'a' ? 'link' : tag === 'select' ? 'combobox' : tag === 'input' || tag === 'textarea' ? (type === 'checkbox' || type === 'radio' ? type : 'textbox') : tag);
+                let role = declared || (tag === 'a' ? 'link' : tag === 'select' ? 'combobox' : tag === 'input' || tag === 'textarea' ? (type === 'checkbox' || type === 'radio' ? type : 'textbox') : tag);
+                const classes = String(this.getAttribute('class') || '');
+                if (!declared && tag === 'div' && (classes.includes('kd-cq-select') || classes.includes('combobox'))) role = 'combobox';
                 const secret = type === 'password';
-                const name = secret ? '' : String(this.getAttribute('aria-label') || this.innerText || this.getAttribute('aria-labelledby') || '').slice(0, 300);
-                return { role, name, secret };
+                const text = (el) => String((el && (el.innerText || el.textContent)) || '').replace(/\s+/g, ' ').trim();
+                let name = '';
+                if (!secret) {
+                    const by = this.getAttribute('aria-labelledby');
+                    if (by) {
+                        const parts = by.split(/\s+/).map((id) => text(this.ownerDocument.getElementById(id))).filter(Boolean);
+                        if (parts.length) name = parts.join(' ');
+                    }
+                    if (!name) name = String(this.getAttribute('aria-label') || '').trim();
+                    const labels = this.labels;
+                    if (!name && labels && labels.length) name = [...labels].map(text).filter(Boolean).join(' ');
+                    if (!name) {
+                        const wrapping = this.closest('label');
+                        if (wrapping) name = text(wrapping);
+                    }
+                    if (!name) {
+                        const field = this.closest('[data-field-item="true"], .kd-cq-field');
+                        const title = field && (field.querySelector('span[title]') || field.querySelector('.kd-cq-field-title-wrap'));
+                        if (title) name = String(title.getAttribute('title') || text(title)).replace(/\s*\*+\s*$/, '').trim();
+                    }
+                    if (!name) name = String(this.getAttribute('placeholder') || '').trim();
+                    if (!name && tag === 'img') name = String(this.getAttribute('alt') || '').trim();
+                    if (!name && !['input', 'textarea', 'select'].includes(tag) && role !== 'combobox') name = text(this);
+                    if (!name) name = String(this.getAttribute('title') || '').trim();
+                }
+                return { role, name: name.slice(0, 300), secret };
             }""",
             "returnByValue": True,
         },
@@ -1183,14 +1317,64 @@ async def _actual_target(
     return target
 
 
-async def _click_dropdown_option(client: Any, value: str) -> bool:
-    """Choose a custom-kit dropdown item by its visible text.
+async def _click_dropdown_option(
+    client: Any, value: str, control_object_id: str | None = None
+) -> bool:
+    """Choose a custom-kit dropdown item by its visible text and verify it settled.
 
     These comboboxes are ``div[tabindex=0]`` widgets, not native ``select``
     elements. After the authorized ref is clicked open, the matching item is
     a portal ``li`` outside the field, so it is selected by text rather than by
     a model-supplied selector.
     """
+    if control_object_id is not None:
+        function = r"""async function(value) {
+            const wanted = String(value || "").trim();
+            const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
+            };
+            const nodes = [...document.querySelectorAll(
+                '[role="option"], li, [class*="dropdown-menu-item"], [class*="option"]'
+            )];
+            const target = nodes.find((el) => visible(el) && (el.innerText || el.textContent || "").trim() === wanted)
+                || nodes.find((el) => visible(el) && (el.getAttribute("aria-label") || el.getAttribute("data-value") || "").trim() === wanted);
+            if (!target) return { found: false, settled: false };
+            const rect = target.getBoundingClientRect();
+            const init = {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                clientX: rect.left + 4,
+                clientY: rect.top + 4,
+                button: 0
+            };
+            target.dispatchEvent(new PointerEvent("pointerdown", init));
+            target.dispatchEvent(new MouseEvent("mousedown", init));
+            target.dispatchEvent(new PointerEvent("pointerup", init));
+            target.dispatchEvent(new MouseEvent("mouseup", init));
+            target.dispatchEvent(new MouseEvent("click", init));
+            await new Promise((resolve) => setTimeout(resolve, 180));
+            const shown = `${this.innerText || ""} ${this.value || ""} ${this.getAttribute("data-value") || ""}`
+                .replace(/\s+/g, " ").trim();
+            return { found: true, settled: shown.includes(wanted) };
+        }"""
+        result = await client.send(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": control_object_id,
+                "functionDeclaration": function,
+                "arguments": [{"value": value}],
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+        )
+        payload = result.get("result", {}).get("value")
+        return (
+            isinstance(payload, dict)
+            and payload.get("found") is True
+            and payload.get("settled") is True
+        )
     expression = f"""(() => {{
         const wanted = {json.dumps(value, ensure_ascii=False)}.trim();
         const visible = (el) => {{
