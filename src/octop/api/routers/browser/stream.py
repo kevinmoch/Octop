@@ -178,14 +178,22 @@ async def _stream_loop(
     async with capture_context as subscription:
         while is_connected():
             started = time.monotonic()
-            if started >= next_snapshot:
-                await _send_session_snapshot(send_json, profile, sess=sess)
-                next_snapshot = started + _SESSION_INTERVAL_S
+            try:
+                if started >= next_snapshot:
+                    await _send_session_snapshot(send_json, profile, sess=sess)
+                    next_snapshot = started + _SESSION_INTERVAL_S
 
-            if subscription is not None:
-                frame = await subscription.next_frame()
-                if frame:
-                    await send_json({"type": "frame", "data": frame})
+                if subscription is not None:
+                    frame = await subscription.next_frame()
+                    if frame:
+                        await send_json({"type": "frame", "data": frame})
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # transient CDP/target switch races
+                logger.warning("browser stream tick failed: %s", exc)
+                # Keep the WebSocket and tab state alive; the next tick uses the
+                # reconnected CDP client after a tab switch.
+                await asyncio.sleep(0.1)
 
             await asyncio.sleep(max(0, _FRAME_INTERVAL_S - (time.monotonic() - started)))
 
@@ -389,7 +397,11 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
     elif t == "tab_switch":
         tab_id = msg.get("tab_id")
         if tab_id is not None:
-            result = await sess.switch_tab(str(tab_id))
+            try:
+                result = await asyncio.wait_for(sess.switch_tab(str(tab_id)), timeout=8.0)
+            except TimeoutError:
+                logger.warning("tab switch timed out; keeping stream open")
+                return
             if not getattr(result, "success", False):
                 # The client may still hold a target id from before a browser
                 # restart. Resolve the current tab by its visible identity

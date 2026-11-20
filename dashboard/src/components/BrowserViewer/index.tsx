@@ -358,11 +358,6 @@ export const BrowserViewer = forwardRef<
           onCompositionEnd={keyboard.onCompositionEnd}
         />
         {overlay}
-        {interactive && isStreaming && (
-          <div className={styles.interactiveHint}>
-            {t("browserViewer.interactiveHint")}
-          </div>
-        )}
       </div>
     </div>
   );

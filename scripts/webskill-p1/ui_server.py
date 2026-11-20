@@ -69,6 +69,8 @@ async def serve() -> None:
             host=host,
             port=port,
             log_level="warning",
+            ws_ping_interval=20.0,
+            ws_ping_timeout=None,
             ssl_certfile=os.environ.get("WEBSKILL_P1_UI_CERTFILE"),
             ssl_keyfile=os.environ.get("WEBSKILL_P1_UI_KEYFILE"),
         )
