@@ -218,6 +218,29 @@ def _secret(element: dict[str, Any]) -> bool:
     return str(element.get("type") or "").lower() == "password"
 
 
+def _capturable_image(element: dict[str, Any]) -> bool:
+    tag = str(element.get("tag") or "").lower()
+    return tag in {"img", "canvas", "svg"} or str(element.get("role") or "").lower() == "img"
+
+
+def _image_capture_options(request: dict[str, Any]) -> dict[str, int] | None:
+    raw = request.get("capture")
+    if not isinstance(raw, dict) or raw.get("images") is not True:
+        return None
+    try:
+        max_images = int(raw.get("maxImages", 4))
+    except (TypeError, ValueError):
+        max_images = 4
+    try:
+        max_bytes = int(raw.get("maxImageBytes", 2 * 1024 * 1024))
+    except (TypeError, ValueError):
+        max_bytes = 2 * 1024 * 1024
+    return {
+        "max_images": max(1, min(max_images, 12)),
+        "max_bytes": max(1, min(max_bytes, 10 * 1024 * 1024)),
+    }
+
+
 def _node(element: dict[str, Any], ref: str) -> dict[str, Any]:
     role = _role(element)
     name = (
@@ -248,6 +271,45 @@ def _target(element: dict[str, Any], ref: str) -> dict[str, Any]:
     if _secret(element):
         target["secret"] = True
     return target
+
+
+def _image_elements(root: dict[str, Any], excluded: set[int]) -> list[dict[str, Any]]:
+    """Return image-bearing elements omitted by the control-oriented DOM builder."""
+    images: list[dict[str, Any]] = []
+    image_tags = {"img", "canvas", "svg"}
+    sensitive_tags = {"script", "style", "template", "noscript"}
+
+    def visit(node: dict[str, Any]) -> None:
+        tag = str(node.get("nodeName") or "").lower()
+        if tag in sensitive_tags:
+            return
+        node_id = node.get("nodeId")
+        attributes = _attributes(node)
+        if tag in image_tags and isinstance(node_id, int) and node_id not in excluded:
+            images.append(
+                {
+                    "tag": tag,
+                    "role": "img",
+                    "node_id": node_id,
+                    "accessibleName": (
+                        attributes.get("alt")
+                        or attributes.get("aria-label")
+                        or attributes.get("title")
+                        or attributes.get("name")
+                        or ""
+                    ),
+                }
+            )
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+        content = node.get("contentDocument")
+        if isinstance(content, dict):
+            visit(content)
+
+    visit(root)
+    return images
 
 
 def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
@@ -317,10 +379,7 @@ async def read_page(
             "PERCEPTION_SUBTREE_UNSUPPORTED",
             "Subtree perception is not available in P1; no full-page fallback is performed",
         )
-    # P1 perception is DOM-only. Models may still ask for page images (the
-    # SDK enables that option independently of the host); failing the whole
-    # perception makes the assistant look like it lost browser control after
-    # a handoff. Ignore the image budget and return the readable DOM instead.
+    image_options = _image_capture_options(request)
     browser = await resolve_browser(session, resolver)
     model_attachment = await attach_model_target(session, browser)
     attached: FrameAttachment | None = None
@@ -436,6 +495,17 @@ async def read_page(
             ],
         ]
         excluded = _sensitive_subtrees(projected_root)
+        if image_options is not None:
+            known_nodes = {
+                element.get("node_id")
+                for element in raw_elements
+                if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+            }
+            raw_elements.extend(
+                element
+                for element in _image_elements(projected_root, excluded)
+                if element.get("node_id") not in known_nodes
+            )
         if any(element.get("framePath") for element in raw_elements if isinstance(element, dict)):
             raise BrowserAgentError(
                 "PERCEPTION_SUBTREE_UNSUPPORTED",
@@ -482,6 +552,7 @@ async def read_page(
         session.document = after
         nodes: list[dict[str, Any]] = []
         targets: list[dict[str, Any]] = []
+        image_candidates: list[tuple[dict[str, Any], str]] = []
         for element in elements:
             backend_node_id = backend_ids.get(element["node_id"])
             if backend_node_id is None:
@@ -490,18 +561,71 @@ async def read_page(
                     "Could not bind a visible control to its backend node identity",
                 )
             ref = registry.issue_ref(session, backend_node_id, selected_frame)
-            nodes.append(_node(element, ref))
+            node = _node(element, ref)
+            if _capturable_image(element):
+                node["capturable"] = True
+                image_candidates.append((node, ref))
+            nodes.append(node)
             targets.append(_target(element, ref))
+        result: dict[str, Any] = {
+            "nodes": nodes,
+            "page": {
+                "url": selected_url,
+                **({"title": selected_title} if selected_title else {}),
+            },
+            **({"nestedFrames": nested} if nested else {}),
+        }
+        if image_options is not None:
+            image_payloads: list[dict[str, Any]] = []
+            omitted = 0
+            failures = 0
+            for node, ref in image_candidates:
+                if len(image_payloads) >= image_options["max_images"]:
+                    omitted += 1
+                    node["imageNote"] = (
+                        "Image omitted because the per-message image budget was reached."
+                    )
+                    continue
+                try:
+                    captured = await capture_image(
+                        session,
+                        {"ref": ref, "max_bytes": image_options["max_bytes"]},
+                        registry=registry,
+                        resolver=resolver,
+                    )
+                except Exception as error:  # noqa: BLE001 - one image must not fail perception
+                    failures += 1
+                    node["imageNote"] = f"Image capture failed: {str(error)[:200]}"
+                    continue
+                payload = captured.get("result") if isinstance(captured, dict) else None
+                if not isinstance(payload, dict) or not isinstance(payload.get("data"), str):
+                    failures += 1
+                    reason = payload.get("reason") if isinstance(payload, dict) else None
+                    node["imageNote"] = (
+                        str(reason)
+                        if isinstance(reason, str) and reason
+                        else "Image capture returned no bytes."
+                    )
+                    continue
+                image_id = f"img_{len(image_payloads) + 1}"
+                node["imageId"] = image_id
+                image_payloads.append(
+                    {
+                        "id": image_id,
+                        "mimeType": str(payload.get("mimeType") or "image/png"),
+                        "data": payload["data"],
+                        "level": str(payload.get("level") or "canvas"),
+                    }
+                )
+            if image_payloads:
+                result["images"] = image_payloads
+            if omitted:
+                result["imagesOmitted"] = omitted
+            if failures:
+                result["imageFailures"] = failures
         return {
             "type": "perceive-result",
-            "result": {
-                "nodes": nodes,
-                "page": {
-                    "url": selected_url,
-                    **({"title": selected_title} if selected_title else {}),
-                },
-                **({"nestedFrames": nested} if nested else {}),
-            },
+            "result": result,
             "targets": targets,
             "document": after.public(),
         }
@@ -510,6 +634,110 @@ async def read_page(
             await attached.close()
         if model_attachment is not None:
             await model_attachment.close()
+
+
+_IMAGE_SOURCE_FUNCTION = """
+async function() {
+  const source = this.currentSrc || this.src || "";
+  if (source) {
+    try {
+      const response = await fetch(source, { credentials: "include" });
+      if (!response.ok) {
+        return { ok: false, reason: `HTTP ${response.status}` };
+      }
+      const type = (response.headers.get("content-type") || "").split(";")[0].trim();
+      if (!type.startsWith("image/")) {
+        return { ok: false, reason: `unexpected content type ${type || "unknown"}` };
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      let binary = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return {
+        ok: true,
+        level: "src",
+        mimeType: type,
+        width: this.naturalWidth || this.width || 0,
+        height: this.naturalHeight || this.height || 0,
+        data: btoa(binary),
+      };
+    } catch (error) {
+      return { ok: false, reason: String(error).slice(0, 180) };
+    }
+  }
+  if (typeof this.toDataURL === "function") {
+    const url = this.toDataURL("image/png");
+    const comma = url.indexOf(",");
+    if (comma >= 0) {
+      return {
+        ok: true,
+        level: "canvas",
+        mimeType: "image/png",
+        width: this.width || 0,
+        height: this.height || 0,
+        data: url.slice(comma + 1),
+      };
+    }
+  }
+  return { ok: false, reason: "The element has no readable image source" };
+}
+"""
+
+
+async def _capture_image_source(
+    client: Any,
+    backend_node_id: int,
+    max_bytes: int,
+) -> dict[str, Any] | None:
+    """Read image bytes through the page before falling back to a screenshot.
+
+    Hidden/lazy images and images with no layout box still have a readable
+    source; screenshot-only capture cannot reach them. Returning None means
+    the caller should try the screenshot path.
+    """
+    try:
+        resolved = await client.send("DOM.resolveNode", {"backendNodeId": backend_node_id})
+        object_id = resolved.get("object", {}).get("objectId")
+        if not isinstance(object_id, str) or not object_id:
+            return None
+        evaluated = await client.send(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": object_id,
+                "functionDeclaration": _IMAGE_SOURCE_FUNCTION,
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+        )
+    except Exception:  # noqa: BLE001 - screenshot path remains available
+        return None
+    value = evaluated.get("result", {}).get("value")
+    if not isinstance(value, dict) or value.get("ok") is not True:
+        return None
+    data = value.get("data")
+    if not isinstance(data, str) or not data:
+        return None
+    try:
+        decoded = base64.b64decode(data, validate=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(decoded) > max_bytes:
+        return {
+            "failure": (
+                f"The source image is {len(decoded)} bytes, over the {max_bytes}-byte budget"
+            )
+        }
+    mime_type = value.get("mimeType")
+    return {
+        "data": data,
+        "mimeType": str(mime_type) if isinstance(mime_type, str) else "image/png",
+        "width": max(1, int(value.get("width") or 0)),
+        "height": max(1, int(value.get("height") or 0)),
+        "bytes": len(decoded),
+        "level": str(value.get("level") or "src"),
+    }
 
 
 async def capture_image(
@@ -547,8 +775,32 @@ async def capture_image(
             client = attached.client
         elif entry.frame != "self":
             await assert_frame_identity_current(client, entry.frame)
-        await client.send("DOM.scrollIntoViewIfNeeded", {"backendNodeId": entry.backend_node_id})
-        box = await client.send("DOM.getBoxModel", {"backendNodeId": entry.backend_node_id})
+        source = await _capture_image_source(client, entry.backend_node_id, max_bytes)
+        if source is not None and "data" in source:
+            return {"type": "capture-image-result", "result": source}
+        if source is not None and "failure" in source:
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": str(source["failure"]),
+                    "triedLevels": ["src-bytes"],
+                },
+            }
+        try:
+            await client.send(
+                "DOM.scrollIntoViewIfNeeded", {"backendNodeId": entry.backend_node_id}
+            )
+            box = await client.send("DOM.getBoxModel", {"backendNodeId": entry.backend_node_id})
+        except Exception as error:  # noqa: BLE001 - no layout/hidden image is a fact
+            return {
+                "type": "capture-image-result",
+                "result": {
+                    "id": ref,
+                    "reason": f"The element has no visible box: {str(error)[:200]}",
+                    "triedLevels": ["cdp-screenshot"],
+                },
+            }
         quad = box.get("model", {}).get("border", [])
         if not isinstance(quad, list) or len(quad) != 8:
             return {

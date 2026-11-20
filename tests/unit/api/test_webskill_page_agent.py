@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -45,6 +46,7 @@ class FakeClient:
         self.evaluation_context_ids: list[int] = []
         self.detached: list[str] = []
         self.page_target_available = True
+        self.include_image = False
         self.activated_target: str | None = None
         self.new_target_url: str | None = None
         self.open_target_on_release: str | None = None
@@ -166,14 +168,41 @@ class FakeClient:
                                 {"nodeId": 22, "backendNodeId": 202, "nodeName": "BUTTON"}
                             ],
                         },
+                        *(
+                            [
+                                {
+                                    "nodeId": 50,
+                                    "backendNodeId": 501,
+                                    "nodeName": "IMG",
+                                    "attributes": ["src", "/chart.png", "alt", "Chart"],
+                                }
+                            ]
+                            if self.include_image
+                            else []
+                        ),
                     ],
                 }
             }
         if method == "DOM.resolveNode":
             if params == {"backendNodeId": self.backend_node_id}:
                 return {"object": {"objectId": "button-object"}}
+            if params == {"backendNodeId": 501}:
+                return {"object": {"objectId": "image-object"}}
             return {"object": {}}
         if method == "Runtime.callFunctionOn":
+            if params and params.get("objectId") == "image-object":
+                return {
+                    "result": {
+                        "value": {
+                            "ok": True,
+                            "level": "src",
+                            "mimeType": "image/png",
+                            "width": 120,
+                            "height": 80,
+                            "data": base64.b64encode(b"source-bytes").decode("ascii"),
+                        }
+                    }
+                }
             return {"result": {"value": {"role": "button", "name": "Run once", "secret": False}}}
         if method == "DOM.requestNode":
             if params == {"objectId": "button-object"}:
@@ -184,7 +213,11 @@ class FakeClient:
         if method == "DOM.getBoxModel":
             if params and params.get("nodeId") == self.node_id:
                 return {"model": {"content": [0, 0, 100, 0, 100, 100, 0, 100]}}
+            if params and params.get("backendNodeId") == 501:
+                return {"model": {"border": [0, 0, 120, 0, 120, 80, 0, 80]}}
             return {"model": {}}
+        if method == "Page.captureScreenshot":
+            return {"data": base64.b64encode(b"chart-bytes").decode("ascii")}
         if method == "Input.dispatchMouseEvent":
             if params and params.get("type") == "mouseReleased":
                 self.clicks.append(params)
@@ -195,9 +228,10 @@ class FakeClient:
 
 
 class FakeBrowser:
-    def __init__(self) -> None:
+    def __init__(self, *, include_image: bool = False) -> None:
         self.clicks: list[dict[str, Any]] = []
         self.client = FakeClient(self.clicks)
+        self.client.include_image = include_image
         self.ref_cache = RefCache()
         self._internal = SimpleNamespace(client=self.client, ref_cache=self.ref_cache)
         self.active_target = "target-1"
@@ -236,6 +270,19 @@ class FakeBrowser:
                             "text": "private child",
                             "node_id": 22,
                         },
+                        *(
+                            [
+                                {
+                                    "ref": "img_0",
+                                    "tag": "img",
+                                    "role": "img",
+                                    "accessibleName": "Chart",
+                                    "node_id": 50,
+                                }
+                            ]
+                            if self.client.include_image
+                            else []
+                        ),
                     ]
                 }
             ),
@@ -698,10 +745,10 @@ async def test_closed_model_target_fails_instead_of_following_view(
     assert error.value.code == "PAGE_TAB_EXPIRED"
 
 
-async def test_image_request_degrades_to_dom_perception(
+async def test_image_request_captures_page_image(
     registry: BrowserAgentRegistry,
 ) -> None:
-    browser = FakeBrowser()
+    browser = FakeBrowser(include_image=True)
     session = registry.create(1, "user-1")
     resolver = resolver_for(browser)
     perceived = await read_page(
@@ -709,13 +756,24 @@ async def test_image_request_degrades_to_dom_perception(
         {
             "type": "perceive",
             "scope": {"include": ["body"]},
-            "capture": {"images": True, "maxImages": 4},
+            "capture": {"images": True, "maxImages": 4, "maxImageBytes": 1024},
         },
         resolver=resolver,
         registry=registry,
     )
     assert perceived["type"] == "perceive-result"
-    assert any(target["ref"].startswith("ws_") for target in perceived["targets"])
+    images = perceived["result"]["images"]
+    assert images == [
+        {
+            "id": "img_1",
+            "mimeType": "image/png",
+            "data": base64.b64encode(b"source-bytes").decode("ascii"),
+            "level": "src",
+        }
+    ]
+    image_node = next(node for node in perceived["result"]["nodes"] if node.get("role") == "img")
+    assert image_node["imageId"] == "img_1"
+    assert image_node["capturable"] is True
 
 
 async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegistry) -> None:

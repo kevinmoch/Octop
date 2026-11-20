@@ -736,7 +736,7 @@ async def page_agent_ws(
                     request_id,
                 )
             except Exception:
-                logger.error("WebSkill PageAgent request failed without payload logging")
+                logger.exception("WebSkill PageAgent request failed without payload logging")
                 await send_error(
                     BrowserAgentError("TOOL_EXECUTION_FAILED", "The browser-agent request failed"),
                     request_id,
