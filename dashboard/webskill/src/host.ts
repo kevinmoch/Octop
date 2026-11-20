@@ -53,6 +53,7 @@ import {
 import { OctopPageAgentTransport } from "./transport";
 import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
 import { createPageActionConsent } from "./pageActionConsent";
+import { createDownloadConsent } from "./downloadConsent";
 import { pdfDocumentReader, pdfExtractor } from "./pdf";
 
 export type ConsolePage = NonNullable<ConsoleProps["initialPage"]>;
@@ -115,6 +116,7 @@ export async function createWebSkillHost(
     audit,
   });
   const pageActionUi: { current?: PageActionUi } = {};
+  const downloadConsent = createDownloadConsent(() => init.locale);
   const pageActionConsent = createPageActionConsent({
     origin: () => {
       if (currentPage?.url === undefined) return undefined;
@@ -229,7 +231,7 @@ export async function createWebSkillHost(
     linkedDocuments: createFetchLinkedDocumentReader(),
     pdfExtractor,
     pdfDocumentReader,
-    downloads: { reader: downloadReader },
+    downloads: { reader: downloadReader, consent: downloadConsent },
     docxExtractor: extractDocxText,
     xlsxExtractor: extractXlsxText,
     pptxExtractor: extractPptxText,
