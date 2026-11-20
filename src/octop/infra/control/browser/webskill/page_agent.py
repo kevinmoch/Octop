@@ -3183,6 +3183,15 @@ async def execute_action(
                         "it was not added to the model workset"
                     )
                 outcome["navigated"] = True
+            if (
+                action == "click"
+                and new_target is None
+                and not outcome.get("navigated")
+                and not outcome.get("changes")
+                and not outcome.get("elevatedModal")
+                and not noop
+            ):
+                outcome["noop"] = True
             return {"type": "execute-result", "outcome": outcome}
         finally:
             if attached is not None:

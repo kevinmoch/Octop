@@ -63,7 +63,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 31 | scroll | ✅ | 真实容器、步长、静默窗口、atEnd/movedBy | — |
 | 32 | attach | 🟡 | Octop 文件桥 + DataTransfer；真实隐藏 input 已验证 | 不是跨宿主协议；SDK/extension 用系统选择器 |
 | 33 | back | ✅ | navigate.go_back | — |
-| 34 | noop / changes 元数据 | 🟡 | set 有 noop；已补 mutation added/removed、status 文本与 navigated；status 会脱敏动作值 | 非 set 动作的 noop 判定仍简化 |
+| 34 | noop / changes 元数据 | 🟡 | set 与 click 有 noop；mutation added/removed、status 文本、navigated；status 会脱敏动作值 | 其他动作的 noop 判定仍简化 |
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
@@ -186,3 +186,12 @@ button 测试弹窗按钮 → dialog aria-label=测试弹窗
 - 模态提升：真实 dialog 的 outcome 带 `elevatedModal`；感知节点带
   `provenance: "modal-elevated"`；限制 actionScope 时弹窗内 ref 仍可执行。
 - 当前定向测试：79 passed。
+
+
+## 11. 本轮测试
+
+```text
+Python 定向测试 80 passed
+SDK verify slug 7 passed
+ruff / mypy 通过
+```

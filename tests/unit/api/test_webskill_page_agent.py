@@ -545,7 +545,11 @@ async def test_perceive_confirm_grant_and_single_click(
     )
     assert executed == {
         "type": "execute-result",
-        "outcome": {"ok": True, "target": {"role": "button", "name": "Run once"}},
+        "outcome": {
+            "ok": True,
+            "target": {"role": "button", "name": "Run once"},
+            "noop": True,
+        },
     }
     assert len(browser.clicks) == 1
     assert browser.ref_cache.all_refs() == {"btn_1": 42}

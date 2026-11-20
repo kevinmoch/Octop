@@ -30,6 +30,7 @@ class ActionClient:
         self.native_drag = False
         self.fill_reason: str | None = None
         self.status_text: str | None = None
+        self.change_counts = {"added": 2, "removed": 1}
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = params or {}
@@ -48,7 +49,7 @@ class ActionClient:
             if "__octopPageChanges" in expression:
                 if "MutationObserver" in expression:
                     return {"result": {"value": True}}
-                return {"result": {"value": {"added": 2, "removed": 1}}}
+                return {"result": {"value": self.change_counts}}
             return {"result": {"value": {"url": self.url, "title": "Form"}}}
         if method == "DOM.getDocument":
             return {
@@ -263,6 +264,17 @@ def test_click_reports_dom_changes() -> None:
     result = _run(client, "click")
     assert result["outcome"]["ok"] is True
     assert result["outcome"]["changes"] == {"added": 2, "removed": 1}
+
+
+def test_click_without_page_reaction_is_noop() -> None:
+    client = ActionClient()
+    client.role = "button"
+    client.name = "无反应按钮"
+    client.change_counts = {"added": 0, "removed": 0}
+    result = _run(client, "click")
+    assert result["outcome"]["ok"] is True
+    assert result["outcome"]["noop"] is True
+    assert "changes" not in result["outcome"]
 
 
 def test_click_reports_status_text_and_redacts_the_action_value() -> None:
