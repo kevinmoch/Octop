@@ -624,9 +624,12 @@ async def run_browser_stream_session(
                     profile_lease(profile),
                 ):
                     try:
-                        await asyncio.wait_for(_handle_client_event(sess, msg), timeout=15.0)
+                        await asyncio.wait_for(_handle_client_event(sess, msg), timeout=2.0)
                     except TimeoutError:
-                        logger.warning("browser input event timed out; stream kept open")
+                        logger.warning(
+                            "browser input event %s timed out; stream kept open",
+                            msg.get("type"),
+                        )
                     except Exception as exc:  # noqa: BLE001
                         logger.debug("browser input event failed: %s", exc)
     except TimeoutError:
