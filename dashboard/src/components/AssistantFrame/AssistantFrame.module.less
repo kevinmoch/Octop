@@ -214,21 +214,27 @@
 }
 
 .inlineRight .dockHandle[data-dir="w"] {
-  position: relative;
-  top: auto;
-  bottom: auto;
-  flex: 0 0 auto;
-  width: 6px;
+  /* Sit over the browser/panel border rather than as an invisible 6px flex
+     child: the visible divider is the element users naturally grab. */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 4;
+  width: 12px;
   cursor: ew-resize;
+  transform: translateX(-6px);
 }
 
 .inlineBottom .dockHandle[data-dir="n"] {
-  position: relative;
-  right: auto;
-  left: auto;
-  flex: 0 0 auto;
-  height: 6px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 4;
+  height: 12px;
   cursor: ns-resize;
+  transform: translateY(-6px);
 }
 
 .dockHandle::after {
@@ -239,11 +245,22 @@
   border-radius: 2px;
   background: var(--fn-border-primary, rgba(0, 0, 0, 0.18));
   transform: translate(-50%, -50%);
+  transition:
+    background 120ms ease,
+    width 120ms ease;
+}
+
+.dockHandle:hover::after {
+  background: var(--fn-color-brand, #635bff);
 }
 
 .dockHandle[data-dir="w"]::after {
   width: 3px;
-  height: 28px;
+  height: 36px;
+}
+
+.dockHandle[data-dir="w"]:hover::after {
+  width: 4px;
 }
 
 .dockHandle[data-dir="n"]::after {
