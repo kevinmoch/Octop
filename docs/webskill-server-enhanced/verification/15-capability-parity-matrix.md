@@ -327,5 +327,9 @@ candidateId: cand-t7aj7oaa
 - trace 实际显示的是 `action=select`
 
 生成器仍然提交了候选，因为当前校验只要求声明的**工具名**在 trace 中出现，
-没有逐参数核对。这个缺口需要在后续单独修正，不能把本次生成视为
-参数级完全 trace-backed。
+没有逐参数核对。
+
+该缺口已由 SDK commit `c264b33c` 修正：页面操作现在按
+`action + target role/name/frame + 具体 value` 与 trace 做一对一形状匹配；
+`ref` 忽略，占位符/已脱敏值放宽。SDK 新增 AC-30.16 与
+`pageActionTrace.test.ts`（7 条），完整 agent 测试 537 passed。
