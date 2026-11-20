@@ -127,9 +127,10 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 | `test_webskill_page_agent.py` | 页面读取、frame、图片、字段标题、自定义 select、字段名称/值 |
 | `test_webskill_capture.py` | 图片取像、预算、OOPIF、title promotion |
 | `test_webskill_page_semantics.py` | ref 复用/签名恢复、live value、select 回读、generic promotion、动作集合与 attach 拒绝 |
+| `test_webskill_page_actions.py` | set 切换/noop、hover、submit、scroll 回读、drag 目标解析与鼠标序列 |
 | `test_browser_stream_frames.py` | stream frame/nav 基础行为 |
 
-当前共 40 个相关测试通过；`attach`、完整 flat→tree、签名路径变化后的恢复、
+当前共 45 个相关测试通过；`attach`、完整 flat→tree、签名路径变化后的恢复、
 跨 iframe 自动发现和完整滚动静默窗口仍是明确的后续项。
 
 ## 7. 结论
