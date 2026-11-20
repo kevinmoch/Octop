@@ -10,6 +10,7 @@ import pytest
 from octop.infra.control.browser.webskill.page_agent import (
     _action_visible,
     _click_dropdown_option,
+    _file_inputs,
     _hidden_by_ancestor,
     _live_value,
     _node_parents,
@@ -225,6 +226,34 @@ def test_generic_promotion_recognises_class_and_href_signals() -> None:
     promoted = _promoted_elements(root)
     assert {"node_id": 2, "role": "button", "name": "更多操作"} in promoted
     assert {"node_id": 3, "role": "link", "name": "查看详情"} in promoted
+
+
+def test_invisible_file_inputs_are_exposed_for_attach() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "INPUT",
+                "nodeId": 2,
+                "attributes": ["type", "file", "title", "上传附件"],
+            },
+            {
+                "nodeName": "INPUT",
+                "nodeId": 3,
+                "attributes": ["type", "text", "title", "普通字段"],
+            },
+        ],
+    }
+    assert _file_inputs(root, set()) == [
+        {
+            "tag": "input",
+            "type": "file",
+            "role": "textbox",
+            "node_id": 2,
+            "accessibleName": "上传附件",
+        }
+    ]
 
 
 def test_cursor_pointer_is_supplemental_promotion_evidence() -> None:

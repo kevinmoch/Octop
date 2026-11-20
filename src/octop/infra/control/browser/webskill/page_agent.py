@@ -485,6 +485,43 @@ def _image_elements(root: dict[str, Any], excluded: set[int]) -> list[dict[str, 
     return images
 
 
+def _file_inputs(root: dict[str, Any], excluded: set[int]) -> list[dict[str, Any]]:
+    """Include file inputs even when styled invisible behind a picker button."""
+    files: list[dict[str, Any]] = []
+
+    def visit(node: dict[str, Any]) -> None:
+        tag = str(node.get("nodeName") or "").lower()
+        node_id = node.get("nodeId")
+        attrs = _attributes(node)
+        if (
+            tag == "input"
+            and str(attrs.get("type", "")).lower() == "file"
+            and isinstance(node_id, int)
+            and node_id not in excluded
+        ):
+            files.append(
+                {
+                    "tag": "input",
+                    "type": "file",
+                    "role": "textbox",
+                    "node_id": node_id,
+                    "accessibleName": (
+                        attrs.get("aria-label") or attrs.get("title") or attrs.get("name") or ""
+                    ),
+                }
+            )
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+        content = node.get("contentDocument")
+        if isinstance(content, dict):
+            visit(content)
+
+    visit(root)
+    return files
+
+
 def _text_content(node: dict[str, Any]) -> str:
     parts: list[str] = []
 
@@ -1037,6 +1074,25 @@ async def read_page(
                     existing["role"] = field["role"]
             else:
                 raw_elements.append(field)
+        file_inputs = _file_inputs(projected_root, excluded)
+        known_nodes = {
+            element.get("node_id")
+            for element in raw_elements
+            if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+        }
+        by_node = {
+            element.get("node_id"): element
+            for element in raw_elements
+            if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+        }
+        for file_input in file_inputs:
+            existing = by_node.get(file_input.get("node_id"))
+            if existing is not None:
+                existing["type"] = "file"
+                existing["role"] = "textbox"
+                existing["accessibleName"] = file_input["accessibleName"]
+            elif file_input.get("node_id") not in known_nodes:
+                raw_elements.append(file_input)
         if image_options is not None:
             known_nodes = {
                 element.get("node_id")
@@ -1148,11 +1204,20 @@ async def read_page(
             in_scope = scope_include is None or _within_scope(
                 element["node_id"], parents, scope_include, scope_exclude
             )
+            is_file_input = (
+                str(element.get("tag") or "") == "input"
+                and str(element.get("type") or "").lower() == "file"
+            )
             action_ref = (
                 role in ACTIONABLE_ROLES
                 and in_scope
-                and not _hidden_by_ancestor(element["node_id"], projected_root, parents)
-                and await _action_visible(client, backend_node_id)
+                and (
+                    is_file_input
+                    or (
+                        not _hidden_by_ancestor(element["node_id"], projected_root, parents)
+                        and await _action_visible(client, backend_node_id)
+                    )
+                )
             )
             needs_ref = action_ref or image_target
             node = _node(element, None)
@@ -2132,7 +2197,15 @@ async def execute_action(
                 await client.send("DOM.getDocument", {"depth": -1})
             else:
                 await assert_frame_identity_current(client, entry.frame)
-            entry = await _ensure_ref(client, session, ref, entry, browser, document)
+            entry = await _ensure_ref(
+                client,
+                session,
+                ref,
+                entry,
+                browser,
+                document,
+                require_visible=request.get("action") != "attach",
+            )
             if (
                 model_attachment is not None
                 and attached is None

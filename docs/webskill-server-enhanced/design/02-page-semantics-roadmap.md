@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 62 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 63 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -294,6 +294,9 @@ OOPIF attach/detach/导航、target workset、new target 激活。
 - `WebSkillFrame`：文件选择 Modal（中英双语），由用户手动选择。
 - `OctopPageAgentTransport`：attach 前通过 `attach-files` bridge 请求文件，父窗口上传后才 grant/execute。
 - 测试：attachments HTTP 上传/非法 base64、attach action、transport 调序与取消。
+- 真实隐藏 file input 验收：`title=测试附件`、`display:none`，被额外暴露为
+  `textbox` target；上传 `proof.txt` 后 attach 返回 ok，页面 `files[0]` 为
+  `proof.txt` / 12 bytes。
 
 
 ## 9. 阶段 6 先行证据（子树读取）
