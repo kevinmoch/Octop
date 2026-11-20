@@ -2453,6 +2453,61 @@ async def _click_dropdown_option(
     return result.get("result", {}).get("value") is True
 
 
+_CHANGE_OBSERVER_START = r"""(() => {
+    const key = '__octopPageChanges';
+    window[key]?.observer?.disconnect();
+    const state = { added: 0, removed: 0, observer: null };
+    state.observer = new MutationObserver((records) => {
+        for (const record of records) {
+            state.added += record.addedNodes.length;
+            state.removed += record.removedNodes.length;
+        }
+    });
+    state.observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+    });
+    window[key] = state;
+    return true;
+})()"""
+
+_CHANGE_OBSERVER_STOP = r"""(() => {
+    const key = '__octopPageChanges';
+    const state = window[key];
+    if (!state) return null;
+    state.observer?.disconnect();
+    delete window[key];
+    return { added: state.added, removed: state.removed };
+})()"""
+
+
+async def _start_change_observation(client: Any) -> None:
+    with contextlib.suppress(Exception):
+        await client.send(
+            "Runtime.evaluate",
+            {"expression": _CHANGE_OBSERVER_START, "returnByValue": True},
+        )
+
+
+async def _stop_change_observation(client: Any) -> dict[str, int] | None:
+    try:
+        await asyncio.sleep(0.12)
+        reply = await client.send(
+            "Runtime.evaluate",
+            {"expression": _CHANGE_OBSERVER_STOP, "returnByValue": True},
+        )
+        value = reply.get("result", {}).get("value")
+    except Exception:  # noqa: BLE001 - change accounting is supplemental
+        return None
+    if not isinstance(value, dict):
+        return None
+    added = value.get("added")
+    removed = value.get("removed")
+    if not isinstance(added, int) or not isinstance(removed, int):
+        return None
+    return {"added": added, "removed": removed}
+
+
 async def execute_action(
     session: BrowserAgentSession,
     request: dict[str, Any],
@@ -2542,6 +2597,7 @@ async def execute_action(
             action = request["action"]
             noop = False
             scrolled_payload: dict[str, Any] | None = None
+            await _start_change_observation(client)
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
             action_cache = RefCache()
             try:
@@ -2928,6 +2984,7 @@ async def execute_action(
                         "reason": result.error or "The browser action failed",
                     },
                 }
+            changes = await _stop_change_observation(client)
             evaluation: dict[str, Any] = {"expression": "location.href", "returnByValue": True}
             if attached is not None:
                 evaluation["contextId"] = attached.execution_context_id
@@ -2943,6 +3000,8 @@ async def execute_action(
                     "atEnd": bool(scrolled_payload.get("atEnd")),
                     "movedBy": int(scrolled_payload.get("movedBy") or 0),
                 }
+            if changes is not None and (changes["added"] or changes["removed"]):
+                outcome["changes"] = changes
             action_url = attached.url if attached is not None else document.url
             if current_url and current_url != action_url:
                 outcome["navigated"] = True

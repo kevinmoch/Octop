@@ -63,7 +63,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 31 | scroll | ✅ | 真实容器、步长、静默窗口、atEnd/movedBy | — |
 | 32 | attach | 🟡 | Octop 文件桥 + DataTransfer；真实隐藏 input 已验证 | 不是跨宿主协议；SDK/extension 用系统选择器 |
 | 33 | back | ✅ | navigate.go_back | — |
-| 34 | noop / changes 元数据 | 🟡 | set 有 noop；有 navigated | 无 changes 摘要 |
+| 34 | noop / changes 元数据 | 🟡 | set 有 noop；已补 mutation changes 计数与 navigated | 无 status 文本；非 set 动作的 noop 判定仍简化 |
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ❌ | 无 | 与感知模态提升同缺口 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |

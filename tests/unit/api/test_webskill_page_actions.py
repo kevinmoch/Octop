@@ -39,8 +39,13 @@ class ActionClient:
         if method == "Page.getFrameTree":
             return {"frameTree": {"frame": {"loaderId": "loader-1"}}}
         if method == "Runtime.evaluate":
-            if params.get("expression") == "location.href":
+            expression = str(params.get("expression") or "")
+            if expression == "location.href":
                 return {"result": {"value": self.url}}
+            if "__octopPageChanges" in expression:
+                if "MutationObserver" in expression:
+                    return {"result": {"value": True}}
+                return {"result": {"value": {"added": 2, "removed": 1}}}
             return {"result": {"value": {"url": self.url, "title": "Form"}}}
         if method == "DOM.getDocument":
             return {
@@ -246,6 +251,15 @@ def test_attach_consumes_host_selected_files() -> None:
         page_agent.wait_for_new_page_target = original
     assert result["outcome"]["ok"] is True
     assert session.attachments == []
+
+
+def test_click_reports_dom_changes() -> None:
+    client = ActionClient()
+    client.role = "button"
+    client.name = "提交"
+    result = _run(client, "click")
+    assert result["outcome"]["ok"] is True
+    assert result["outcome"]["changes"] == {"added": 2, "removed": 1}
 
 
 def test_click_uses_real_pointer_sequence() -> None:
