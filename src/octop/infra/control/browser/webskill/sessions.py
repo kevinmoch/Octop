@@ -372,6 +372,15 @@ class BrowserAgentRegistry:
         frame: str = "self",
         signature: str = "",
     ) -> str:
+        if signature:
+            document_key = session.document.key if session.document else ""
+            for existing_ref, existing in session.refs.items():
+                if (
+                    existing.signature == signature
+                    and existing.frame == frame
+                    and existing.document_key == document_key
+                ):
+                    return existing_ref
         ref = f"ws_{secrets.token_hex(12)}"
         session.refs[ref] = PageRef(
             backend_node_id,

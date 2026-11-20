@@ -801,11 +801,9 @@ async def read_page(
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "The frame changed while it was being perceived"
             )
-        if (
-            not frame_scope_path(scope)
-            or session.document is None
-            or session.document.key != after.key
-        ):
+        # A single-frame scope has an empty frame path; that must not invalidate
+        # refs on every perception. Only a real document change does.
+        if session.document is None or session.document.key != after.key:
             session.refs.clear()
         session.document = after
         node_paths = _node_paths(projected_root)
