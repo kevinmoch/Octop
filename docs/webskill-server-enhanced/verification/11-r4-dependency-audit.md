@@ -27,7 +27,19 @@
 - 生产/上游发布前需要逐项评估：升级、替换、隔离或书面风险接受。
 - 当前不能宣称生产安全准入通过。
 
+## 扩展仓库
+
+`pnpm audit --prod --json`：
+
+- total: 35
+- critical: 0
+- high: 9
+- moderate: 7
+- low: 19
+
+扩展侧同样未清零，不能据此做生产发布。
+
 ## 备注
 
 - 之前 P3 已处理 `image-size` 两项告警；本清单是剩余既有依赖告警。
-- 扩展仓库使用 pnpm，`npm audit` 不适用其 lockfile；扩展侧需单独用 pnpm audit 处理。
+- 依赖升级需要逐项回归，不能为了“清零”直接覆盖 lockfile。
