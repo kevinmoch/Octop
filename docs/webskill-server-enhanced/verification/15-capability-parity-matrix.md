@@ -80,7 +80,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 43 | trace target `{role,name,frame}` | ✅ | `_target(frame=...)` 与 `_actual_target` 都回填 frame；release gate 新增 perception/action 两条断言 |
 | 44 | trace 不含 ref/selector/坐标 | ✅ | `_target` 契约测试 |
 | 45 | SDK 原生控件语义 parity | ✅ | `semanticParity.test.ts` 直接加载 SDK browser dist |
-| 46 | 企业自定义控件双执行器实测 | 🟡 | SDK 原生 fixture；未跑真实 extension 全链路 |
+| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture：SDK 无 hint → title span button / custom control `unlabeled control #2`；SDK + roleHints → combobox 但仍无 wrapper label；Octop `_field_controls` → combobox + `问题属性`。宿主标签推断是实际差异 |
 | 47 | 录制回放可迁移 | ➖ | Octop 录制回放是宿主内部机制，不是 WebSkill 技能契约 |
 | 48 | 文档/附件读取 | ✅ | 既有 readers、linked documents、PDF/DOCX/XLSX 测试 |
 
@@ -439,3 +439,62 @@ segment 3 nodesRemaining: 0
 - 1600 个节点全部读到
 
 这补上了 A-359 的 paging 子项；subtree 子项仍按原测试覆盖。
+
+
+## 19. 企业自定义控件双读取器对比（2026-11-21）
+
+同一份 DOM fixture：
+
+```html
+<div class="kd-cq-field" data-field-item="true">
+  <div class="kd-cq-field-title-wrap"><span title="问题属性">问题属性</span></div>
+  <div class="kd-cq-select" tabindex="0"></div>
+  <input class="kd-cq-input" />
+</div>
+```
+
+### SDK reader
+
+无 hint：
+
+```text
+title span            → button  "问题属性"
+.kd-cq-select         → button  "unlabeled control #2"
+input                 → textbox 无名
+```
+
+带 `roleHints: [{ role:"combobox", selectors:[".kd-cq-select"] }]`：
+
+```text
+.kd-cq-select         → combobox "unlabeled control #2"
+title span            → button   "问题属性"
+input                 → textbox  无名
+```
+
+结论：`roleHints` 只修角色，不修 accessible name。
+
+### Octop `_field_controls`
+
+```text
+.kd-cq-select         → combobox "问题属性"
+```
+
+结论：Octop 的宿主侧 enterprise label bridge 比通用 SDK reader 更懂该控件的
+wrapper title；这是**宿主特有推断**，不是 SDK 缺陷，也不能要求 SDK 仅凭通用
+DOM 规则推断所有企业组件库的标题关系。
+
+### 对技能迁移的影响
+
+- WebSkill extension 里同一控件很可能得到 `unlabeled control #2`，技能若照此录制，
+  target 不具可读性。
+- Octop 得到 `问题属性`，因此同一动作更容易被模型重放。
+- 两侧角色也可能不同（SDK 无 hint 时是 button，Octop 是 combobox）。
+
+当前不修改 SDK；如果要让 extension 也得到 `问题属性`，需要宿主在装配期提供
+企业组件 label hint（或 SDK 新增 name hint 契约），这是下一项独立决策。
+
+新增 SDK 测试：
+
+```text
+packages/browser/test/enterpriseControlParity.test.ts  2 passed
+```
