@@ -28,6 +28,7 @@ class ActionClient:
         self.url = "https://example.test/form"
         self.node_names = {10: "INPUT", 11: "DIV"}
         self.native_drag = False
+        self.fill_reason: str | None = None
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = params or {}
@@ -81,6 +82,10 @@ class ActionClient:
         if method == "Runtime.callFunctionOn":
             declaration = str(params.get("functionDeclaration") or "")
             self.functions.append(declaration)
+            if "HTMLInputElement.prototype" in declaration:
+                if self.fill_reason:
+                    return {"result": {"value": {"ok": False, "reason": self.fill_reason}}}
+                return {"result": {"value": {"ok": True, "value": "文本"}}}
             if "const tag = this.tagName" in declaration:
                 return {
                     "result": {"value": {"role": self.role, "name": self.name, "secret": False}}
@@ -169,6 +174,21 @@ def _run(client: ActionClient, action: str, *, value: str | None = None) -> dict
         )
     finally:
         page_agent.wait_for_new_page_target = original
+
+
+def test_fill_uses_native_setter_and_reports_readonly() -> None:
+    client = ActionClient()
+    client.name = "输入"
+    result = _run(client, "fill", value="文本")
+    assert result["outcome"]["ok"] is True
+    assert any("HTMLInputElement.prototype" in function for function in client.functions)
+
+    readonly = ActionClient()
+    readonly.name = "只读"
+    readonly.fill_reason = "read-only"
+    denied = _run(readonly, "fill", value="文本")
+    assert denied["outcome"]["ok"] is False
+    assert "read-only" in denied["outcome"]["reason"]
 
 
 def test_set_toggles_and_returns_noop_when_already_set() -> None:

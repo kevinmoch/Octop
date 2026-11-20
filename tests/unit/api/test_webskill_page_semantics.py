@@ -11,8 +11,11 @@ from octop.infra.control.browser.webskill.page_agent import (
     _action_visible,
     _click_dropdown_option,
     _live_value,
+    _node_parents,
     _promoted_elements,
     _recover_ref,
+    _scope_selectors,
+    _within_scope,
 )
 from octop.infra.control.browser.webskill.sessions import (
     SUPPORTED_ACTIONS,
@@ -82,6 +85,31 @@ def test_signature_recovery_uses_dom_path_and_tag() -> None:
     assert recovered is not None
     assert recovered.backend_node_id == 20
     assert "DOM.getDocument" in client.calls
+
+
+def test_action_scope_is_a_subtree_with_exclusions() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "children": [{"nodeName": "BUTTON", "nodeId": 3}],
+            },
+            {"nodeName": "BUTTON", "nodeId": 4},
+        ],
+    }
+    parents = _node_parents(root)
+    assert _within_scope(3, parents, {1}, set()) is True
+    assert _within_scope(4, parents, {2}, set()) is False
+    assert _within_scope(3, parents, {1}, {2}) is False
+
+
+def test_scope_frames_use_their_own_include_and_exclude() -> None:
+    scope = {"frames": [{"frame": ["iframe#main"], "include": ["#form"], "exclude": [".danger"]}]}
+    assert _scope_selectors(scope) == (["#form"], [".danger"])
+    assert _scope_selectors({"include": ["body"]}) == (["body"], [])
 
 
 def test_action_visibility_rejects_no_layout_and_zero_size() -> None:

@@ -214,6 +214,76 @@ def _node_at_path(root: dict[str, Any], path: list[int]) -> dict[str, Any] | Non
     return node
 
 
+def _node_parents(root: dict[str, Any]) -> dict[int, int | None]:
+    parents: dict[int, int | None] = {}
+
+    def visit(node: dict[str, Any], parent: int | None) -> None:
+        node_id = node.get("nodeId")
+        if isinstance(node_id, int):
+            parents[node_id] = parent
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child, node_id if isinstance(node_id, int) else parent)
+        content = node.get("contentDocument")
+        if isinstance(content, dict):
+            visit(content, node_id if isinstance(node_id, int) else parent)
+
+    visit(root, None)
+    return parents
+
+
+def _within_scope(
+    node_id: int, parents: dict[int, int | None], include: set[int], exclude: set[int]
+) -> bool:
+    current: int | None = node_id
+    matched = False
+    while current is not None:
+        if current in exclude:
+            return False
+        matched = matched or current in include
+        current = parents.get(current)
+    return matched
+
+
+async def _scope_node_ids(
+    client: Any, document_node_id: int, selectors: list[str]
+) -> set[int] | None:
+    ids: set[int] = set()
+    for selector in selectors:
+        if not isinstance(selector, str) or not selector.strip():
+            continue
+        try:
+            result = await client.send(
+                "DOM.querySelectorAll",
+                {"nodeId": document_node_id, "selector": selector},
+            )
+        except Exception:  # noqa: BLE001 - unsupported test client; caller falls back
+            return None
+        for node_id in result.get("nodeIds", []):
+            if isinstance(node_id, int):
+                ids.add(node_id)
+    return ids
+
+
+def _scope_selectors(scope: Any) -> tuple[list[str], list[str]] | None:
+    if not isinstance(scope, dict):
+        return None
+    if "frames" in scope:
+        frames = scope.get("frames")
+        if not isinstance(frames, list) or not frames or not isinstance(frames[0], dict):
+            return None
+        scope = frames[0]
+    include = scope.get("include")
+    exclude = scope.get("exclude", [])
+    if not isinstance(include, list):
+        return None
+    return (
+        [value for value in include if isinstance(value, str)],
+        [value for value in exclude if isinstance(value, str)] if isinstance(exclude, list) else [],
+    )
+
+
 def _attributes(node: dict[str, Any]) -> dict[str, str]:
     raw = node.get("attributes", [])
     return dict(zip(raw[::2], raw[1::2], strict=False)) if isinstance(raw, list) else {}
@@ -825,6 +895,19 @@ async def read_page(
             session.refs.clear()
         session.document = after
         node_paths = _node_paths(projected_root)
+        parents = _node_parents(projected_root)
+        selectors = _scope_selectors(scope)
+        scope_include: set[int] | None = None
+        scope_exclude: set[int] = set()
+        if selectors is not None:
+            include_selectors, exclude_selectors = selectors
+            root_node_id = projected_root.get("nodeId")
+            if isinstance(root_node_id, int):
+                found_include = await _scope_node_ids(client, root_node_id, include_selectors)
+                found_exclude = await _scope_node_ids(client, root_node_id, exclude_selectors)
+                if found_include is not None:
+                    scope_include = found_include
+                    scope_exclude = found_exclude or set()
         nodes: list[dict[str, Any]] = []
         targets: list[dict[str, Any]] = []
         image_candidates: list[tuple[dict[str, Any], str]] = []
@@ -839,7 +922,14 @@ async def read_page(
             image_target = _capturable_image(element)
             if image_target:
                 role = "img"
-            action_ref = role in ACTIONABLE_ROLES and await _action_visible(client, backend_node_id)
+            in_scope = scope_include is None or _within_scope(
+                element["node_id"], parents, scope_include, scope_exclude
+            )
+            action_ref = (
+                role in ACTIONABLE_ROLES
+                and in_scope
+                and await _action_visible(client, backend_node_id)
+            )
             needs_ref = action_ref or image_target
             node = _node(element, None)
             node_ref: str | None = None
@@ -1472,8 +1562,19 @@ _SCROLL_FUNCTION = r"""async function(direction) {
     const before = vertical ? container.scrollTop : container.scrollLeft;
     const step = Math.max(extent - 64, Math.round(extent / 2), 1);
     const target = before + (forward ? step : -step);
+    let mutations = 0;
+    const observer = new MutationObserver(() => { mutations += 1; });
+    observer.observe(container, { childList: true, subtree: true, attributes: true });
     if (vertical) container.scrollTop = target; else container.scrollLeft = target;
-    await new Promise((resolve) => setTimeout(resolve, 180));
+    const deadline = Date.now() + 500;
+    let last = mutations;
+    let quietSince = Date.now();
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        if (mutations !== last) { last = mutations; quietSince = Date.now(); }
+        else if (Date.now() - quietSince >= 120) break;
+    }
+    observer.disconnect();
     const after = vertical ? container.scrollTop : container.scrollLeft;
     const max = vertical ? container.scrollHeight - container.clientHeight : container.scrollWidth - container.clientWidth;
     const atEnd = forward ? after >= max - 1 : after <= 0;
@@ -1511,6 +1612,21 @@ _SUBMIT_FUNCTION = """function() {
     if (!form || typeof form.requestSubmit !== 'function') return false;
     form.requestSubmit();
     return true;
+}"""
+
+
+_FILL_FUNCTION = r"""function(value) {
+    const tag = this.tagName.toLowerCase();
+    if (tag !== 'input' && tag !== 'textarea') return { ok: false, reason: 'not a text control' };
+    if (this.hasAttribute('readonly') || this.disabled) return { ok: false, reason: 'read-only' };
+    const proto = tag === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (!setter) return { ok: false, reason: 'no native setter' };
+    this.focus();
+    setter.call(this, String(value ?? ''));
+    this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    this.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: this.value === String(value ?? ''), value: String(this.value ?? '') };
 }"""
 
 
@@ -1752,9 +1868,43 @@ async def execute_action(
                     if action == "click":
                         result = await interact.click(client, action_cache, ref=temporary_ref)
                     elif action == "fill":
-                        result = await interact.fill_text(
-                            client, action_cache, text=request["value"], ref=temporary_ref
+                        filled = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _FILL_FUNCTION,
+                                "arguments": [{"value": request["value"]}],
+                                "returnByValue": True,
+                            },
                         )
+                        fill_state = filled.get("result", {}).get("value")
+                        if isinstance(fill_state, dict) and fill_state.get("ok") is True:
+                            result = ToolResult(
+                                success=True,
+                                content="Filled",
+                                metrics=ActionMetrics(
+                                    action="fill",
+                                    duration_ms=0,
+                                    dom_nodes_scanned=0,
+                                    estimated_tokens=0,
+                                ),
+                            )
+                        elif isinstance(fill_state, dict) and fill_state.get("reason"):
+                            result = ToolResult(
+                                success=False,
+                                content="",
+                                error=f"The element cannot be filled: {fill_state['reason']}",
+                                metrics=ActionMetrics(
+                                    action="fill",
+                                    duration_ms=0,
+                                    dom_nodes_scanned=0,
+                                    estimated_tokens=0,
+                                ),
+                            )
+                        else:
+                            result = await interact.fill_text(
+                                client, action_cache, text=request["value"], ref=temporary_ref
+                            )
                     elif action == "select":
                         if target_tag == "select":
                             result = await interact.select_value(
