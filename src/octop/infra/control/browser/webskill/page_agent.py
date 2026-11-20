@@ -317,9 +317,10 @@ async def read_page(
             "PERCEPTION_SUBTREE_UNSUPPORTED",
             "Subtree perception is not available in P1; no full-page fallback is performed",
         )
-    capture = request.get("capture")
-    if isinstance(capture, dict) and capture.get("images") is True:
-        raise BrowserAgentError("PERCEPTION_FAILED", "Image capture is not available in P1")
+    # P1 perception is DOM-only. Models may still ask for page images (the
+    # SDK enables that option independently of the host); failing the whole
+    # perception makes the assistant look like it lost browser control after
+    # a handoff. Ignore the image budget and return the readable DOM instead.
     browser = await resolve_browser(session, resolver)
     model_attachment = await attach_model_target(session, browser)
     attached: FrameAttachment | None = None

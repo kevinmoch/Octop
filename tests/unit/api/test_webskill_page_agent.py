@@ -698,6 +698,26 @@ async def test_closed_model_target_fails_instead_of_following_view(
     assert error.value.code == "PAGE_TAB_EXPIRED"
 
 
+async def test_image_request_degrades_to_dom_perception(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FakeBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    perceived = await read_page(
+        session,
+        {
+            "type": "perceive",
+            "scope": {"include": ["body"]},
+            "capture": {"images": True, "maxImages": 4},
+        },
+        resolver=resolver,
+        registry=registry,
+    )
+    assert perceived["type"] == "perceive-result"
+    assert any(target["ref"].startswith("ws_") for target in perceived["targets"])
+
+
 async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegistry) -> None:
     browser = FakeBrowser()
     session = registry.create(1, "user-1")
