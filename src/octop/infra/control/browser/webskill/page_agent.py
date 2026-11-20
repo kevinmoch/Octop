@@ -1408,6 +1408,70 @@ async def issue_action_grant(
             await model_attachment.close()
 
 
+def _signature_element(node: dict[str, Any]) -> dict[str, Any]:
+    tag = str(node.get("nodeName") or "").lower()
+    attrs = _attributes(node)
+    classes = str(attrs.get("class", ""))
+    declared = str(attrs.get("role", "")).lower()
+    if not declared and "kd-cq-select" in classes:
+        declared = "combobox"
+    return {
+        "tag": tag,
+        "role": declared or tag,
+        "type": str(attrs.get("type", "")).lower(),
+        "accessibleName": (
+            attrs.get("aria-label")
+            or attrs.get("alt")
+            or attrs.get("title")
+            or attrs.get("name")
+            or ""
+        ),
+        "text": _text_content(node),
+        "href": attrs.get("href", ""),
+    }
+
+
+def _signature_identity_matches(node: dict[str, Any], signature: dict[str, Any]) -> bool:
+    tag = str(node.get("nodeName") or "").lower()
+    if tag != str(signature.get("tag") or "").lower():
+        return False
+    element = _signature_element(node)
+    role = _role(element)
+    expected_role = signature.get("role")
+    if isinstance(expected_role, str) and role != expected_role:
+        return False
+    expected_name = signature.get("name")
+    if isinstance(expected_name, str) and expected_name:
+        name = str(
+            element.get("accessibleName") or element.get("text") or element.get("name") or ""
+        ).strip()
+        if name != expected_name.strip():
+            return False
+    expected_href = signature.get("href")
+    return not (
+        isinstance(expected_href, str)
+        and expected_href
+        and str(element.get("href") or "") != expected_href
+    )
+
+
+def _find_signature_nodes(root: dict[str, Any], signature: dict[str, Any]) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+
+    def visit(node: dict[str, Any]) -> None:
+        if isinstance(node.get("backendNodeId"), int) and _signature_identity_matches(
+            node, signature
+        ):
+            matches.append(node)
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+
+    visit(root)
+    return matches
+
+
 async def _recover_ref(
     client: Any,
     entry: PageRef,
@@ -1428,12 +1492,17 @@ async def _recover_ref(
         return None
     root = raw.get("root", {})
     node = _node_at_path(root, path)
-    if not isinstance(node, dict):
+    if isinstance(node, dict):
+        tag = str(node.get("nodeName") or "").lower()
+        if not expected_tag or tag == expected_tag:
+            backend_node_id = node.get("backendNodeId")
+            if isinstance(backend_node_id, int) and backend_node_id > 0:
+                return replace(entry, backend_node_id=backend_node_id)
+    signature.pop("path", None)
+    candidates = _find_signature_nodes(root, signature)
+    if len(candidates) != 1:
         return None
-    tag = str(node.get("nodeName") or "").lower()
-    if expected_tag and tag != expected_tag:
-        return None
-    backend_node_id = node.get("backendNodeId")
+    backend_node_id = candidates[0].get("backendNodeId")
     if not isinstance(backend_node_id, int) or backend_node_id <= 0:
         return None
     return replace(entry, backend_node_id=backend_node_id)

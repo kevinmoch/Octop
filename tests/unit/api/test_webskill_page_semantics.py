@@ -133,6 +133,25 @@ def test_action_visibility_rejects_no_layout_and_zero_size() -> None:
     assert asyncio.run(_action_visible(BoxClient("error"), 1)) is False
 
 
+def test_signature_recovery_can_follow_a_changed_path_when_unique() -> None:
+    entry = PageRef(
+        backend_node_id=999,
+        document_key="document-key",
+        frame="self",
+        signature=json.dumps(
+            {
+                "path": [9, 9],
+                "tag": "button",
+                "role": "button",
+                "name": "保存",
+            }
+        ),
+    )
+    recovered = asyncio.run(_recover_ref(_DocumentClient(), entry))
+    assert recovered is not None
+    assert recovered.backend_node_id == 20
+
+
 def test_live_value_reads_text_control_state() -> None:
     class ValueClient:
         async def send(self, method: str, params: dict | None = None) -> dict:
