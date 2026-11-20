@@ -1494,6 +1494,28 @@ _SUBMIT_FUNCTION = """function() {
 }"""
 
 
+_DRAG_FUNCTION = """function(endX, endY) {
+    const destination = document.elementFromPoint(endX, endY);
+    if (!destination) return false;
+    const view = this.ownerDocument.defaultView;
+    const Drag = view && view.DragEvent;
+    const Transfer = view && view.DataTransfer;
+    if (!Drag || !Transfer || this.closest('[draggable="true"]') === null) return false;
+    const start = this.getBoundingClientRect();
+    const end = destination.getBoundingClientRect();
+    const from = { clientX: start.left + start.width / 2, clientY: start.top + start.height / 2 };
+    const to = { clientX: end.left + end.width / 2, clientY: end.top + end.height / 2 };
+    const transfer = new Transfer();
+    const base = { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer };
+    this.dispatchEvent(new Drag('dragstart', { ...base, ...from }));
+    destination.dispatchEvent(new Drag('dragenter', { ...base, ...to }));
+    const accepted = !destination.dispatchEvent(new Drag('dragover', { ...base, ...to }));
+    if (accepted) destination.dispatchEvent(new Drag('drop', { ...base, ...to }));
+    this.dispatchEvent(new Drag('dragend', { ...base, ...to }));
+    return accepted;
+}"""
+
+
 async def _element_center(client: Any, backend_node_id: int) -> tuple[float, float]:
     box = await client.send("DOM.getBoxModel", {"backendNodeId": backend_node_id})
     quad = box.get("model", {}).get("border", [])
@@ -1821,12 +1843,15 @@ async def execute_action(
                             result = await interact.click(client, action_cache, ref=temporary_ref)
                             noop = False
                     elif action == "hover":
+                        hover_x, hover_y = await _element_center(client, entry.backend_node_id)
                         await client.send(
-                            "Runtime.callFunctionOn",
+                            "Input.dispatchMouseEvent",
                             {
-                                "objectId": object_id,
-                                "functionDeclaration": _HOVER_FUNCTION,
-                                "returnByValue": True,
+                                "type": "mouseMoved",
+                                "x": hover_x,
+                                "y": hover_y,
+                                "button": "none",
+                                "buttons": 0,
                             },
                         )
                         result = ToolResult(
@@ -1883,24 +1908,34 @@ async def execute_action(
                         end_x, end_y = await _element_center(
                             client, destination_entry.backend_node_id
                         )
-                        for event_type, x, y, buttons in (
-                            ("mouseMoved", start_x, start_y, 0),
-                            ("mousePressed", start_x, start_y, 1),
-                            ("mouseMoved", (start_x + end_x) / 2, (start_y + end_y) / 2, 1),
-                            ("mouseMoved", end_x, end_y, 1),
-                            ("mouseReleased", end_x, end_y, 0),
-                        ):
-                            await client.send(
-                                "Input.dispatchMouseEvent",
-                                {
-                                    "type": event_type,
-                                    "x": x,
-                                    "y": y,
-                                    "button": "left",
-                                    "buttons": buttons,
-                                    "clickCount": 1,
-                                },
-                            )
+                        native_drag = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _DRAG_FUNCTION,
+                                "arguments": [{"value": end_x}, {"value": end_y}],
+                                "returnByValue": True,
+                            },
+                        )
+                        if native_drag.get("result", {}).get("value") is not True:
+                            for event_type, x, y, buttons in (
+                                ("mouseMoved", start_x, start_y, 0),
+                                ("mousePressed", start_x, start_y, 1),
+                                ("mouseMoved", (start_x + end_x) / 2, (start_y + end_y) / 2, 1),
+                                ("mouseMoved", end_x, end_y, 1),
+                                ("mouseReleased", end_x, end_y, 0),
+                            ):
+                                await client.send(
+                                    "Input.dispatchMouseEvent",
+                                    {
+                                        "type": event_type,
+                                        "x": x,
+                                        "y": y,
+                                        "button": "left",
+                                        "buttons": buttons,
+                                        "clickCount": 1,
+                                    },
+                                )
                         result = ToolResult(
                             success=True,
                             content="Dragged",

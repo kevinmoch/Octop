@@ -27,6 +27,7 @@ class ActionClient:
         self.functions: list[str] = []
         self.url = "https://example.test/form"
         self.node_names = {10: "INPUT", 11: "DIV"}
+        self.native_drag = False
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = params or {}
@@ -86,6 +87,8 @@ class ActionClient:
                 }
             if "toggle" in declaration:
                 return {"result": {"value": {"toggle": True, "current": self.checked}}}
+            if "dragstart" in declaration:
+                return {"result": {"value": self.native_drag}}
             if "requestSubmit" in declaration:
                 return {"result": {"value": True}}
             if "pointerover" in declaration:
@@ -190,8 +193,7 @@ def test_hover_dispatches_hover_function_without_click() -> None:
     client.name = "菜单"
     result = _run(client, "hover")
     assert result["outcome"]["ok"] is True
-    assert any("pointerover" in function for function in client.functions)
-    assert client.input_events == []
+    assert any(event.get("type") == "mouseMoved" for event in client.input_events)
 
 
 def test_submit_invokes_form_request_submit() -> None:
