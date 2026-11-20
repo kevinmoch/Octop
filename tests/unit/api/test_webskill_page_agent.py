@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -123,7 +124,18 @@ class FakeClient:
         if method == "Page.getFrameTree":
             return {"frameTree": {"frame": {"loaderId": self.loader_id}}}
         if method == "Runtime.evaluate":
-            if params and params.get("expression") == "location.href":
+            expression = params.get("expression") if params else None
+            if isinstance(expression, str) and "fetch(" in expression:
+                return {
+                    "result": {
+                        "value": {
+                            "ok": True,
+                            "contentType": "text/plain",
+                            "data": "bGlua2Vk",
+                        }
+                    }
+                }
+            if expression == "location.href":
                 return {"result": {"value": self.url}}
             return {"result": {"value": {"url": self.url, "title": "Example form"}}}
         if method == "DOM.getDocument":
@@ -1097,3 +1109,30 @@ def test_target_workset_limit_does_not_move_the_model_pointer(
     assert admit_model_target(session, "target-overflow") is False
     assert session.model_target == "target-0"
     assert "target-overflow" not in session.model_targets
+
+
+def test_linked_document_uses_page_origin_and_rejects_foreign_origin(
+    registry: BrowserAgentRegistry,
+) -> None:
+    from octop.infra.control.browser.webskill.page_agent import fetch_linked_document
+
+    browser = FakeBrowser()
+    session = registry.create(1, "user-1")
+    resolver = resolver_for(browser)
+    result = asyncio.run(
+        fetch_linked_document(
+            session,
+            "https://example.test/report.txt",
+            resolver=resolver,
+        )
+    )
+    assert result == {"contentType": "text/plain", "data": "bGlua2Vk"}
+    with pytest.raises(BrowserAgentError) as error:
+        asyncio.run(
+            fetch_linked_document(
+                session,
+                "https://evil.test/report.txt",
+                resolver=resolver,
+            )
+        )
+    assert error.value.code == "PAGE_ACTION_OUT_OF_SCOPE"

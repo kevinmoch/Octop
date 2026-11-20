@@ -317,6 +317,7 @@ export default function App({
               key={focusRunId ?? focusCandidateId ?? consolePage ?? "console"}
               backend={host.backend}
               governance={host.governance}
+              connect={host.connect}
               runtimeConfig={host.runtimeConfig}
               hostCapabilities={{ downloadedFiles: false }}
               initialPage={

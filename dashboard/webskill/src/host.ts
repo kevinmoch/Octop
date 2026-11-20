@@ -25,11 +25,14 @@ import {
   createRemoteTargetRegistry,
   explainResolution,
 } from "./sdkExports";
-import type { DownloadedFileReader, PageActionUi } from "@webskill/sdk/agent";
+import type {
+  ActionDownloadWatcher,
+  DownloadedFileReader,
+  PageActionUi,
+} from "@webskill/sdk/agent";
 import {
   OpfsProvider,
   createDocxBlockReader,
-  createFetchLinkedDocumentReader,
   createPptxBlockReader,
   createXlsxBlockReader,
   createXlsxTableReader,
@@ -54,6 +57,7 @@ import { OctopPageAgentTransport } from "./transport";
 import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
 import { createPageActionConsent } from "./pageActionConsent";
 import { createDownloadConsent } from "./downloadConsent";
+import { createHostConnectFacade } from "./connectFacade";
 import { pdfDocumentReader, pdfExtractor } from "./pdf";
 
 export type ConsolePage = NonNullable<ConsoleProps["initialPage"]>;
@@ -136,6 +140,44 @@ export async function createWebSkillHost(
     audit,
     maxTabs: () => 8,
   });
+  const downloadIds = async (): Promise<Set<string>> => {
+    let result: unknown;
+    try {
+      result = await bridge.call("downloads-list");
+    } catch {
+      return new Set();
+    }
+    if (
+      typeof result !== "object" ||
+      result === null ||
+      !Array.isArray((result as Record<string, unknown>).downloads)
+    ) {
+      return new Set();
+    }
+    return new Set(
+      (result as { downloads: Array<Record<string, unknown>> }).downloads
+        .map((entry) => entry.id)
+        .filter((id): id is string => typeof id === "string"),
+    );
+  };
+  const downloadWatcher: ActionDownloadWatcher = {
+    async open() {
+      const before = await downloadIds();
+      return {
+        async settle({ timeoutMs }) {
+          const end = Date.now() + timeoutMs;
+          while (Date.now() < end) {
+            const current = await downloadIds();
+            const fresh = [...current].filter((id) => !before.has(id)).length;
+            if (fresh > 0) return fresh;
+            await new Promise((resolve) => setTimeout(resolve, 150));
+          }
+          return 0;
+        },
+      };
+    },
+  };
+
   pageActions = new PageActionPolicy({
     scope: { include: ["body"] },
     executor: createRemotePageActionExecutor({ transport, targets }),
@@ -145,6 +187,9 @@ export async function createWebSkillHost(
         Promise.resolve({ id: input.id, cancelled: true }),
     },
     consent: pageActionConsent,
+    downloadWatcher,
+    downloadSignalEnabled: () => true,
+    downloadWaitMs: () => 1500,
     audit,
     diagnose: (ref) => explainResolution(targets.resolve(ref)),
     describePage: () => currentPage,
@@ -221,6 +266,38 @@ export async function createWebSkillHost(
       };
     },
   };
+  const buildLinkedDocument: NonNullable<
+    ChatbotHostAdapter["linkedDocuments"]
+  > = {
+    get origin() {
+      if (currentPage?.url === undefined) return undefined;
+      try {
+        return new URL(currentPage.url).origin;
+      } catch {
+        return undefined;
+      }
+    },
+    async read(url: string) {
+      const result = await bridge.call("linked-document", { url });
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        typeof (result as Record<string, unknown>).contentType !== "string" ||
+        typeof (result as Record<string, unknown>).data !== "string"
+      ) {
+        throw new Error("The host linked-document response is invalid");
+      }
+      const binary = atob((result as Record<string, string>).data);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return {
+        mimeType: (result as Record<string, string>).contentType,
+        bytes,
+      };
+    },
+  };
   const adapter: ChatbotHostAdapter = {
     ...bundle.chatbotAdapter,
     pagePerception,
@@ -228,7 +305,7 @@ export async function createWebSkillHost(
     pageActions,
     pageImage: createRemotePageImageHost({ transport }),
     pageTabs,
-    linkedDocuments: createFetchLinkedDocumentReader(),
+    linkedDocuments: buildLinkedDocument,
     pdfExtractor,
     pdfDocumentReader,
     downloads: { reader: downloadReader, consent: downloadConsent },
@@ -272,6 +349,7 @@ export async function createWebSkillHost(
     fs,
     runtimeConfig,
     noAuth,
+    connect: createHostConnectFacade(pageActionConsent, downloadConsent),
     llm: createHostLlmClient(runtimeConfig, noAuth),
     adapter,
     skillCandidates,

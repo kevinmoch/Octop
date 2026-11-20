@@ -26,6 +26,7 @@ from octop.infra.control.browser.webskill.downloads import (
 from octop.infra.control.browser.webskill.page_agent import (
     capture_image,
     execute_action,
+    fetch_linked_document,
     issue_action_grant,
     public_error_code,
     read_page,
@@ -84,6 +85,11 @@ class TabAdmitBody(BaseModel):
 class PdfExtractBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     data: str = Field(min_length=1, max_length=28_000_000)
+
+
+class LinkedDocumentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=2048)
 
 
 def _origin_parts(value: str) -> tuple[str, str, int | None]:
@@ -350,6 +356,37 @@ async def read_session_download(
             "bytes": len(data),
             "data": base64.b64encode(data).decode("ascii"),
         }
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/linked-document",
+    summary="Read a linked document with the controlled page's session",
+)
+async def linked_document(
+    session_id: str,
+    body: LinkedDocumentBody,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        result = await fetch_linked_document(
+            session,
+            body.url,
+            resolver=resolve_harness_session,
+        )
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.linked_document.read",
+            session.id,
+            {"host": urlsplit(body.url).hostname or ""},
+        )
+        return result
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

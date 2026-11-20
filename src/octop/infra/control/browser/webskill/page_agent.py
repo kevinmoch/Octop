@@ -8,6 +8,7 @@ import secrets
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from octop_browser.actions import interact, navigate
 from octop_browser.dom.builder import DOMBuilder
@@ -622,6 +623,106 @@ async def capture_image(
     finally:
         if attached is not None:
             await attached.close()
+        if model_attachment is not None:
+            await model_attachment.close()
+
+
+MAX_LINKED_DOCUMENT_BYTES = 20 * 1024 * 1024
+
+
+def _same_origin(left: str, right: str) -> bool:
+    def parts(value: str) -> tuple[str, str, int] | None:
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return None
+        if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+            return None
+        return (
+            parsed.scheme.lower(),
+            parsed.hostname.lower(),
+            parsed.port or (443 if parsed.scheme.lower() == "https" else 80),
+        )
+
+    a = parts(left)
+    b = parts(right)
+    return a is not None and a == b
+
+
+async def fetch_linked_document(
+    session: BrowserAgentSession,
+    url: str,
+    *,
+    resolver: SessionResolver,
+) -> dict[str, Any]:
+    """Fetch a linked document in the page's own session, not the harness.
+
+    The extension host performs this in the bound tab's content script. Octop's
+    host lives in a different origin, so a plain fetch would lose the site's
+    cookies and return a login page. Execute the fetch inside the controlled
+    page instead, with the same-origin gate enforced host-side.
+    """
+    if not isinstance(url, str) or not (url.startswith("http://") or url.startswith("https://")):
+        raise BrowserAgentError("ACTION_INVALID", "Only absolute http(s) documents can be read")
+    if len(url) > 2048:
+        raise BrowserAgentError("ACTION_INVALID", "The document URL is too long")
+    browser = await resolve_browser(session, resolver)
+    model_attachment = await attach_model_target(session, browser)
+    try:
+        client = (
+            model_attachment.client if model_attachment is not None else browser._internal.client
+        )  # noqa: SLF001
+        document = await document_identity(session, browser, client)
+        if not _same_origin(document.url, url):
+            raise BrowserAgentError(
+                "PAGE_ACTION_OUT_OF_SCOPE",
+                "Linked documents must stay on the current page's origin",
+            )
+        result = await client.send(
+            "Runtime.evaluate",
+            {
+                "expression": f"""async () => {{
+                    const response = await fetch({json.dumps(url)}, {{ credentials: "include" }});
+                    if (!response.ok) return {{ ok: false, status: response.status }};
+                    const buffer = await response.arrayBuffer();
+                    if (buffer.byteLength > {MAX_LINKED_DOCUMENT_BYTES}) {{
+                        return {{ ok: false, reason: "document-too-large" }};
+                    }}
+                    let binary = "";
+                    const bytes = new Uint8Array(buffer);
+                    for (let i = 0; i < bytes.length; i += 0x8000) {{
+                        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+                    }}
+                    return {{
+                        ok: true,
+                        contentType: response.headers.get("content-type") || "application/octet-stream",
+                        data: btoa(binary),
+                    }};
+                }}""",
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+        )
+        value = result.get("result", {}).get("value")
+        if not isinstance(value, dict) or value.get("ok") is not True:
+            reason = value.get("reason") if isinstance(value, dict) else None
+            if reason == "document-too-large":
+                raise BrowserAgentError("TOOL_EXECUTION_FAILED", "The linked document is too large")
+            status = value.get("status") if isinstance(value, dict) else None
+            raise BrowserAgentError(
+                "TOOL_EXECUTION_FAILED",
+                f"The linked document responded with HTTP {status}"
+                if status
+                else "The linked document could not be read",
+            )
+        content_type = value.get("contentType")
+        data = value.get("data")
+        if not isinstance(content_type, str) or not isinstance(data, str):
+            raise BrowserAgentError(
+                "TOOL_EXECUTION_FAILED", "The linked document response is invalid"
+            )
+        return {"contentType": content_type, "data": data}
+    finally:
         if model_attachment is not None:
             await model_attachment.close()
 
