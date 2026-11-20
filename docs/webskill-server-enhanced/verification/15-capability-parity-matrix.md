@@ -80,7 +80,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 43 | trace target `{role,name,frame}` | ✅ | `_target(frame=...)` 与 `_actual_target` 都回填 frame；release gate 新增 perception/action 两条断言 |
 | 44 | trace 不含 ref/selector/坐标 | ✅ | `_target` 契约测试 |
 | 45 | SDK 原生控件语义 parity | ✅ | `semanticParity.test.ts` 直接加载 SDK browser dist |
-| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture 读取+动作均已对比：SDK action 能点击，但 action target 回退为 raw `generic` 且无 name；Octop target 由 ref signature/field bridge 得到 `combobox + 问题属性`。宿主标签推断和 action target 语义化仍是差异 |
+| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture 读取+动作均已对比：SDK action target 已从 `generic` 修为 `combobox + unlabeled control #2`；Octop 仍是 `combobox + 问题属性`。角色对齐，wrapper label 仍是宿主特有差异 |
 | 47 | 录制回放可迁移 | ➖ | Octop 录制回放是宿主内部机制，不是 WebSkill 技能契约 |
 | 48 | 文档/附件读取 | ✅ | 既有 readers、linked documents、PDF/DOCX/XLSX 测试 |
 
@@ -513,7 +513,15 @@ Octop:
   action target            → role/name 来自 ref signature + wrapper label
 ```
 
-SDK 的点击本身成功，但 action target 没有复用 reader 提升后的语义角色，
-也没有 wrapper label。这不是“点不到”，而是“点到了但 trace/审计里的目标身份丢失”。
-当前不修改 SDK；如果要统一，需要给 SDK action executor 增加 reader 语义 target
-查询，或让宿主注入 name hint。
+SDK 的点击本身成功。方案 A 已落地：action target 现在复用 reader 发放句柄时
+记录的语义 role/name，因此从 raw `generic` 变为：
+
+```text
+role: combobox
+name: unlabeled control #2
+```
+
+Octop 仍多出 wrapper label `问题属性`，因为宿主 `_field_controls` 做了企业组件标题推断；
+这是 name hint 差异，不再是 action target 整体丢失语义。
+
+剩余选择：保留 Octop 宿主增强，或给 SDK 增加 name hint 契约。
