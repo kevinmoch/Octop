@@ -238,6 +238,13 @@ export default function AssistantFrame({
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
+      // Keep receiving moves even when the cursor crosses the browser iframe;
+      // without capture the iframe steals pointermove after a pixel or two.
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        /* pointer may already be released */
+      }
       sizeRef.current = {
         dir,
         pointerId: event.pointerId,
