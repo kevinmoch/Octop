@@ -11,6 +11,7 @@ import pytest
 from octop.infra.control.browser.webskill import page_agent
 from octop.infra.control.browser.webskill.page_agent import _keyboard_replace, execute_action
 from octop.infra.control.browser.webskill.sessions import (
+    DOCUMENT_REF,
     BrowserAgentError,
     BrowserAgentRegistry,
     BrowserAgentSession,
@@ -137,7 +138,11 @@ def _resolver(browser: ActionBrowser):
 
 
 def _setup(
-    client: ActionClient, action: str, *, value: str | None = None
+    client: ActionClient,
+    action: str,
+    *,
+    value: str | None = None,
+    destination: int | None = None,
 ) -> tuple[BrowserAgentSession, str, dict[str, Any], BrowserAgentRegistry]:
     registry = BrowserAgentRegistry()
     session = registry.create(1, "user-1")
@@ -156,15 +161,31 @@ def _setup(
     session.model_targets = {"target-1"}
     source = registry.issue_ref(session, 10, "self", '{"role":"button","name":"字段","path":[0]}')
     registry.issue_ref(session, 11, "self", '{"role":"button","name":"投放区","path":[1]}')
-    request: dict[str, Any] = {"ref": source, "action": action}
+    request: dict[str, Any] = {
+        "ref": DOCUMENT_REF if action == "back" else source,
+        "action": action,
+    }
     if value is not None:
         request["value"] = value
+    if destination is not None:
+        request["value"] = registry.issue_ref(
+            session,
+            destination,
+            "self",
+            '{"role":"button","name":"投放区","path":[1]}',
+        )
     grant = registry.issue_grant(session, document=document, request=request)
     return session, grant, request, registry
 
 
-def _run(client: ActionClient, action: str, *, value: str | None = None) -> dict[str, Any]:
-    session, grant, request, registry = _setup(client, action, value=value)
+def _run(
+    client: ActionClient,
+    action: str,
+    *,
+    value: str | None = None,
+    destination: int | None = None,
+) -> dict[str, Any]:
+    session, grant, request, registry = _setup(client, action, value=value, destination=destination)
     browser = ActionBrowser(client)
     original = page_agent.wait_for_new_page_target
 
@@ -329,6 +350,33 @@ def test_hover_dispatches_hover_function_without_click() -> None:
     assert result["outcome"]["ok"] is True
     assert result["outcome"]["target"]["role"] == "button"
     assert any(event.get("type") == "mouseMoved" for event in client.input_events)
+
+
+def test_hover_without_page_reaction_is_noop() -> None:
+    client = ActionClient()
+    client.name = "无反应菜单"
+    client.change_counts = {"added": 0, "removed": 0}
+    result = _run(client, "hover")
+    assert result["outcome"]["ok"] is True
+    assert result["outcome"]["noop"] is True
+    assert "changes" not in result["outcome"]
+
+
+def test_drag_without_page_reaction_is_noop() -> None:
+    client = ActionClient()
+    client.name = "拖动项"
+    client.change_counts = {"added": 0, "removed": 0}
+    result = _run(client, "drag", destination=11)
+    assert result["outcome"]["ok"] is True
+    assert result["outcome"]["noop"] is True
+
+
+def test_back_without_navigation_is_noop() -> None:
+    client = ActionClient()
+    client.change_counts = {"added": 0, "removed": 0}
+    result = _run(client, "back")
+    assert result["outcome"]["ok"] is True
+    assert result["outcome"]["noop"] is True
 
 
 def test_submit_invokes_form_request_submit() -> None:

@@ -3193,13 +3193,16 @@ async def execute_action(
                     )
                 outcome["navigated"] = True
             if (
-                action == "click"
+                action in {"click", "hover", "drag", "back"}
                 and new_target is None
                 and not outcome.get("navigated")
                 and not outcome.get("changes")
                 and not outcome.get("elevatedModal")
                 and not noop
             ):
+                # Align with the SDK's no-reaction verdict: click, hover, drag
+                # and back are all allowed to report noop. fill/select keep the
+                # existing readback semantics; scroll reports movedBy/atEnd.
                 outcome["noop"] = True
             return {"type": "execute-result", "outcome": outcome}
         finally:

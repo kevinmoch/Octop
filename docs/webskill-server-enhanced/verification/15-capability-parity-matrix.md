@@ -63,7 +63,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 31 | scroll | ✅ | 真实容器、步长、静默窗口、atEnd/movedBy | — |
 | 32 | attach | 🟡 | Octop 文件桥 + DataTransfer；真实隐藏 input 已验证 | 不是跨宿主协议；SDK/extension 用系统选择器 |
 | 33 | back | ✅ | navigate.go_back | — |
-| 34 | noop / changes 元数据 | 🟡 | set 与 click 有 noop；mutation added/removed、status 文本、navigated；status 会脱敏动作值 | 其他动作的 noop 判定仍简化 |
+| 34 | noop / changes 元数据 | 🟡 | click/set/hover/drag/back 有 noop；mutation added/removed、status 文本、navigated；status 会脱敏动作值 | click 仍缺 SDK 的“已打开浮层不算 noop”判据；fill/select/scroll 按 SDK 语义不报 noop |
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
@@ -615,3 +615,28 @@ PageAction outcome (模型可见):
 ```text
 tests/unit/api/test_webskill_downloads.py
 ```
+
+
+## 22. noop 动作面对齐（2026-11-21）
+
+补齐：
+
+- `hover` 无 DOM 变化 / status / 导航 / modal → `noop: true`
+- `drag` 无 DOM 变化 / status / 导航 / modal → `noop: true`
+- `back` 没有发生导航 → `noop: true`
+- `click` / `set` 保持原有 noop
+- `fill` / `select` / `scroll` 按 SDK 语义不强行报 noop；scroll 用 `scrolled.movedBy/atEnd`
+
+新增单元测试：
+
+```text
+test_hover_without_page_reaction_is_noop
+test_drag_without_page_reaction_is_noop
+test_back_without_navigation_is_noop
+```
+
+当前定向测试：91 passed。
+
+仍有一个小差异：SDK 的 click 会用 `popoverOpenBeside()` 把
+“点击前浮层已经开着”排除出 noop；Octop 目前只看 DOM changes/status/
+navigation/modal。这个差异已保留在矩阵 🟡 说明中，未在本轮硬造。
