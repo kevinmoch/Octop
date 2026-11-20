@@ -190,6 +190,10 @@ class FakeBrowser:
         self._internal = SimpleNamespace(client=self.client, ref_cache=self.ref_cache)
         self.active_target = "target-1"
 
+    async def switch_tab(self, tab_id: str) -> ToolResult:
+        self.active_target = tab_id
+        return tool_result(f"Activated tab {tab_id}")
+
     async def list_tabs(self) -> ToolResult:
         return tool_result("", metadata={"tabs": [{"tab_id": self.active_target, "active": True}]})
 
@@ -648,7 +652,7 @@ async def test_new_target_updates_model_and_activates_view(
     assert session.model_target == "target-2"
     assert session.document is None
     assert not session.refs
-    assert browser.client.activated_target == "target-2"
+    assert browser.active_target == "target-2"
     child = await read_page(
         session,
         {"type": "perceive", "scope": {"include": ["body"]}},
