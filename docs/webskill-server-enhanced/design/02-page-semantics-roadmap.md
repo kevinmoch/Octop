@@ -236,8 +236,8 @@
 - 阶段 0：完成（45 个定向测试 + parity 文档）
 - 阶段 1：完成（click/fill/select/set/hover/drag/submit/scroll 均有执行级测试；fill 使用原生 setter；hover 走真实鼠标；drag 优先 HTML5；scroll 有静默窗口）
 - 阶段 2：基本完成（aria-hidden/hidden/inert/display/visibility、零尺寸、scope include/exclude 均已接入 ref 发放；执行前再次检查可见性；独立 actionScope 的 host 配置仍待补）
-- 阶段 3：基本完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向元数据待补）
-- 阶段 4：基础（tabs/target 已有；嵌套 frame 自动发现待补）
+- 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
+- 阶段 4：基础（17 个 frame/oopif/target 测试；嵌套 frame 自动发现仍待补）
 - 阶段 5-9：未开始
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
@@ -259,3 +259,11 @@
 阶段 2 的已知宿主边界：P1 当前把 perception scope 同时作为 action ref 的发放范围；
 SDK 的 `PageActionPolicy.scope` 未通过 remote execute 协议下传，因此“独立 actionScope”
 尚未形成可配置的双范围；这属于宿主协议扩展，不是本次 SDK 修改。
+
+## 6. 阶段 3 验收证据
+
+- cursor:pointer 使用父级差分，避免把继承 pointer 的容器全部提升。
+- DOM click 探针通过 CDP `includeCommandLineAPI` 的 `getEventListeners` 标记。
+- 有 actionable descendant 的容器不再重复提升。
+- 真实受控页感知：83 nodes / 44 targets，70ms；`问题属性/问题提出方/问题描述`
+  的 role、name、value、ref 均正确，owner 保持 agent。
