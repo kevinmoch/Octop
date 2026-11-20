@@ -403,6 +403,11 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
                 logger.warning("tab switch timed out; keeping stream open")
                 return
             if not getattr(result, "success", False):
+                logger.warning(
+                    "tab switch failed for %s: %s",
+                    tab_id,
+                    getattr(result, "error", "unknown error"),
+                )
                 # The client may still hold a target id from before a browser
                 # restart. Resolve the current tab by its visible identity
                 # instead of leaving the user stuck on the old frame.
