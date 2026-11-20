@@ -242,8 +242,8 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
 - 阶段 6：完成（树形 children、ref 子树、客户端 paging 输入树已具备；真实页面 roots=63/flat=83）
 - 阶段 7：完成（path/tag/role/name/href 唯一恢复；歧义拒绝）
-- 阶段 8：部分（语义 target 契约测试；双执行器技能 fixture 待补）
-- 阶段 9：未开始
+- 阶段 8：部分（语义 target 已由 ref signature 覆盖，target 不含 selector/坐标；双执行器技能 fixture 待补）
+- 阶段 9：进行中（真实页面表单/下拉/附件/树/动作矩阵已验证；完整 CCS 页面矩阵待补）
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
@@ -321,3 +321,34 @@ OOPIF attach/detach/导航、target workset、new target 激活。
   同名歧义返回 `PAGE_ACTION_STALE_REF`，不猜测目标。
 - 测试：tree nesting、subtree、ambiguous recovery、semantic target shape。
 - 技能 target 契约测试断言只含 `ref/role/name`，不含 selector/坐标。
+
+
+## 11. 目标身份修正（阶段 8 前置）
+
+执行结果的 target 现在优先使用 ref signature 的 role/name。此前 promoted div 在感知中是
+`button/测试悬浮`，执行回填却是 `div/悬浮`，会把 trace 技能身份改坏。真实动作矩阵
+现在回填：
+
+```text
+checkbox 勾选
+button 测试悬浮
+button 测试滚动
+button 测试拖拽
+```
+
+## 12. 阶段 9 真实矩阵（本轮）
+
+受控页面临时元素，清理后不影响业务数据：
+
+| 动作 | 结果 |
+|---|---|
+| set checkbox true | checked=true |
+| hover | mouseover=2 |
+| scroll down | scrollTop=30, movedBy=30, atEnd=false |
+| drag HTML5 | dragstart=1, drop=1 |
+| attach 隐藏 file input | files[0]=proof.txt, 12 bytes |
+| select 问题属性 | 回读 规格不符 |
+| fill 问题描述 | 回读 测试 |
+
+阈值差异：scroll 的可滚动内容高度只有 180px，步长按 `max(extent-64, extent/2)`
+得到 30px，因此 `movedBy=30` 是预期，不是固定 300px。

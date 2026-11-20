@@ -263,6 +263,7 @@ def test_hover_dispatches_hover_function_without_click() -> None:
     client.name = "菜单"
     result = _run(client, "hover")
     assert result["outcome"]["ok"] is True
+    assert result["outcome"]["target"]["role"] == "button"
     assert any(event.get("type") == "mouseMoved" for event in client.input_events)
 
 

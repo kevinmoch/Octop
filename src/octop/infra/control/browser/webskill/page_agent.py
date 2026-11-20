@@ -1932,6 +1932,19 @@ async def _actual_target(
         target.pop("name", None)
     if target.get("secret") is not True:
         target.pop("secret", None)
+    # Ref signatures were built from the perception node. For promoted widgets
+    # the raw DOM role (div) and own text are not the semantic identity the
+    # model saw; use the verified signature so trace targets stay replayable.
+    try:
+        signature = json.loads(entry.signature) if entry.signature else {}
+    except json.JSONDecodeError:
+        signature = {}
+    expected_role = signature.get("role")
+    expected_name = signature.get("name")
+    if isinstance(expected_role, str) and expected_role:
+        target["role"] = expected_role
+    if isinstance(expected_name, str) and expected_name and target.get("secret") is not True:
+        target["name"] = expected_name
     return target
 
 
