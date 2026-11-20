@@ -122,6 +122,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cdp", default="http://127.0.0.1:9223")
     parser.add_argument("--page", default="/browser")
+    parser.add_argument("--budget-ms", type=int, default=5000)
+    parser.add_argument("--perceive-budget-ms", type=int, default=2000)
     args = parser.parse_args()
     result = asyncio.run(run(args.cdp, args.page))
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -130,6 +132,15 @@ def main() -> int:
         outcome.get("ok") is True or outcome.get("skipped") is True
         for outcome in actions.values()
     )
+    if result.get("perceiveMs", 0) > args.perceive_budget_ms:
+        ok = False
+    if any(
+        isinstance(outcome, dict)
+        and isinstance(outcome.get("durationMs"), int)
+        and outcome["durationMs"] > args.budget_ms
+        for outcome in actions.values()
+    ):
+        ok = False
     return 0 if ok else 1
 
 

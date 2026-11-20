@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from octop.infra.control.browser.webskill import page_agent
-from octop.infra.control.browser.webskill.page_agent import execute_action
+from octop.infra.control.browser.webskill.page_agent import _keyboard_replace, execute_action
 from octop.infra.control.browser.webskill.sessions import (
     BrowserAgentError,
     BrowserAgentRegistry,
@@ -176,6 +176,32 @@ def _run(client: ActionClient, action: str, *, value: str | None = None) -> dict
         )
     finally:
         page_agent.wait_for_new_page_target = original
+
+
+def test_keyboard_replacement_selects_then_reads_back() -> None:
+    class KeyboardClient:
+        def __init__(self) -> None:
+            self.inserted: list[str] = []
+
+        async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+            params = params or {}
+            if method == "Runtime.callFunctionOn":
+                declaration = str(params.get("functionDeclaration") or "")
+                if "this.select" in declaration:
+                    return {"result": {"value": True}}
+                if "this.value" in declaration:
+                    return {"result": {"value": "新值"}}
+                return {"result": {"value": "新值"}}
+            if method == "Input.dispatchKeyEvent":
+                return {}
+            if method == "Input.insertText":
+                self.inserted.append(str(params.get("text")))
+                return {}
+            raise AssertionError(method)
+
+    client = KeyboardClient()
+    assert asyncio.run(_keyboard_replace(client, "control", "新值")) is True
+    assert client.inserted == ["新值"]
 
 
 def test_fill_uses_native_setter_and_reports_readonly() -> None:

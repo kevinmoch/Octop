@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 73 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 74 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -426,3 +426,21 @@ button 测试拖拽
   - select 410ms，fill 38ms，hover 22ms；
   - owner=agent。
 - 动作审计测试断言 `durationMs` 为非负整数。
+
+
+## 19. 阶段 12：写入型 smoke 与发布预算
+
+- `page_semantics_write_smoke.py --write`：
+  - 保存 `问题属性` / `问题描述` 原值；
+  - select 到备用值 → 回读；
+  - fill 临时值 → 回读；
+  - 无论成功失败都在 finally 中恢复原值；
+  - 不点击保存/提交/审批。
+- 真实结果：
+  - `问题属性`：规格不符 → 产地不符 → 规格不符；
+  - `问题描述`：测试 → 测试暂存 → 测试。
+- controlled Vue textarea 会拒绝原生 setter；新增 select-all + `Input.insertText` 兜底，
+  并回读最终值，失败不再退化为从光标处追加。
+- `page_semantics_smoke.py` 增加 `--budget-ms` / `--perceive-budget-ms`，超预算退出非 0。
+- 当前真实预算：perceive ~81ms（预算 2000ms），fill/hover <500ms（预算 5000ms）。
+- 测试：`_keyboard_replace` 行为测试、audit `durationMs`、smoke 实际运行。

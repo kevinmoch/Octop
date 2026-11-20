@@ -2285,6 +2285,65 @@ async def _element_center(client: Any, backend_node_id: int) -> tuple[float, flo
     return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
 
 
+async def _keyboard_replace(client: Any, object_id: str, value: str) -> bool:
+    """Replace a controlled text field through focus + select-all + key input."""
+    selected = await client.send(
+        "Runtime.callFunctionOn",
+        {
+            "objectId": object_id,
+            "functionDeclaration": """function() {
+                const tag = this.tagName.toLowerCase();
+                if (tag !== 'input' && tag !== 'textarea') return false;
+                this.focus();
+                if (typeof this.select === 'function') this.select();
+                return true;
+            }""",
+            "returnByValue": True,
+        },
+    )
+    if selected.get("result", {}).get("value") is not True:
+        return False
+    for modifiers in (2, 4):  # Ctrl and Meta, matching interact.fill_text
+        await client.send(
+            "Input.dispatchKeyEvent",
+            {"type": "keyDown", "key": "a", "code": "KeyA", "modifiers": modifiers},
+        )
+        await client.send(
+            "Input.dispatchKeyEvent",
+            {"type": "keyUp", "key": "a", "code": "KeyA", "modifiers": modifiers},
+        )
+    await client.send(
+        "Input.dispatchKeyEvent",
+        {"type": "keyDown", "key": "Backspace", "code": "Backspace"},
+    )
+    await client.send(
+        "Input.dispatchKeyEvent",
+        {"type": "keyUp", "key": "Backspace", "code": "Backspace"},
+    )
+    await client.send("Input.insertText", {"text": value})
+    await client.send(
+        "Runtime.callFunctionOn",
+        {
+            "objectId": object_id,
+            "functionDeclaration": """function() {
+                this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+                this.dispatchEvent(new Event('change', { bubbles: true }));
+                return String(this.value ?? '');
+            }""",
+            "returnByValue": True,
+        },
+    )
+    current = await client.send(
+        "Runtime.callFunctionOn",
+        {
+            "objectId": object_id,
+            "functionDeclaration": "function(){ return String(this.value ?? ''); }",
+            "returnByValue": True,
+        },
+    )
+    return bool(current.get("result", {}).get("value") == value)
+
+
 async def _click_dropdown_option(
     client: Any, value: str, control_object_id: str | None = None
 ) -> bool:
@@ -2533,9 +2592,30 @@ async def execute_action(
                                 ),
                             )
                         else:
-                            result = await interact.fill_text(
-                                client, action_cache, text=request["value"], ref=temporary_ref
-                            )
+                            # Controlled Vue/React fields can reject a native
+                            # setter but still accept a real select-all + key
+                            # replacement. Only claim success after reading the
+                            # final value back.
+                            if await _keyboard_replace(client, object_id, str(request["value"])):
+                                result = ToolResult(
+                                    success=True,
+                                    content="Filled",
+                                    metrics=ActionMetrics(
+                                        action="fill",
+                                        duration_ms=0,
+                                        dom_nodes_scanned=0,
+                                        estimated_tokens=0,
+                                    ),
+                                )
+                            else:
+                                return {
+                                    "type": "execute-result",
+                                    "outcome": {
+                                        "ok": False,
+                                        "target": target,
+                                        "reason": "The native value setter did not apply",
+                                    },
+                                }
                     elif action == "select":
                         if target_tag == "select":
                             result = await interact.select_value(
