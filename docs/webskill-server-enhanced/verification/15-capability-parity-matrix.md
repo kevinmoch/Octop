@@ -282,3 +282,50 @@ Step 2 textbox 问题描述 fill 测试          → ok
 
 这验证了 trace-backed 页面技能的候选格式、安装链路和 Octop 执行链路；
 候选正文目前是固定 draft，不是由真实 LLM 根据 trace 自动撰写。
+
+
+## 15. 真实 LLM 从 trace 生成技能并执行
+
+Octop 中开启「技能自动生成」后，先用模型执行页面动作：
+
+```text
+select 问题属性 = 规格不符
+fill   问题描述 = 测试
+```
+
+随后模型调用 `generate_skill`，真实生成候选：
+
+```text
+name: fill-inspection-issue-form
+candidateId: cand-t7aj7oaa
+```
+
+生成的 SKILL.md 被安装回 Octop，真实模型再次执行：
+
+```text
+问题属性 = 规格不符  confirmed
+问题描述 = 测试      confirmed
+```
+
+没有保存/提交/审批。
+
+这是当前最完整的链路：
+
+```text
+真实页面动作
+→ trace
+→ 真实 LLM 生成 SKILL.md
+→ Octop 安装
+→ 真实模型按技能执行
+```
+
+### 发现的 trace 校验缺口
+
+生成确认卡同时展示了「技能里写的步骤」与「本会话实际执行」：
+
+- 第二个 `act_on_page` 技能声明的参数是 `action=fill`
+- trace 实际显示的是 `action=select`
+
+生成器仍然提交了候选，因为当前校验只要求声明的**工具名**在 trace 中出现，
+没有逐参数核对。这个缺口需要在后续单独修正，不能把本次生成视为
+参数级完全 trace-backed。
