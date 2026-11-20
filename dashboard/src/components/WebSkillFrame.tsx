@@ -32,7 +32,8 @@ type HostRequest = {
     | "tabs-reset"
     | "pdf-extract"
     | "downloads-list"
-    | "downloads-read";
+    | "downloads-read"
+    | "linked-document";
   sessionId: string;
   payload?: unknown;
 };
@@ -60,7 +61,8 @@ function isRequest(value: unknown): value is HostRequest {
       data.api === "tabs-reset" ||
       data.api === "pdf-extract" ||
       data.api === "downloads-list" ||
-      data.api === "downloads-read")
+      data.api === "downloads-read" ||
+      data.api === "linked-document")
   );
 }
 
@@ -233,6 +235,24 @@ export default function WebSkillFrame({
             respond({
               ok: true,
               result: await browserAgentApi.deleteRecording(recordingId),
+            });
+          } else if (data.api === "linked-document") {
+            const payload = data.payload;
+            if (
+              typeof payload !== "object" ||
+              payload === null ||
+              Array.isArray(payload) ||
+              Object.keys(payload).some((key) => key !== "url") ||
+              typeof (payload as Record<string, unknown>).url !== "string" ||
+              ((payload as Record<string, unknown>).url as string).length > 2048
+            )
+              throw new Error("Invalid linked document URL");
+            respond({
+              ok: true,
+              result: await browserAgentApi.readLinkedDocument(
+                sessionId,
+                (payload as Record<string, string>).url,
+              ),
             });
           } else if (data.api === "downloads-list") {
             respond({

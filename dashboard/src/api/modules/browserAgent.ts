@@ -123,6 +123,13 @@ export const browserAgentApi = {
       "/browser-agent/pdf/extract",
       { method: "POST", body: JSON.stringify({ data }) },
     ),
+  readLinkedDocument: (sessionId: string, url: string) =>
+    request<{ contentType: string; data: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(
+        sessionId,
+      )}/linked-document`,
+      { method: "POST", body: JSON.stringify({ url }) },
+    ),
   listDownloads: (sessionId: string) =>
     request<{ downloads: BrowserAgentDownload[] }>(
       `/browser-agent/sessions/${encodeURIComponent(sessionId)}/downloads`,
