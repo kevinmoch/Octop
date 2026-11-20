@@ -195,3 +195,35 @@ Python 定向测试 80 passed
 SDK verify slug 7 passed
 ruff / mypy 通过
 ```
+
+
+## 12. 页面录制技能的语义回放证明
+
+新增：
+
+- `scripts/webskill-p1/fixtures/recorded-page-skill.json`
+- `scripts/webskill-p1/semantic_skill_smoke.py`
+- `tests/unit/api/test_webskill_skill_migration.py`
+
+fixture 只含：
+
+```json
+{"role":"combobox","name":"问题属性"}
+{"role":"textbox","name":"问题描述"}
+```
+
+不含 ref、selector、坐标。脚本每一步重新 `perceive_page`，按 role/name
+解析新鲜 ref，再 grant/execute。
+
+真实 CCS 页面结果：
+
+```text
+select 问题属性 → 规格不符  ok
+fill 问题描述 → 测试      ok
+changes: select added=1/removed=1, fill added=1/removed=0
+```
+
+这验证了 WebSkill 风格技能所依赖的语义目标契约在 Octop 可执行。
+
+注意：这是**语义步骤回放 harness**，不是完整的 SDK SKILL.md 解析器；
+技能仍由 Chatbot/模型按步骤调用 `perceive_page` + `act_on_page`。

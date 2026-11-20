@@ -1,0 +1,16 @@
+{
+  "name": "recorded-inspection-page",
+  "description": "Semantic replay of a WebSkill page workflow with fresh perception and no stored refs.",
+  "steps": [
+    {
+      "action": "select",
+      "target": {"role": "combobox", "name": "问题属性"},
+      "value": "规格不符"
+    },
+    {
+      "action": "fill",
+      "target": {"role": "textbox", "name": "问题描述"},
+      "value": "测试"
+    }
+  ]
+}
