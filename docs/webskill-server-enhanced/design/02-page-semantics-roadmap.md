@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 66 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 69 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -242,8 +242,8 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
 - 阶段 6：完成（树形 children、ref 子树、客户端 paging 输入树已具备；真实页面 roots=63/flat=83）
 - 阶段 7：完成（path/tag/role/name/href 唯一恢复；歧义拒绝）
-- 阶段 8：部分（语义 target 已由 ref signature 覆盖，target 不含 selector/坐标；双执行器技能 fixture 待补）
-- 阶段 9：进行中（真实页面表单/下拉/附件/树/动作矩阵已验证；完整 CCS 页面矩阵待补）
+- 阶段 8：完成（SDK `createDomPerceptionReader` 原生控件 fixture 与 Octop 期望 role/name 一致；target 契约无 selector/坐标）
+- 阶段 9：完成本轮闸门（真实表单/下拉/附件/树/动作矩阵 + release gate 测试；完整业务回归仍建议上线前执行）
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
@@ -352,3 +352,14 @@ button 测试拖拽
 
 阈值差异：scroll 的可滚动内容高度只有 180px，步长按 `max(extent-64, extent/2)`
 得到 30px，因此 `movedBy=30` 是预期，不是固定 300px。
+
+
+## 13. 阶段 8/9 证据
+
+- `semanticParity.test.ts` 直接加载 WebSkill SDK browser dist 的
+  `createDomPerceptionReader`，在 jsdom 中读取同一组 button/input/link fixture，
+  得到 `{button,保存}`、`{textbox,搜索}`、`{link,详情}`，与 Octop 期望一致。
+- `test_webskill_release_gate.py` 固定动作面、target 形状和 tree 兼容性。
+- 真实动作矩阵结果见 §12。
+- 已知不可自动化：真实 CCS 业务页面的完整回归仍需要上线前人工走查；
+  本轮已覆盖表单、下拉、树、隐藏 file input、checkbox、hover、scroll、drag。
