@@ -835,10 +835,26 @@ async def test_image_request_captures_page_image(
     assert image_node["capturable"] is True
 
 
-async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegistry) -> None:
+async def test_subtree_reads_only_the_referenced_subtree(registry: BrowserAgentRegistry) -> None:
     browser = FakeBrowser()
     session = registry.create(1, "user-1")
     resolver = resolver_for(browser)
+    full = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver,
+        registry=registry,
+    )
+    ref = full["targets"][0]["ref"]
+    subtree = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}, "ref": ref},
+        resolver=resolver,
+        registry=registry,
+    )
+    assert subtree["targets"][0]["ref"] == ref
+    assert len(subtree["result"]["nodes"]) == 1
+
     with pytest.raises(BrowserAgentError) as error:
         await read_page(
             session,
@@ -846,7 +862,7 @@ async def test_subtree_and_frame_inputs_fail_closed(registry: BrowserAgentRegist
             resolver=resolver,
             registry=registry,
         )
-    assert error.value.code == "PERCEPTION_SUBTREE_UNSUPPORTED"
+    assert error.value.code == "PERCEPTION_SUBTREE_UNKNOWN_REF"
 
 
 @pytest.mark.parametrize(

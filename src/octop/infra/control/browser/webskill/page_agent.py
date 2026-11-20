@@ -883,10 +883,12 @@ async def read_page(
     registry: BrowserAgentRegistry,
 ) -> dict[str, Any]:
     scope = request.get("scope")
-    if "ref" in request:
+    subtree_ref = request.get("ref")
+    if subtree_ref is not None and (
+        not isinstance(subtree_ref, str) or not subtree_ref or len(subtree_ref) > 256
+    ):
         raise BrowserAgentError(
-            "PERCEPTION_SUBTREE_UNSUPPORTED",
-            "Subtree perception is not available in P1; no full-page fallback is performed",
+            "PERCEPTION_SUBTREE_UNKNOWN_REF", "The subtree reference is invalid"
         )
     image_options = _image_capture_options(request)
     browser = await resolve_browser(session, resolver)
@@ -1051,18 +1053,6 @@ async def read_page(
                 "PERCEPTION_SUBTREE_UNSUPPORTED",
                 "Frame projection exceeded its selected document",
             )
-        elements = [
-            element
-            for element in raw_elements
-            if isinstance(element, dict)
-            and isinstance(element.get("node_id"), int)
-            and element.get("node_id") not in excluded
-        ]
-        if len(elements) > MAX_P1_NODES:
-            raise BrowserAgentError(
-                "PERCEPTION_FAILED",
-                f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
-            )
         after = await document_identity(session, browser, client)
         if before.key != after.key:
             raise BrowserAgentError(
@@ -1079,6 +1069,20 @@ async def read_page(
             raise BrowserAgentError(
                 "PERCEPTION_FAILED", "The frame changed while it was being perceived"
             )
+        subtree_entry: PageRef | None = None
+        if subtree_ref is not None:
+            try:
+                subtree_entry = registry.resolve_ref(session, subtree_ref, after)
+            except BrowserAgentError as error:
+                raise BrowserAgentError(
+                    "PERCEPTION_SUBTREE_UNKNOWN_REF",
+                    "The subtree reference is unknown or expired",
+                ) from error
+            if subtree_entry.frame != selected_frame:
+                raise BrowserAgentError(
+                    "PERCEPTION_SUBTREE_OUT_OF_SCOPE",
+                    "The subtree reference belongs to another frame",
+                )
         # A single-frame scope has an empty frame path; that must not invalidate
         # refs on every perception. Only a real document change does.
         if session.document is None or session.document.key != after.key:
@@ -1086,6 +1090,35 @@ async def read_page(
         session.document = after
         node_paths = _node_paths(projected_root)
         parents = _node_parents(projected_root)
+        subtree_root_id: int | None = None
+        if subtree_entry is not None:
+            for candidate_id, candidate_backend in backend_ids.items():
+                if candidate_backend == subtree_entry.backend_node_id:
+                    subtree_root_id = candidate_id
+                    break
+            if subtree_root_id is None:
+                raise BrowserAgentError(
+                    "PERCEPTION_SUBTREE_UNKNOWN_REF",
+                    "The subtree reference is no longer in this document",
+                )
+        elements = [
+            element
+            for element in raw_elements
+            if isinstance(element, dict)
+            and isinstance(element.get("node_id"), int)
+            and element.get("node_id") not in excluded
+        ]
+        if subtree_root_id is not None:
+            elements = [
+                element
+                for element in elements
+                if _within_scope(element["node_id"], parents, {subtree_root_id}, excluded)
+            ]
+        if len(elements) > MAX_P1_NODES:
+            raise BrowserAgentError(
+                "PERCEPTION_FAILED",
+                f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
+            )
         selectors = _scope_selectors(scope)
         scope_include: set[int] | None = None
         scope_exclude: set[int] = set()

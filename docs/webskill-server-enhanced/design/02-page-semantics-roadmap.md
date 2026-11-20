@@ -240,7 +240,8 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
 - 阶段 4：完成（同源嵌套 frame 自动发现、嵌套 frame refs、投影选择、OOPIF、动态导航失效、target workset 已有测试，共 20 项 frame/target 相关断言）
 - 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
-- 阶段 6-9：未开始
+- 阶段 6：部分完成（ref 子树读取已实现并测试；完整树形 children、cursor/paging 待补）
+- 阶段 7-9：部分/未开始
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
@@ -293,3 +294,13 @@ OOPIF attach/detach/导航、target workset、new target 激活。
 - `WebSkillFrame`：文件选择 Modal（中英双语），由用户手动选择。
 - `OctopPageAgentTransport`：attach 前通过 `attach-files` bridge 请求文件，父窗口上传后才 grant/execute。
 - 测试：attachments HTTP 上传/非法 base64、attach action、transport 调序与取消。
+
+
+## 9. 阶段 6 先行证据（子树读取）
+
+- `perceive_page` 接受 `ref`，只返回该 ref 的后代元素；不再整页回落。
+- ref 未知/过期返回 `PERCEPTION_SUBTREE_UNKNOWN_REF`，跨 frame 返回
+  `PERCEPTION_SUBTREE_OUT_OF_SCOPE`。
+- 测试：`test_subtree_reads_only_the_referenced_subtree` 验证全页 ref → 子树只含该目标，
+  以及缺失 ref 的结构化错误。
+- 树形 `children`、cursor/paging 仍未实现，阶段 6 不宣称完整。
