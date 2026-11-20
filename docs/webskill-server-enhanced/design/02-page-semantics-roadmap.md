@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 69 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 70 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -236,7 +236,7 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 
 - 阶段 0：完成（45 个定向测试 + parity 文档）
 - 阶段 1：完成（click/fill/select/set/hover/drag/submit/scroll 均有执行级测试；fill 使用原生 setter；hover 走真实鼠标；drag 优先 HTML5；scroll 有静默窗口）
-- 阶段 2：基本完成（aria-hidden/hidden/inert/display/visibility、零尺寸、scope include/exclude 均已接入 ref 发放；执行前再次检查可见性；独立 actionScope 的 host 配置仍待补）
+- 阶段 2：完成（aria-hidden/hidden/inert/display/visibility、零尺寸、独立 actionScope include/exclude；执行前再次校验可见性与 action scope）
 - 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
 - 阶段 4：完成（同源嵌套 frame 自动发现、嵌套 frame refs、投影选择、OOPIF、动态导航失效、target workset 已有测试，共 20 项 frame/target 相关断言）
 - 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
@@ -363,3 +363,17 @@ button 测试拖拽
 - 真实动作矩阵结果见 §12。
 - 已知不可自动化：真实 CCS 业务页面的完整回归仍需要上线前人工走查；
   本轮已覆盖表单、下拉、树、隐藏 file input、checkbox、hover、scroll、drag。
+
+
+## 14. 阶段 2 独立 actionScope 验收
+
+- `perceive` 可携带独立 `actionScope`；未携带时保持旧的 perception scope 行为。
+- action ref 只从 actionScope 发放；perception 仍读取整个 include 范围。
+- 执行前 `_assert_ref_in_action_scope` 重新查询当前 DOM，目标越界返回
+  `PAGE_ACTION_OUT_OF_SCOPE`。
+- 真实页面：
+  - 正常 `actionScope={include:["body"]}` → 46 targets；
+  - 限制 `actionScope={include:["#does-not-exist"]}` → 0 targets；
+  - select 问题属性仍 ok。
+- Transport 默认向 perceive 注入 `{include:["body"]}`，host 配置与
+  `PageActionPolicy.scope` 可以各自装配。

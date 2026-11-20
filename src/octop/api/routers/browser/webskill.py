@@ -729,7 +729,14 @@ async def page_agent_ws(
                     return control_owner_for(profile) != "user"
 
                 if message.get("type") == "perceive":
-                    if set(message) - {"type", "requestId", "scope", "ref", "capture"}:
+                    if set(message) - {
+                        "type",
+                        "requestId",
+                        "scope",
+                        "actionScope",
+                        "ref",
+                        "capture",
+                    }:
                         raise BrowserAgentError(
                             "REQUEST_INVALID", "Perception contains unknown fields"
                         )

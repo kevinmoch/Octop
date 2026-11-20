@@ -61,6 +61,8 @@ class PageRef:
     frame: str = "self"
     # JSON identity used to restore a ref after the DOM node is replaced.
     signature: str = ""
+    # JSON include/exclude selectors that gated this ref at issuance.
+    action_scope: str = ""
 
 
 @dataclass
@@ -387,6 +389,7 @@ class BrowserAgentRegistry:
         backend_node_id: int,
         frame: str = "self",
         signature: str = "",
+        action_scope: str = "",
     ) -> str:
         if signature:
             document_key = session.document.key if session.document else ""
@@ -403,6 +406,7 @@ class BrowserAgentRegistry:
             session.document.key if session.document else "",
             frame,
             signature,
+            action_scope,
         )
         return ref
 

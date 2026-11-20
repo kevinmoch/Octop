@@ -105,7 +105,7 @@ export async function createWebSkillHost(
     audit,
   });
   const targets = createRemoteTargetRegistry();
-  const transport = new OctopPageAgentTransport(bridge);
+  const transport = new OctopPageAgentTransport(bridge, { include: ["body"] });
   let currentPage: { key: string; url?: string; title?: string } | undefined;
   const pagePerception = new PagePerceptionPolicy({
     scope: { include: ["body"] },

@@ -1061,6 +1061,20 @@ async def read_page(
         known_nodes = {
             element.get("node_id") for element in raw_elements if isinstance(element, dict)
         }
+        perception_selectors = _scope_selectors(scope)
+        action_selectors = _scope_selectors(request.get("actionScope"))
+        selectors = action_selectors or perception_selectors
+        scope_include: set[int] | None = None
+        scope_exclude: set[int] = set()
+        if selectors is not None:
+            include_selectors, exclude_selectors = selectors
+            root_node_id = projected_root.get("nodeId")
+            if isinstance(root_node_id, int):
+                found_include = await _scope_node_ids(client, root_node_id, include_selectors)
+                found_exclude = await _scope_node_ids(client, root_node_id, exclude_selectors)
+                if found_include is not None:
+                    scope_include = found_include
+                    scope_exclude = found_exclude or set()
         cursor_backends = await _cursor_pointer_backends(client)
         click_backends = await _click_listener_backends(client)
         promoted = _promoted_elements(
@@ -1202,18 +1216,15 @@ async def read_page(
                 "PERCEPTION_FAILED",
                 f"The document has more than {MAX_P1_NODES} readable controls; it will not be silently truncated",
             )
-        selectors = _scope_selectors(scope)
-        scope_include: set[int] | None = None
-        scope_exclude: set[int] = set()
-        if selectors is not None:
-            include_selectors, exclude_selectors = selectors
-            root_node_id = projected_root.get("nodeId")
-            if isinstance(root_node_id, int):
-                found_include = await _scope_node_ids(client, root_node_id, include_selectors)
-                found_exclude = await _scope_node_ids(client, root_node_id, exclude_selectors)
-                if found_include is not None:
-                    scope_include = found_include
-                    scope_exclude = found_exclude or set()
+        action_scope_json = (
+            json.dumps(
+                {"include": action_selectors[0], "exclude": action_selectors[1]},
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            if action_selectors is not None
+            else ""
+        )
         nodes: list[dict[str, Any]] = []
         targets: list[dict[str, Any]] = []
         image_candidates: list[tuple[dict[str, Any], str]] = []
@@ -1262,7 +1273,13 @@ async def read_page(
                     separators=(",", ":"),
                     ensure_ascii=False,
                 )
-                node_ref = registry.issue_ref(session, backend_node_id, selected_frame, signature)
+                node_ref = registry.issue_ref(
+                    session,
+                    backend_node_id,
+                    selected_frame,
+                    signature,
+                    action_scope_json,
+                )
                 node["ref"] = node_ref
             if (
                 node_ref
@@ -1790,6 +1807,56 @@ def _find_signature_nodes(root: dict[str, Any], signature: dict[str, Any]) -> li
     return matches
 
 
+async def _assert_ref_in_action_scope(client: Any, entry: PageRef) -> None:
+    if not entry.action_scope:
+        return
+    try:
+        scope = json.loads(entry.action_scope)
+    except json.JSONDecodeError as error:
+        raise BrowserAgentError(
+            "PAGE_ACTION_OUT_OF_SCOPE", "The action scope is invalid"
+        ) from error
+    include = scope.get("include")
+    exclude = scope.get("exclude", [])
+    if not isinstance(include, list):
+        raise BrowserAgentError(
+            "PAGE_ACTION_OUT_OF_SCOPE", "The action scope has no includable region"
+        )
+    raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+    root = raw.get("root", {})
+    if not isinstance(root, dict):
+        raise BrowserAgentError("PAGE_ACTION_OUT_OF_SCOPE", "The document is unavailable")
+    parents = _node_parents(root)
+    target_node_id: int | None = None
+
+    def find(node: dict[str, Any]) -> None:
+        nonlocal target_node_id
+        if node.get("backendNodeId") == entry.backend_node_id:
+            node_id = node.get("nodeId")
+            if isinstance(node_id, int):
+                target_node_id = node_id
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    find(child)
+
+    find(root)
+    if target_node_id is None:
+        raise BrowserAgentError(
+            "PAGE_ACTION_STALE_REF", "The element reference is no longer in this document"
+        )
+    root_id = root.get("nodeId")
+    if not isinstance(root_id, int):
+        raise BrowserAgentError("PAGE_ACTION_OUT_OF_SCOPE", "The document is unavailable")
+    included = await _scope_node_ids(client, root_id, include)
+    excluded = await _scope_node_ids(client, root_id, exclude) or set()
+    if included is None or not _within_scope(target_node_id, parents, included, excluded):
+        raise BrowserAgentError(
+            "PAGE_ACTION_OUT_OF_SCOPE",
+            "The element is outside the action scope",
+        )
+
+
 async def _recover_ref(
     client: Any,
     entry: PageRef,
@@ -1845,6 +1912,7 @@ async def _ensure_ref(
                 "PAGE_ACTION_STALE_REF",
                 "The element reference is no longer visible",
             )
+        await _assert_ref_in_action_scope(client, entry)
         return entry
     except Exception:  # noqa: BLE001 - attempt signature recovery below
         recovered = await _recover_ref(client, entry)
@@ -1867,6 +1935,7 @@ async def _ensure_ref(
                 "PAGE_ACTION_STALE_REF",
                 "The element reference no longer identifies the same control",
             ) from None
+        await _assert_ref_in_action_scope(client, recovered)
         session.refs[ref] = recovered
         return recovered
 

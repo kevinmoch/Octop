@@ -9,6 +9,7 @@ import pytest
 
 from octop.infra.control.browser.webskill.page_agent import (
     _action_visible,
+    _assert_ref_in_action_scope,
     _click_dropdown_option,
     _file_inputs,
     _hidden_by_ancestor,
@@ -89,6 +90,47 @@ def test_signature_recovery_uses_dom_path_and_tag() -> None:
     assert recovered is not None
     assert recovered.backend_node_id == 20
     assert "DOM.getDocument" in client.calls
+
+
+def test_execution_revalidates_the_ref_against_the_action_scope() -> None:
+    class ScopeClient:
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method == "DOM.getDocument":
+                return {
+                    "root": {
+                        "nodeId": 1,
+                        "nodeName": "#document",
+                        "children": [
+                            {
+                                "nodeId": 2,
+                                "nodeName": "DIV",
+                                "attributes": ["id", "form"],
+                                "children": [
+                                    {"nodeId": 3, "backendNodeId": 20, "nodeName": "BUTTON"}
+                                ],
+                            },
+                            {"nodeId": 4, "backendNodeId": 21, "nodeName": "BUTTON"},
+                        ],
+                    }
+                }
+            if method == "DOM.querySelectorAll":
+                return {"nodeIds": [2]}
+            raise AssertionError(method)
+
+    inside = PageRef(
+        backend_node_id=20,
+        document_key="document-key",
+        action_scope=json.dumps({"include": ["#form"], "exclude": []}),
+    )
+    asyncio.run(_assert_ref_in_action_scope(ScopeClient(), inside))
+    outside = PageRef(
+        backend_node_id=21,
+        document_key="document-key",
+        action_scope=json.dumps({"include": ["#form"], "exclude": []}),
+    )
+    with pytest.raises(BrowserAgentError) as error:
+        asyncio.run(_assert_ref_in_action_scope(ScopeClient(), outside))
+    assert error.value.code == "PAGE_ACTION_OUT_OF_SCOPE"
 
 
 def test_action_scope_is_a_subtree_with_exclusions() -> None:

@@ -101,7 +101,9 @@ describe("OctopPageAgentTransport frame routing", () => {
     });
     expect(FakeWebSocket.instances).toHaveLength(1);
     const requests = FakeWebSocket.instances[0]!.requests;
+    expect(requests[0]!.actionScope).toEqual({ include: ["body"] });
     expect(requests).toHaveLength(2);
+    expect(requests[1]!.actionScope).toEqual({ include: ["body"] });
     expect(requests[1]!.scope).toEqual({
       frames: [{ frame: ["iframe#same-frame"], include: ["body"] }],
     });

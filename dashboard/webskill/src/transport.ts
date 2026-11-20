@@ -75,7 +75,12 @@ export class OctopPageAgentTransport implements PageAgentTransport {
 
   private readonly router: FrameRouter;
 
-  constructor(private readonly bridge: OctopHostBridge) {
+  constructor(
+    private readonly bridge: OctopHostBridge,
+    private readonly actionScope: Record<string, unknown> = {
+      include: ["body"],
+    },
+  ) {
     this.router = createFrameRouter<string>({
       dispatcher: {
         mainFrame: () => "self",
@@ -90,7 +95,11 @@ export class OctopPageAgentTransport implements PageAgentTransport {
   }
 
   send(request: PageAgentRequest): Promise<PageAgentReply> {
-    if (request.type === "perceive") return this.router.perceive(request);
+    if (request.type === "perceive")
+      return this.router.perceive({
+        ...request,
+        actionScope: this.actionScope,
+      } as typeof request);
     if (request.type === "capture-image")
       return this.router.captureImage(request);
     return this.router.execute(request);
