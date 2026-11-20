@@ -253,3 +253,32 @@ changes: select added=1/removed=1, fill added=1/removed=0
 
 模型按语义目标执行，未使用 selector/坐标。运行中确认卡未出现，是因为该 origin+action
 已在此前测试中留下“不再询问”记忆；A-64/A-70 已单独验证确认卡路径。
+
+
+## 14. Trace-backed 技能候选实测
+
+使用 SDK `SkillGenerator` 的 trace-backed 校验路径生成候选（draft 内容为固定
+页面流程；trace records 包含 `perceive_page` 和两次 `act_on_page`）：
+
+- 候选名：`recorded-inspection-trace`
+- 版本：1.0.0
+- 只依赖 `perceive_page` / `act_on_page` / `role+name`
+- 生成器返回 `submitted`，候选通过 trace 工具名校验
+
+把该 SKILL.md 安装到 Octop 后，真实模型执行：
+
+```text
+Step 1 combobox 问题属性 select 规格不符  → ok
+Step 2 textbox 问题描述 fill 测试          → ok
+没有保存/提交/审批
+```
+
+结果：
+
+```text
+问题属性：规格不符
+问题描述：测试
+```
+
+这验证了 trace-backed 页面技能的候选格式、安装链路和 Octop 执行链路；
+候选正文目前是固定 draft，不是由真实 LLM 根据 trace 自动撰写。
