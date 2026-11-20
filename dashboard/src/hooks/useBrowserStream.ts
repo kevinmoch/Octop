@@ -245,11 +245,22 @@ export function useBrowserStream() {
   /** Switch to a tab by id. */
   const switchTab = useCallback(
     (tabId: number | string) => {
-      if (sendEvent({ type: "tab_switch", tab_id: tabId })) {
+      // Include the visible URL/title as a fallback: after a browser restart the
+      // old target id may be stale even though the tab label is still rendered.
+      // The server can then resolve the current target by identity.
+      const tab = tabs.find((item) => String(item.id) === String(tabId));
+      if (
+        sendEvent({
+          type: "tab_switch",
+          tab_id: tabId,
+          ...(tab?.url ? { tab_url: tab.url } : {}),
+          ...(tab?.title ? { tab_title: tab.title } : {}),
+        })
+      ) {
         setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
       }
     },
-    [sendEvent],
+    [sendEvent, tabs],
   );
 
   /** Close a tab by id. */
