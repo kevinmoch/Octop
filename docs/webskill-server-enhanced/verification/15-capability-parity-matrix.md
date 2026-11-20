@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   40 项  83%
-🟡 部分对齐    6 项  13%
+✅ 完全对齐   41 项  85%
+🟡 部分对齐    5 项  10%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -68,7 +68,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
 | 38 | tab workset / 新页 | ✅ | target admit/switch、stream 跟随 | — |
-| 39 | 下载信号 | 🟡 | page_agent 有 downloads 基础设施 | 未在本轮矩阵做完整动作级回归 |
+| 39 | 下载信号 | ✅ | 真实 act_on_page click 触发 blob download；浏览器 Download 事件 `report.txt`；模型收到 `1 download` | — |
 | 40 | frame 内动作 | ✅ | frame/OOPIF 测试 | 跨 frame drag 明确拒绝 |
 | 41 | attach 跨宿主可移植 | ❌ | Octop-only | 需要 SDK 文件选择协议 |
 | 42 | 执行 target 语义身份 | ✅ | ref signature 回填 role/name；非主 frame 的 perception target 和 action outcome 现在都带 `frame`，trace 无 selector/坐标 | — |
@@ -572,3 +572,46 @@ name hint。该默认配置已同步到：
 旧 0.29.0 包装版本会忽略 `name`，但 role hint 仍生效。
 
 SDK browser 测试：873 passed。
+
+
+## 21. 下载动作级回归（2026-11-21）
+
+在真实 CCS 页面注入临时链接：
+
+```html
+<a download="report.txt" href="blob:...">Download report</a>
+```
+
+模型执行：
+
+```text
+act_on_page click "Download report"
+```
+
+结果：
+
+```text
+Playwright Download event:
+  suggested_filename = report.txt
+  failure = None
+
+PageAction outcome (模型可见):
+  page reported 1 download
+  no navigation
+```
+
+验证覆盖：
+
+- click 触发真实浏览器下载
+- `downloadCount` 进入动作结果
+- 没有把下载误报成导航
+- 文件字节可落盘（Playwright 临时路径）
+- 临时链接已移除，原页面无残留
+
+矩阵第 39 行从 🟡 改为 ✅。
+
+测试文件既有：
+
+```text
+tests/unit/api/test_webskill_downloads.py
+```
