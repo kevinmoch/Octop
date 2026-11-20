@@ -1884,6 +1884,28 @@ _SUBMIT_FUNCTION = """function() {
 }"""
 
 
+_ATTACH_FUNCTION = """function(files) {
+    if (this.tagName !== 'INPUT' || this.type !== 'file') {
+        return { ok: false, reason: 'not a file input' };
+    }
+    try {
+        const transfer = new DataTransfer();
+        for (const file of files) {
+            const binary = atob(String(file.data || ''));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+            transfer.items.add(new File([bytes], String(file.name || 'attachment'), { type: String(file.type || 'application/octet-stream') }));
+        }
+        this.files = transfer.files;
+        this.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+        return { ok: this.files.length === files.length, count: this.files.length };
+    } catch (error) {
+        return { ok: false, reason: String(error && error.message ? error.message : error) };
+    }
+}"""
+
+
 _FILL_FUNCTION = r"""function(value) {
     const tag = this.tagName.toLowerCase();
     if (tag !== 'input' && tag !== 'textarea') return { ok: false, reason: 'not a text control' };
@@ -2328,6 +2350,66 @@ async def execute_action(
                             content="Submitted",
                             metrics=ActionMetrics(
                                 action="submit",
+                                duration_ms=0,
+                                dom_nodes_scanned=0,
+                                estimated_tokens=0,
+                            ),
+                        )
+                    elif action == "attach":
+                        files = list(session.attachments)
+                        if not files:
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": "No files were selected for this attach action",
+                                },
+                            }
+                        attach_result = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _ATTACH_FUNCTION,
+                                "arguments": [
+                                    {
+                                        "value": [
+                                            {
+                                                "name": file["name"],
+                                                "type": file["type"],
+                                                "data": base64.b64encode(file["data"]).decode(
+                                                    "ascii"
+                                                ),
+                                            }
+                                            for file in files
+                                        ]
+                                    }
+                                ],
+                                "returnByValue": True,
+                            },
+                        )
+                        session.attachments.clear()
+                        attached_state = attach_result.get("result", {}).get("value")
+                        if (
+                            not isinstance(attached_state, dict)
+                            or attached_state.get("ok") is not True
+                        ):
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": str(
+                                        (attached_state or {}).get("reason")
+                                        or "The target did not accept the selected files"
+                                    )[:500],
+                                },
+                            }
+                        result = ToolResult(
+                            success=True,
+                            content=f"Attached {attached_state.get('count', len(files))} file(s)",
+                            metrics=ActionMetrics(
+                                action="attach",
                                 duration_ms=0,
                                 dom_nodes_scanned=0,
                                 estimated_tokens=0,

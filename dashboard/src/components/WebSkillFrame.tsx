@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Spin } from "antd";
+import { Alert, Button, Modal, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import AssistantFrame, {
   type AssistantPlacement,
@@ -33,7 +33,8 @@ type HostRequest = {
     | "pdf-extract"
     | "downloads-list"
     | "downloads-read"
-    | "linked-document";
+    | "linked-document"
+    | "attach-files";
   sessionId: string;
   payload?: unknown;
 };
@@ -62,7 +63,8 @@ function isRequest(value: unknown): value is HostRequest {
       data.api === "pdf-extract" ||
       data.api === "downloads-list" ||
       data.api === "downloads-read" ||
-      data.api === "linked-document")
+      data.api === "linked-document" ||
+      data.api === "attach-files")
   );
 }
 
@@ -96,6 +98,9 @@ export default function WebSkillFrame({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [frameLoaded, setFrameLoaded] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const attachInputRef = useRef<HTMLInputElement>(null);
+  const attachResolver = useRef<((files: File[] | null) => void) | null>(null);
   const handoffRef = useRef(false);
   const locale = i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en";
   const frameUrl = new URL(
@@ -111,6 +116,22 @@ export default function WebSkillFrame({
       { channel: CHANNEL, ...message },
       window.location.origin,
     );
+  }, []);
+
+  const pickAttachFiles = useCallback(
+    () =>
+      new Promise<File[] | null>((resolve) => {
+        attachResolver.current = resolve;
+        setAttachOpen(true);
+      }),
+    [],
+  );
+
+  const finishAttach = useCallback((files: File[] | null) => {
+    const resolve = attachResolver.current;
+    attachResolver.current = null;
+    setAttachOpen(false);
+    resolve?.(files);
   }, []);
 
   const requestAgentControl = useCallback(() => {
@@ -271,6 +292,34 @@ export default function WebSkillFrame({
             respond({
               ok: true,
               result: await browserAgentApi.deleteRecording(recordingId),
+            });
+          } else if (data.api === "attach-files") {
+            const selected = await pickAttachFiles();
+            if (selected === null)
+              throw new Error("File selection was cancelled");
+            const files = await Promise.all(
+              selected.map(async (file) => {
+                if (file.size > 10 * 1024 * 1024)
+                  throw new Error("Each attachment must be at most 10 MB");
+                const bytes = new Uint8Array(await file.arrayBuffer());
+                let binary = "";
+                for (let index = 0; index < bytes.length; index += 1)
+                  binary += String.fromCharCode(bytes[index]);
+                return {
+                  name: file.name,
+                  type: file.type || "application/octet-stream",
+                  data: btoa(binary),
+                };
+              }),
+            );
+            if (
+              files.reduce((sum, file) => sum + file.data.length, 0) >
+              28_000_000
+            )
+              throw new Error("Attachments are too large");
+            respond({
+              ok: true,
+              result: await browserAgentApi.uploadAttachments(sessionId, files),
             });
           } else if (data.api === "linked-document") {
             const payload = data.payload;
@@ -438,7 +487,16 @@ export default function WebSkillFrame({
     };
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
-  }, [browserProfile, locale, mode, onSessionExpired, send, sessionId, userId]);
+  }, [
+    browserProfile,
+    locale,
+    mode,
+    onSessionExpired,
+    pickAttachFiles,
+    send,
+    sessionId,
+    userId,
+  ]);
 
   useEffect(() => {
     if (!ready) return;
@@ -457,63 +515,90 @@ export default function WebSkillFrame({
   }
 
   return (
-    <AssistantFrame
-      placement={placement}
-      onPlacementChange={onPlacementChange}
-      placementKey="octop:webskill-browser:ai-placement"
-      storageKey="octop:webskill-browser:ai-panel"
-      placementLocked={placementLocked}
-      placements={["right", "bottom", "float"]}
-      hidden={hidden}
-      title={null}
-      overlayHeader
-      onClose={onClose}
-      bodyClassName="webskill-frame-body"
-    >
-      <div
-        onPointerDownCapture={() => requestAgentControl()}
-        style={{
-          height: "100%",
-          minHeight: 0,
-          position: "relative",
-          background: "var(--fn-bg-primary)",
-        }}
+    <>
+      <AssistantFrame
+        placement={placement}
+        onPlacementChange={onPlacementChange}
+        placementKey="octop:webskill-browser:ai-placement"
+        storageKey="octop:webskill-browser:ai-panel"
+        placementLocked={placementLocked}
+        placements={["right", "bottom", "float"]}
+        hidden={hidden}
+        title={null}
+        overlayHeader
+        onClose={onClose}
+        bodyClassName="webskill-frame-body"
       >
-        {(!sessionId || !ready) && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              zIndex: 1,
-              display: "grid",
-              placeItems: "center",
-              background: "var(--fn-bg-primary)",
-            }}
-          >
-            <Spin
-              tip={
-                sessionId ? t("webskill.loading") : t("webskill.startRequired")
-              }
+        <div
+          onPointerDownCapture={() => requestAgentControl()}
+          style={{
+            height: "100%",
+            minHeight: 0,
+            position: "relative",
+            background: "var(--fn-bg-primary)",
+          }}
+        >
+          {(!sessionId || !ready) && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 1,
+                display: "grid",
+                placeItems: "center",
+                background: "var(--fn-bg-primary)",
+              }}
+            >
+              <Spin
+                tip={
+                  sessionId
+                    ? t("webskill.loading")
+                    : t("webskill.startRequired")
+                }
+              />
+            </div>
+          )}
+          {sessionId && browserActive && (
+            <iframe
+              key={sessionId}
+              ref={frameRef}
+              title="WebSkill"
+              src={frameUrl}
+              onLoad={() => setFrameLoaded(true)}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
+              style={{
+                display: "block",
+                width: "100%",
+                height: "100%",
+                border: 0,
+              }}
             />
-          </div>
-        )}
-        {sessionId && browserActive && (
-          <iframe
-            key={sessionId}
-            ref={frameRef}
-            title="WebSkill"
-            src={frameUrl}
-            onLoad={() => setFrameLoaded(true)}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
-            style={{
-              display: "block",
-              width: "100%",
-              height: "100%",
-              border: 0,
-            }}
-          />
-        )}
-      </div>
-    </AssistantFrame>
+          )}
+        </div>
+      </AssistantFrame>
+      <Modal
+        open={attachOpen}
+        title={t("webskill.attachTitle")}
+        footer={null}
+        onCancel={() => finishAttach(null)}
+        destroyOnHidden
+      >
+        <p>{t("webskill.attachHint")}</p>
+        <input
+          ref={attachInputRef}
+          type="file"
+          multiple
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            finishAttach(files.length > 0 ? files : null);
+          }}
+        />
+        <div style={{ marginTop: 16, textAlign: "right" }}>
+          <Button onClick={() => finishAttach(null)}>
+            {t("webskill.attachCancel")}
+          </Button>
+        </div>
+      </Modal>
+    </>
   );
 }

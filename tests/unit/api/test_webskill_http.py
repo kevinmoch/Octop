@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from urllib.parse import urlencode
@@ -106,6 +107,32 @@ async def test_perceive_grant_execute_and_audit(
         assert (
             await client.get(f"/api/browser-agent/sessions/{session_id}", headers=auth)
         ).status_code == 404
+
+
+async def test_attachment_upload_is_bounded_and_consumed_by_attach(
+    tmp_path, isolated_registry: BrowserAgentRegistry
+) -> None:
+    async with octop_client(tmp_path) as (client, _server):
+        await bootstrap_admin(client, tmp_path)
+        auth = await auth_header(client)
+        session_id = await new_session(client, auth)
+        payload = base64.b64encode(b"hello").decode("ascii")
+        uploaded = await client.post(
+            f"/api/browser-agent/sessions/{session_id}/attachments",
+            headers={**auth, **ORIGIN_HEADERS},
+            json={"files": [{"name": "a.txt", "type": "text/plain", "data": payload}]},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        assert uploaded.json()["count"] == 1
+        session = next(iter(isolated_registry._sessions.values()))  # noqa: SLF001
+        assert session.attachments[0]["data"] == b"hello"
+
+        invalid = await client.post(
+            f"/api/browser-agent/sessions/{session_id}/attachments",
+            headers={**auth, **ORIGIN_HEADERS},
+            json={"files": [{"name": "a.txt", "data": "not-base64"}]},
+        )
+        assert invalid.status_code == 400
 
 
 async def test_origin_ticket_replay_permission_and_cross_user_denied(

@@ -92,6 +92,18 @@ class LinkedDocumentBody(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
 
 
+class AttachmentFileBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(default="application/octet-stream", alias="type", max_length=128)
+    data: str = Field(min_length=1, max_length=14_000_000)
+
+
+class AttachmentsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    files: list[AttachmentFileBody] = Field(min_length=1, max_length=5)
+
+
 def _origin_parts(value: str) -> tuple[str, str, int | None]:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
@@ -264,6 +276,61 @@ async def issue_ticket(
         check_request_origin(request)
         ticket = browser_agent_registry.issue_ticket(session_id, user.id)
         return {"ticket": ticket, "expiresIn": TICKET_TTL_SECONDS}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/attachments",
+    summary="Upload Octop-only files for the next attach action",
+)
+async def upload_attachments(
+    session_id: str,
+    body: AttachmentsBody,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        decoded: list[dict[str, Any]] = []
+        total = 0
+        for item in body.files:
+            try:
+                raw = base64.b64decode(item.data, validate=True)
+            except (binascii.Error, ValueError) as error:
+                raise BrowserAgentError(
+                    "ATTACHMENT_INVALID", "Attachment data is not valid base64"
+                ) from error
+            total += len(raw)
+            if len(raw) > 10 * 1024 * 1024:
+                raise BrowserAgentError(
+                    "ATTACHMENT_TOO_LARGE", "Each attachment must be at most 10 MB"
+                )
+            decoded.append({"name": item.name, "type": item.content_type, "data": raw})
+        if total > 20 * 1024 * 1024:
+            raise BrowserAgentError("ATTACHMENT_TOO_LARGE", "Attachments must total at most 20 MB")
+        session.attachments = decoded
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.attachments.uploaded",
+            session.id,
+            {
+                "files": [
+                    {"name": item["name"], "type": item["type"], "bytes": len(item["data"])}
+                    for item in decoded
+                ]
+            },
+        )
+        return {
+            "files": [
+                {"name": item["name"], "type": item["type"], "bytes": len(item["data"])}
+                for item in decoded
+            ],
+            "count": len(decoded),
+        }
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

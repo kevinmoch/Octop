@@ -18,7 +18,18 @@ MAX_SESSIONS_PER_USER = 8
 MAX_TICKETS_PER_SESSION = 4
 MAX_MODEL_TARGETS = 8
 SUPPORTED_ACTIONS = frozenset(
-    {"click", "fill", "select", "scroll", "back", "set", "hover", "drag", "submit"}
+    {
+        "click",
+        "fill",
+        "select",
+        "scroll",
+        "back",
+        "set",
+        "hover",
+        "drag",
+        "submit",
+        "attach",
+    }
 )
 DOCUMENT_REF = "@document"
 
@@ -69,6 +80,9 @@ class BrowserAgentSession:
     downloads_initialized: bool = False
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
+    # Octop-only attachment bridge: bytes uploaded by the host immediately
+    # before an attach action, consumed by that action.
+    attachments: list[dict[str, Any]] = field(default_factory=list)
     connection_id: str | None = None
     has_connected: bool = False
     stream_connection_ids: set[str] = field(default_factory=set)
@@ -139,6 +153,8 @@ def action_digest(request: dict[str, Any]) -> str:
         raise BrowserAgentError("ACTION_INVALID", "Set requires true or false")
     if action == "drag" and (not isinstance(value, str) or not value):
         raise BrowserAgentError("ACTION_INVALID", "Drag requires a destination reference")
+    if action == "attach" and value is not None:
+        raise BrowserAgentError("ACTION_INVALID", "Attach files are selected by the host")
     normalized = {
         "ref": ref,
         "action": action,

@@ -5798,6 +5798,9 @@
     "emptyFooterHint": "Agent will use the browser automatically when needed",
     "streamError": "Browser stream connection failed",
     "handoffFailed": "Failed to switch control",
+    "attachTitle": "Select files to attach",
+    "attachHint": "The assistant cannot choose files for you. Select the files this action should upload.",
+    "attachCancel": "Cancel",
     "viewportAuto": "Auto-fit",
     "state": {
       "idle": "Idle",

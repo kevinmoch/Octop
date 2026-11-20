@@ -134,6 +134,17 @@ export const browserAgentApi = {
     request<{ downloads: BrowserAgentDownload[] }>(
       `/browser-agent/sessions/${encodeURIComponent(sessionId)}/downloads`,
     ),
+  uploadAttachments: (
+    sessionId: string,
+    files: Array<{ name: string; type: string; data: string }>,
+  ) =>
+    request<{
+      files: Array<{ name: string; type: string; bytes: number }>;
+      count: number;
+    }>(`/browser-agent/sessions/${encodeURIComponent(sessionId)}/attachments`, {
+      method: "POST",
+      body: JSON.stringify({ files }),
+    }),
   readDownload: (sessionId: string, downloadId: string) =>
     request<{ contentType: string; bytes: number; data: string }>(
       `/browser-agent/sessions/${encodeURIComponent(

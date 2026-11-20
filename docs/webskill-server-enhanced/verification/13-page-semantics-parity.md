@@ -76,7 +76,7 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 - action 句柄只发给可操作 role、图片取像和可滚动容器；generic 容器仍可读，
   但不发 ref。
 - ref 跨感知保留；同一签名复用 ref；DOM 节点替换后按 path/tag/role/name 验证恢复。
-- 新增 set/hover/drag/submit；attach 明确不在 P1 能力面内。
+- 新增 set/hover/drag/submit；attach 以 Octop-only host 文件桥实现，SDK 未改。
 - tab 切换优先于模型写锁；hover/resize 不抢 owner；手动点击新窗口会自动跟随 target。
 
 ## 3. 仍存在的差异（必须明确）
@@ -90,7 +90,7 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 | action scope | 独立于读取范围 | 当前 body 读取/操作，敏感仅部分剪枝 | 边界比参考实现宽 |
 | 子树续读 / 分页 | 支持 ref 子树 + cursor | 明确 `PERCEPTION_SUBTREE_UNSUPPORTED` | 大页面只能整页读 |
 | 嵌套帧 | 自动发现并可路由 | 仅当前选中帧/有限 OOPIF 路由 | 跨 iframe 控件可能读不到 |
-| 动作集合 | click/fill/select/set/scroll/hover/drag/attach | 已补 set/hover/drag/submit；attach 不支持 | 附件类技能无法直接迁移 |
+| 动作集合 | click/fill/select/set/scroll/hover/drag/attach | 已补 set/hover/drag/submit；attach 为 Octop-only host 桥 | attach 技能只可迁移到 Octop，extension 不通用 |
 | scroll | 找真实滚动容器 + 静默等待 | 已按滚动容器计算步长并回读 atEnd/movedBy；未做完整静默窗口 | 虚拟列表异步加载仍可能读到旧行 |
 | 新建 Tab | tab watcher + workset | stream target activation | 已补主路径，模型侧 workset 语义仍弱 |
 
@@ -102,8 +102,8 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 3. 技能中的 target 使用 `{role, name, frame}`；同页多个同名控件必须在技能里
    补充所在区域/上下文（当前 SDK trace 只有 role/name/frame，复杂表单需模型
    在步骤描述里写清区域）。
-4. 复选框使用 `set`、附件使用 `attach`、拖拽使用 `drag`；P1 当前不承诺这些，
-   迁移到 Octop 前应降级为确认后的 click/fill 或明确标记不支持。
+4. 复选框使用 `set`、附件使用 `attach`、拖拽使用 `drag`；attach 是 Octop-only
+   文件桥，迁移到其他宿主前必须降级或明确标记不支持。
 5. 录制回放只能作为 Octop 内部验证工具；跨宿主迁移必须重新生成/确认动作。
 
 ## 5. 建议的回归矩阵
@@ -126,11 +126,13 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 |---|---|
 | `test_webskill_page_agent.py` | 页面读取、frame、图片、字段标题、自定义 select、字段名称/值 |
 | `test_webskill_capture.py` | 图片取像、预算、OOPIF、title promotion |
-| `test_webskill_page_semantics.py` | ref 复用/签名恢复、live value、select 回读、generic promotion、动作集合与 attach 拒绝 |
+| `test_webskill_page_semantics.py` | ref 复用/签名恢复、live value、select 回读、generic promotion、动作集合 |
+| `test_webskill_page_actions.py` | set/hover/submit/scroll/drag/attach 等执行路径 |
+| `test_webskill_http.py` | attachments 上传/校验 |
 | `test_webskill_page_actions.py` | set 切换/noop、hover、submit、scroll 回读、drag 目标解析与鼠标序列 |
 | `test_browser_stream_frames.py` | stream frame/nav 基础行为 |
 
-当前共 45 个相关测试通过；`attach`、完整 flat→tree、签名路径变化后的恢复、
+当前共 62 个相关测试通过；`attach`、完整 flat→tree、签名路径变化后的恢复、
 跨 iframe 自动发现和完整滚动静默窗口仍是明确的后续项。
 
 ## 7. 结论

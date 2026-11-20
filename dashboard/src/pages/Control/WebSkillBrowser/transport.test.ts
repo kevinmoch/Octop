@@ -21,6 +21,19 @@ class FakeWebSocket {
   send(raw: string) {
     const request = JSON.parse(raw) as Record<string, unknown>;
     this.requests.push(request);
+    if (request.type === "execute") {
+      queueMicrotask(
+        () =>
+          this.onmessage?.({
+            data: JSON.stringify({
+              type: "execute-result",
+              outcome: { ok: true, target: { role: "button", name: "Attach" } },
+              requestId: request.requestId,
+            }),
+          }),
+      );
+      return;
+    }
     const child = request.scope !== undefined && "frames" in request.scope;
     const reply = child
       ? {
@@ -92,6 +105,49 @@ describe("OctopPageAgentTransport frame routing", () => {
     expect(requests[1]!.scope).toEqual({
       frames: [{ frame: ["iframe#same-frame"], include: ["body"] }],
     });
+    transport.dispose();
+  });
+
+  it("asks the host for files before an attach action", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    FakeWebSocket.instances = [];
+    const calls: string[] = [];
+    const bridge = {
+      call: vi.fn(async (api: string) => {
+        calls.push(api);
+        if (api === "attach-files") return { count: 1 };
+        if (api === "grant") return { grant: "test-grant" };
+        return { ticket: "test-ticket" };
+      }),
+    } as unknown as OctopHostBridge;
+    const transport = new OctopPageAgentTransport(bridge);
+
+    const reply = await transport.send({
+      type: "execute",
+      request: { ref: "ws_ref", action: "attach" },
+    });
+
+    expect(reply.type).toBe("execute-result");
+    expect(calls).toContain("attach-files");
+    expect(calls.indexOf("attach-files")).toBeLessThan(calls.indexOf("grant"));
+    transport.dispose();
+  });
+
+  it("rejects attach when the user cancels file selection", async () => {
+    const bridge = {
+      call: vi.fn(async (api: string) =>
+        api === "attach-files"
+          ? { cancelled: true }
+          : { ticket: "test-ticket" },
+      ),
+    } as unknown as OctopHostBridge;
+    const transport = new OctopPageAgentTransport(bridge);
+    await expect(
+      transport.send({
+        type: "execute",
+        request: { ref: "ws_ref", action: "attach" },
+      }),
+    ).rejects.toThrow("no files were selected");
     transport.dispose();
   });
 

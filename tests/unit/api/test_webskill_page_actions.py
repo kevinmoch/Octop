@@ -82,6 +82,8 @@ class ActionClient:
         if method == "Runtime.callFunctionOn":
             declaration = str(params.get("functionDeclaration") or "")
             self.functions.append(declaration)
+            if "new DataTransfer()" in declaration and "this.files" in declaration:
+                return {"result": {"value": {"ok": True, "count": 1}}}
             if "HTMLInputElement.prototype" in declaration:
                 if self.fill_reason:
                     return {"result": {"value": {"ok": False, "reason": self.fill_reason}}}
@@ -189,6 +191,35 @@ def test_fill_uses_native_setter_and_reports_readonly() -> None:
     denied = _run(readonly, "fill", value="文本")
     assert denied["outcome"]["ok"] is False
     assert "read-only" in denied["outcome"]["reason"]
+
+
+def test_attach_consumes_host_selected_files() -> None:
+    client = ActionClient()
+    client.name = "附件"
+    session, grant, request, registry = _setup(client, "attach")
+    session.attachments = [{"name": "a.txt", "type": "text/plain", "data": b"hello"}]
+    browser = ActionBrowser(client)
+    original = page_agent.wait_for_new_page_target
+
+    async def no_new_target(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    page_agent.wait_for_new_page_target = no_new_target
+    try:
+        result = asyncio.run(
+            execute_action(
+                session,
+                request,
+                grant,
+                registry=registry,
+                resolver=_resolver(browser),
+                write_gate=lambda: True,
+            )
+        )
+    finally:
+        page_agent.wait_for_new_page_target = original
+    assert result["outcome"]["ok"] is True
+    assert session.attachments == []
 
 
 def test_click_uses_real_pointer_sequence() -> None:

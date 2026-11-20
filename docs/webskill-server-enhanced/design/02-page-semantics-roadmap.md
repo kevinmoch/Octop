@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 60 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 62 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -124,8 +124,9 @@
   `createRemotePageActionExecutor` 也没有 `pickFiles`。若只做 Octop 私有桥，可不改 SDK，
   但该 attach 不可复用、也不算与扩展宿主等价。
 
-**SDK 影响**：**是（若要求跨宿主可移植）**。需要扩展 PageAgent transport 的文件选择请求/应答，
-或让 host executor 提供 `pickFiles` 契约。若接受 Octop-only 旁路，则 SDK 不动但标记为宿主特有。
+**SDK 影响**：本节最初判断是可移植方案必须改 SDK；实际按用户决策采用 **Octop-only**：
+host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK 未修改。
+因此该能力可迁移性仅限 Octop，不能宣称与 extension 等价。
 
 ### 阶段 6：树、子树与分页
 
@@ -238,7 +239,7 @@
 - 阶段 2：基本完成（aria-hidden/hidden/inert/display/visibility、零尺寸、scope include/exclude 均已接入 ref 发放；执行前再次检查可见性；独立 actionScope 的 host 配置仍待补）
 - 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
 - 阶段 4：完成（同源嵌套 frame 自动发现、嵌套 frame refs、投影选择、OOPIF、动态导航失效、target workset 已有测试，共 20 项 frame/target 相关断言）
-- 阶段 5：待决策（attach 的可移植实现需要 SDK 文件选择协议；若接受 Octop-only 则不改 SDK）
+- 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
 - 阶段 6-9：未开始
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
@@ -281,3 +282,14 @@ SDK 的 `PageActionPolicy.scope` 未通过 remote execute 协议下传，因此�
 
 已有 `test_webskill_page_agent.py` 覆盖同源 frame 读取/动作、子 frame 导航失效、
 OOPIF attach/detach/导航、target workset、new target 激活。
+
+
+## 8. 阶段 5 验收证据（Octop-only）
+
+- 新增 `POST /api/browser-agent/sessions/{id}/attachments`：base64、单文件 10MB、
+  总量 20MB、同源/session/user 校验、审计只记录文件名/类型/大小。
+- `PageAgent.attach`：只接受 `<input type=file>`，用 `DataTransfer` 写入并 dispatch
+  input/change；执行后清空 pending files；无文件/非 file input 结构化失败。
+- `WebSkillFrame`：文件选择 Modal（中英双语），由用户手动选择。
+- `OctopPageAgentTransport`：attach 前通过 `attach-files` bridge 请求文件，父窗口上传后才 grant/execute。
+- 测试：attachments HTTP 上传/非法 base64、attach action、transport 调序与取消。

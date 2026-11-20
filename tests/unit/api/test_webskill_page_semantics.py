@@ -279,10 +279,9 @@ def test_parent_with_actionable_descendant_is_not_promoted_again() -> None:
 
 
 def test_action_contract_includes_set_hover_drag_submit_but_not_attach() -> None:
-    assert {"set", "hover", "drag", "submit"} <= SUPPORTED_ACTIONS
-    assert "attach" not in SUPPORTED_ACTIONS
+    assert {"set", "hover", "drag", "submit", "attach"} <= SUPPORTED_ACTIONS
     action_digest({"ref": "ws_action", "action": "set", "value": "true"})
     action_digest({"ref": "ws_action", "action": "drag", "value": "ws_drop"})
-    with pytest.raises(BrowserAgentError) as error:
-        action_digest({"ref": "ws_action", "action": "attach"})
-    assert error.value.code == "ACTION_UNSUPPORTED"
+    action_digest({"ref": "ws_action", "action": "attach"})
+    with pytest.raises(BrowserAgentError):
+        action_digest({"ref": "ws_action", "action": "attach", "value": "path"})

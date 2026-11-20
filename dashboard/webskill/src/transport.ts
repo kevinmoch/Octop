@@ -135,6 +135,15 @@ export class OctopPageAgentTransport implements PageAgentTransport {
         "The PageAgent transport is closed",
       );
     let grant: string | undefined;
+    if (request.type === "execute" && request.request.action === "attach") {
+      const selection = await this.bridge.call("attach-files", {});
+      if (!isRecord(selection) || selection.cancelled === true) {
+        throw new WebSkillError(
+          "TOOL_EXECUTION_FAILED",
+          "Attach was cancelled: no files were selected",
+        );
+      }
+    }
     if (request.type === "execute") {
       const reply = await this.bridge.call("grant", {
         request: request.request,

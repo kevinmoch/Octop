@@ -24,7 +24,8 @@ export type HostApi =
   | "pdf-extract"
   | "downloads-list"
   | "downloads-read"
-  | "linked-document";
+  | "linked-document"
+  | "attach-files";
 
 type HostRequest = {
   channel: typeof HOST_CHANNEL;
@@ -88,7 +89,8 @@ export function isHostRequest(value: unknown): value is HostRequest {
     value.api !== "pdf-extract" &&
     value.api !== "downloads-list" &&
     value.api !== "downloads-read" &&
-    value.api !== "linked-document"
+    value.api !== "linked-document" &&
+    value.api !== "attach-files"
   )
     return false;
   return typeof value.sessionId === "string" && value.sessionId.length <= 128;

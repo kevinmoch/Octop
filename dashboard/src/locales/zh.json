@@ -5798,6 +5798,9 @@
     "emptyFooterHint": "专家会在需要时自动使用浏览器",
     "streamError": "浏览器流连接失败",
     "handoffFailed": "控制权切换失败",
+    "attachTitle": "选择要上传的文件",
+    "attachHint": "助手不能代你选择文件；请选择本次操作要上传的文件。",
+    "attachCancel": "取消",
     "viewportAuto": "自适配",
     "state": {
       "idle": "空闲",
