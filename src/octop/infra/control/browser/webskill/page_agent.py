@@ -41,8 +41,8 @@ from .sessions import (
 from .targets import (
     admit_model_target,
     attach_model_target,
-    newly_opened_page_target,
     page_target_ids,
+    wait_for_new_page_target,
 )
 
 SessionResolver = Callable[..., Awaitable[Any]]
@@ -844,9 +844,9 @@ async def execute_action(
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
                 outcome["documentUrl"] = current_url
-            new_target = await newly_opened_page_target(
-                browser._internal.client,
-                previous_target_ids,  # noqa: SLF001
+            new_target = await wait_for_new_page_target(
+                browser._internal.client,  # noqa: SLF001
+                previous_target_ids,
             )
             if new_target is not None:
                 # A user click that opens a tab is a foreground navigation in a

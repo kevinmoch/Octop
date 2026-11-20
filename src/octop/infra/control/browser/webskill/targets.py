@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .oopif import OopifSession, attach_page_target
@@ -53,3 +54,21 @@ async def newly_opened_page_target(client: Any, previous: set[str]) -> str | Non
     if len(created) != 1:
         return None
     return next(iter(created))
+
+
+async def wait_for_new_page_target(
+    client: Any, previous: set[str], *, timeout: float = 1.2
+) -> str | None:
+    """Wait briefly for the tab a click just opened.
+
+    Chrome creates the target asynchronously after the input event; reading
+    Target.getTargets immediately can miss it and the model then perceives the
+    old page and clicks again, producing duplicate tabs.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        target = await newly_opened_page_target(client, previous)
+        if target is not None or loop.time() >= deadline:
+            return target
+        await asyncio.sleep(0.1)

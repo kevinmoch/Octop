@@ -828,13 +828,15 @@ async def test_oopif_read_grant_click_and_detach(
     session = registry.create(1, "user-1")
     resolver = resolver_for(browser)
     target_clients: list[object] = []
-    original_target_diff = page_agent_module.newly_opened_page_target
+    original_target_diff = page_agent_module.wait_for_new_page_target
 
-    async def observe_target_diff(client: object, previous: set[str]) -> str | None:
+    async def observe_target_diff(
+        client: object, previous: set[str], *, timeout: float = 1.2
+    ) -> str | None:
         target_clients.append(client)
-        return await original_target_diff(client, previous)
+        return await original_target_diff(client, previous, timeout=timeout)
 
-    monkeypatch.setattr(page_agent_module, "newly_opened_page_target", observe_target_diff)
+    monkeypatch.setattr(page_agent_module, "wait_for_new_page_target", observe_target_diff)
     perceived = await read_page(
         session,
         {
