@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -703,6 +704,7 @@ async def page_agent_ws(
     try:
         async for raw in websocket.iter_text():
             request_id: str | None = None
+            started = time.perf_counter()
             try:
                 if len(raw) > MAX_PAGE_AGENT_MESSAGE_CHARS:
                     raise BrowserAgentError("REQUEST_INVALID", "The PageAgent request is too large")
@@ -745,6 +747,13 @@ async def page_agent_ws(
                         message,
                         resolver=resolve_harness_session,
                         registry=browser_agent_registry,
+                    )
+                    logger.info(
+                        "WebSkill perceive session=%s duration_ms=%d nodes=%d targets=%d",
+                        live.id,
+                        int((time.perf_counter() - started) * 1000),
+                        len(reply.get("result", {}).get("nodes", [])),
+                        len(reply.get("targets", [])),
                     )
                 elif message.get("type") == "capture-image":
                     if set(message) - {"type", "requestId", "ref", "maxBytes"}:
@@ -791,6 +800,7 @@ async def page_agent_ws(
                             code=error.code,
                             grant=grant,
                             expected_document=expected_document,
+                            duration_ms=int((time.perf_counter() - started) * 1000),
                         )
                         raise
                     await _audit_ws(
@@ -800,6 +810,7 @@ async def page_agent_ws(
                         reply["outcome"],
                         grant=grant,
                         expected_document=expected_document,
+                        duration_ms=int((time.perf_counter() - started) * 1000),
                     )
                 else:
                     raise BrowserAgentError(
@@ -837,6 +848,7 @@ async def _audit_ws(
     code: str | None = None,
     grant: str | None = None,
     expected_document: Any = None,
+    duration_ms: int | None = None,
 ) -> None:
     server = websocket.app.state.octop_server
     if server.services is None:
@@ -851,6 +863,7 @@ async def _audit_ws(
             {
                 "action": request.get("action"),
                 "ok": outcome.get("ok"),
+                **({"durationMs": duration_ms} if duration_ms is not None else {}),
                 **({"code": public_error_code(code)} if code is not None else {}),
                 **(
                     {

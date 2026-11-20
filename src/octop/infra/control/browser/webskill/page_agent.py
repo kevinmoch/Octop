@@ -2851,9 +2851,16 @@ async def execute_action(
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
                 outcome["documentUrl"] = current_url
-            new_target = await wait_for_new_page_target(
-                browser._internal.client,  # noqa: SLF001
-                previous_target_ids,
+            # Only click/submit can open a foreground tab. Waiting the full
+            # target-discovery budget after fill/select/hover/scroll made every
+            # non-navigation action ~1.2s slower for no benefit.
+            new_target = (
+                await wait_for_new_page_target(
+                    browser._internal.client,  # noqa: SLF001
+                    previous_target_ids,
+                )
+                if action in {"click", "submit"}
+                else None
             )
             if new_target is not None:
                 # A user click that opens a tab is a foreground navigation in a

@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 72 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 73 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -410,3 +410,19 @@ button 测试拖拽
 - 不可见滚动容器不发放 ref。
 - 测试：`test_scrollable_elements_are_not_dropped_when_they_have_no_role`、
   `test_scrollable_probe_reports_backend_directions`。
+
+
+## 18. 阶段 11：性能、可观测性与 smoke
+
+- execute 审计增加 `durationMs`；perceive 输出结构化日志：
+  `session / duration_ms / nodes / targets`，不记录页面文本。
+- 修复无意义等待：只有 click/submit 等待新 tab；fill/select/hover/set/scroll
+  不再白等 1.2s。
+- 新增 smoke 脚本 `scripts/webskill-p1/page_semantics_smoke.py`：
+  真实仪表盘登录态 → 创建 session → 感知 → select/fill/hover（同值，不发起业务写变更）
+  → 输出 JSON；失败退出非 0。
+- 真实 smoke：
+  - perceive 81ms，81 nodes / 46 targets；
+  - select 410ms，fill 38ms，hover 22ms；
+  - owner=agent。
+- 动作审计测试断言 `durationMs` 为非负整数。

@@ -95,6 +95,8 @@ async def test_perceive_grant_execute_and_audit(
             assert row["documentTarget"] == "target-1"
             assert row["grantDigest"] == expected_grant
             assert row["ref"] == ref
+            assert isinstance(row.get("durationMs"), int)
+            assert row["durationMs"] >= 0
         payloads = "\n".join(row.payload or "" for row in audit)
         assert grant not in payloads
         assert ticket not in payloads
