@@ -234,7 +234,7 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 
 ## 4. 当前状态
 
-- 阶段 0：完成（45 个定向测试 + parity 文档）
+- 阶段 0：完成（70 个定向测试 + parity 文档）
 - 阶段 1：完成（click/fill/select/set/hover/drag/submit/scroll 均有执行级测试；fill 使用原生 setter；hover 走真实鼠标；drag 优先 HTML5；scroll 有静默窗口）
 - 阶段 2：完成（aria-hidden/hidden/inert/display/visibility、零尺寸、独立 actionScope include/exclude；执行前再次校验可见性与 action scope）
 - 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
@@ -245,7 +245,6 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 8：完成（SDK `createDomPerceptionReader` 原生控件 fixture 与 Octop 期望 role/name 一致；target 契约无 selector/坐标）
 - 阶段 9：完成自动/只读矩阵（现场巡检问题、工程管理；真实动作矩阵；release gate；完整业务写入回归仍建议上线前执行）
 
-- 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
 ## 5. 阶段 1/2 验收证据（本轮）
 
