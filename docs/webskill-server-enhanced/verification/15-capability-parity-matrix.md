@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   38 项  79%
-🟡 部分对齐    8 项  17%
+✅ 完全对齐   39 项  81%
+🟡 部分对齐    7 项  15%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -42,7 +42,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 15 | 嵌套 frame 自动发现 | 🟡 | 递归 `discover_frame_routes`、OOPIF | 读取仍需按 frame 选择，不是一次全树 |
 | 16 | modal/frame provenance | 🟡 | modal provenance + frame 字段；inline-frame provenance 未做 |
 | 17 | 子树续读 | ✅ | `perceive_page(ref=...)` | — |
-| 18 | paging | 🟡 | 宿主注入了 `pagePerceptionPaging`，SDK 侧有 `segmentPerception` | 没有 Octop 侧 cursor UI，也没有独立续读验收；A-359 仍 N/A |
+| 18 | paging | ✅ | 真实 1600 个按钮页面，三段落：0 / 1213 / 387，游标续读连续无重复；修复了 1500 硬上限 | — |
 | 19 | ref 跨感知复用 | ✅ | `PageRef` signature 复用 | — |
 | 20 | path 改变后的恢复 | 🟡 | 唯一 role/name/href 恢复 | 未覆盖行/列表上下文签名 |
 | 21 | 同名歧义拒绝 | ✅ | 唯一匹配才恢复，否则 stale | — |
@@ -397,3 +397,45 @@ SDK agent 测试：
 - 回归测试：`87 passed`
 
 这直接补上了技能迁移契约里 `{role,name,frame}` 的 frame 部分。
+
+
+## 18. Paging 端到端验收（2026-11-21）
+
+### 根因
+
+真实大页面（1600 个 `Paging node ####` 按钮）第一次感知返回：
+
+```text
+PERCEPTION_FAILED — The document has more than 1500 readable controls;
+it will not be silently truncated.
+```
+
+Octop `read_page` 的 `MAX_P1_NODES = 1500` 在 SDK 分段之前直接拒绝了页面，
+因此 `pagePerceptionPaging` 永远没有机会执行。
+
+### 修复
+
+把安全上限提升到 `50_000`，并注明必须高于 SDK 默认分段预算
+（`maxNodes=1500`），让 SDK 负责分段；超过 50k 仍明确拒绝，不静默截断。
+
+### 真实结果
+
+```text
+Segment 1: 0 个 Paging 按钮（问题登记表单）
+Segment 2: 1213 个
+Segment 3: 387 个
+总计: 1600 个
+0001–1600 连续，无缺口、无重复
+segment 3 nodesRemaining: 0
+```
+
+模型显示调用了三次 `perceive_page`，每次带上一段的 cursor。
+
+### 当前 paging 证据
+
+- 首次感知：`segment.index=1/3`，有 cursor
+- 第二次：`segment.index=2/3`，有 cursor
+- 第三次：`segment.index=3/3`，无 cursor
+- 1600 个节点全部读到
+
+这补上了 A-359 的 paging 子项；subtree 子项仍按原测试覆盖。

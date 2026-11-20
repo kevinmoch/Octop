@@ -53,7 +53,12 @@ from .targets import (
 
 SessionResolver = Callable[..., Awaitable[Any]]
 WriteGate = Callable[[], bool]
-MAX_P1_NODES = 1500
+# Safety valve for pathological documents. This must stay well above the SDK
+# paging budget (default maxNodes=1500): the SDK segments the full tree, so a
+# hard cap at the segment size would turn every large page into PERCEPTION_FAILED
+# before the cursor path can run. Above this bound we still refuse rather than
+# silently truncate; the error names the limit.
+MAX_P1_NODES = 50_000
 ACTIONABLE_ROLES = {
     "button",
     "checkbox",
