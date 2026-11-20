@@ -243,7 +243,7 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 6：完成（树形 children、ref 子树、客户端 paging 输入树已具备；真实页面 roots=63/flat=83）
 - 阶段 7：完成（path/tag/role/name/href 唯一恢复；歧义拒绝）
 - 阶段 8：完成（SDK `createDomPerceptionReader` 原生控件 fixture 与 Octop 期望 role/name 一致；target 契约无 selector/坐标）
-- 阶段 9：完成本轮闸门（真实表单/下拉/附件/树/动作矩阵 + release gate 测试；完整业务回归仍建议上线前执行）
+- 阶段 9：完成自动/只读矩阵（现场巡检问题、工程管理；真实动作矩阵；release gate；完整业务写入回归仍建议上线前执行）
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
@@ -377,3 +377,11 @@ button 测试拖拽
   - select 问题属性仍 ok。
 - Transport 默认向 perceive 注入 `{include:["body"]}`，host 配置与
   `PageActionPolicy.scope` 可以各自装配。
+
+
+## 15. 业务页面只读矩阵（阶段 9）
+
+- 现场巡检问题：81 nodes / 46 targets，owner=agent。
+- 工程管理：214 nodes / 188 targets，读取成功，无写操作。
+- 切回现场巡检问题：81 nodes / 46 targets，页面恢复。
+- 无 SDK 改动。
