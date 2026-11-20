@@ -522,6 +522,45 @@ def _file_inputs(root: dict[str, Any], excluded: set[int]) -> list[dict[str, Any
     return files
 
 
+def _scrollable_elements(
+    root: dict[str, Any], excluded: set[int], scrollable: dict[int, list[str]]
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+
+    def visit(node: dict[str, Any]) -> None:
+        node_id = node.get("nodeId")
+        backend = node.get("backendNodeId")
+        attrs = _attributes(node)
+        if (
+            isinstance(node_id, int)
+            and isinstance(backend, int)
+            and backend in scrollable
+            and node_id not in excluded
+        ):
+            result.append(
+                {
+                    "tag": str(node.get("nodeName") or "").lower(),
+                    "role": str(attrs.get("role", "")).lower() or "generic",
+                    "node_id": node_id,
+                    "accessibleName": (
+                        attrs.get("aria-label") or attrs.get("title") or attrs.get("name") or ""
+                    ),
+                    "scrollable": scrollable[backend],
+                    "backendNodeId": backend,
+                }
+            )
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+        content = node.get("contentDocument")
+        if isinstance(content, dict):
+            visit(content)
+
+    visit(root)
+    return result
+
+
 def _text_content(node: dict[str, Any]) -> str:
     parts: list[str] = []
 
@@ -872,6 +911,77 @@ async def _click_listener_backends(client: Any) -> set[int]:
             )
 
 
+_SCROLLABLE_PROBE_JS = r"""(() => {
+    const scrolls = (value) => value === 'auto' || value === 'scroll' || value === 'overlay';
+    let count = 0;
+    for (const el of document.querySelectorAll('*')) {
+        if (count >= 8000) break;
+        const overflowsX = el.scrollWidth > el.clientWidth;
+        const overflowsY = el.scrollHeight > el.clientHeight;
+        if (!overflowsX && !overflowsY) continue;
+        const style = getComputedStyle(el);
+        const directions = [];
+        if (overflowsX && scrolls(style.overflowX)) {
+            if (el.scrollLeft > 0) directions.push('left');
+            if (el.scrollLeft < el.scrollWidth - el.clientWidth - 1) directions.push('right');
+        }
+        if (overflowsY && scrolls(style.overflowY)) {
+            if (el.scrollTop > 0) directions.push('up');
+            if (el.scrollTop < el.scrollHeight - el.clientHeight - 1) directions.push('down');
+        }
+        if (directions.length > 0) {
+            el.setAttribute('data-octop-scroll-probe', directions.join(','));
+            count += 1;
+        }
+    }
+    return count;
+})()"""
+
+
+async def _scrollable_backends(client: Any) -> dict[int, list[str]]:
+    marked: dict[int, list[str]] = {}
+    try:
+        probe = await client.send(
+            "Runtime.evaluate",
+            {"expression": _SCROLLABLE_PROBE_JS, "returnByValue": True},
+        )
+        if not isinstance(probe.get("result", {}).get("value"), int):
+            return marked
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = raw.get("root", {})
+        if not isinstance(root, dict):
+            return marked
+
+        def visit(node: dict[str, Any]) -> None:
+            attrs = _attributes(node)
+            value = attrs.get("data-octop-scroll-probe", "")
+            backend = node.get("backendNodeId")
+            if value and isinstance(backend, int):
+                marked[backend] = [
+                    direction
+                    for direction in value.split(",")
+                    if direction in {"left", "right", "up", "down"}
+                ]
+            for key in ("children", "shadowRoots"):
+                for child in node.get(key, []):
+                    if isinstance(child, dict):
+                        visit(child)
+
+        visit(root)
+        return marked
+    except Exception:  # noqa: BLE001 - scrollability is supplemental metadata
+        return marked
+    finally:
+        with contextlib.suppress(Exception):
+            await client.send(
+                "Runtime.evaluate",
+                {
+                    "expression": "document.querySelectorAll('[data-octop-scroll-probe]').forEach((el) => el.removeAttribute('data-octop-scroll-probe'))",
+                    "returnByValue": True,
+                },
+            )
+
+
 async def _action_visible(client: Any, backend_node_id: int) -> bool:
     """Action targets must occupy pixels, as in WebSkill's occupiesNoSpace gate."""
     try:
@@ -1077,6 +1187,7 @@ async def read_page(
                     scope_exclude = found_exclude or set()
         cursor_backends = await _cursor_pointer_backends(client)
         click_backends = await _click_listener_backends(client)
+        scrollable_backends = await _scrollable_backends(client)
         promoted = _promoted_elements(
             projected_root,
             cursor_backends=cursor_backends,
@@ -1134,6 +1245,16 @@ async def read_page(
                 existing["accessibleName"] = file_input["accessibleName"]
             elif file_input.get("node_id") not in known_nodes:
                 raw_elements.append(file_input)
+        by_node = {
+            element.get("node_id"): element
+            for element in raw_elements
+            if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+        }
+        for scrollable_element in _scrollable_elements(
+            projected_root, excluded, scrollable_backends
+        ):
+            if scrollable_element.get("node_id") not in by_node:
+                raw_elements.append(scrollable_element)
         if image_options is not None:
             known_nodes = {
                 element.get("node_id")
@@ -1246,6 +1367,8 @@ async def read_page(
                 str(element.get("tag") or "") == "input"
                 and str(element.get("type") or "").lower() == "file"
             )
+            scrollable = scrollable_backends.get(backend_node_id)
+            scrollable_ref = bool(scrollable and await _action_visible(client, backend_node_id))
             action_ref = (
                 role in ACTIONABLE_ROLES
                 and in_scope
@@ -1257,7 +1380,7 @@ async def read_page(
                     )
                 )
             )
-            needs_ref = action_ref or image_target
+            needs_ref = action_ref or image_target or scrollable_ref
             node = _node(element, None)
             node_ref: str | None = None
             if needs_ref:
@@ -1289,6 +1412,8 @@ async def read_page(
                 value = await _live_value(client, backend_node_id)
                 if value is not None:
                     node["value"] = value
+            if scrollable_ref:
+                node["scrollable"] = scrollable
             if _capturable_image(element):
                 node["capturable"] = True
                 image_candidates.append((node, node_ref or ""))

@@ -19,6 +19,8 @@ from octop.infra.control.browser.webskill.page_agent import (
     _promoted_elements,
     _recover_ref,
     _scope_selectors,
+    _scrollable_backends,
+    _scrollable_elements,
     _target,
     _within_scope,
 )
@@ -90,6 +92,59 @@ def test_signature_recovery_uses_dom_path_and_tag() -> None:
     assert recovered is not None
     assert recovered.backend_node_id == 20
     assert "DOM.getDocument" in client.calls
+
+
+def test_scrollable_elements_are_not_dropped_when_they_have_no_role() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "backendNodeId": 20,
+                "attributes": ["class", "list"],
+            }
+        ],
+    }
+    assert _scrollable_elements(root, set(), {20: ["down"]}) == [
+        {
+            "tag": "div",
+            "role": "generic",
+            "node_id": 2,
+            "accessibleName": "",
+            "scrollable": ["down"],
+            "backendNodeId": 20,
+        }
+    ]
+
+
+def test_scrollable_probe_reports_backend_directions() -> None:
+    class ScrollClient:
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method == "Runtime.evaluate":
+                return {"result": {"value": 1}}
+            if method == "DOM.getDocument":
+                return {
+                    "root": {
+                        "nodeId": 1,
+                        "nodeName": "#document",
+                        "children": [
+                            {
+                                "nodeId": 2,
+                                "backendNodeId": 20,
+                                "nodeName": "DIV",
+                                "attributes": [
+                                    "data-octop-scroll-probe",
+                                    "down,right",
+                                ],
+                            }
+                        ],
+                    }
+                }
+            raise AssertionError(method)
+
+    assert asyncio.run(_scrollable_backends(ScrollClient())) == {20: ["down", "right"]}
 
 
 def test_execution_revalidates_the_ref_against_the_action_scope() -> None:

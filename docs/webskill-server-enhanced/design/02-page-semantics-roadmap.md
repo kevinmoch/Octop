@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 70 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 72 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -384,3 +384,29 @@ button 测试拖拽
 - 工程管理：214 nodes / 188 targets，读取成功，无写操作。
 - 切回现场巡检问题：81 nodes / 46 targets，页面恢复。
 - 无 SDK 改动。
+
+## 16. 阶段 10：可滚动容器语义
+
+目标：对于无可访问名称、无 tabindex 的可滚动 generic 容器，也能给出
+`scrollable: ["left","right","up","down"]` 与可操作 ref，使 `scroll` 动作
+能够指向真实容器，而不是只能滚最近祖先。
+
+验收：
+- 元素自身 overflow 轴有溢出且样式允许滚动；
+- 方向按当前 scrollLeft/scrollTop 只报告还能继续的方向；
+- 不可见容器不发 ref；
+- scroll 动作后回读 movedBy/atEnd。
+
+
+## 17. 阶段 10 验收：可滚动 generic 容器
+
+- 新增 scrollable 探针：按元素自身 scrollTop/scrollLeft 与 overflow 轴
+  产出 `left/right/up/down`，只报告仍可继续的方向。
+- DOMBuilder 会压平无名 generic 容器；现在 `_scrollable_elements` 把它们补回，
+  并发放 scroll ref。
+- 真实 generic 容器（无 role/name/tabindex）：
+  - 感知节点 `{role:"generic", scrollable:["down"], ref:...}`；
+  - scroll down → `ok:true`，`movedBy:35`，`scrollTop:35`。
+- 不可见滚动容器不发放 ref。
+- 测试：`test_scrollable_elements_are_not_dropped_when_they_have_no_role`、
+  `test_scrollable_probe_reports_backend_directions`。
