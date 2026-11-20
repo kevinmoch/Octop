@@ -227,3 +227,29 @@ changes: select added=1/removed=1, fill added=1/removed=0
 
 注意：这是**语义步骤回放 harness**，不是完整的 SDK SKILL.md 解析器；
 技能仍由 Chatbot/模型按步骤调用 `perceive_page` + `act_on_page`。
+
+
+## 13. 真实安装 SKILL.md 的执行验证
+
+通过 Octop 控制台 › 安装与导出安装了一个最小 prompt-only 技能：
+
+`scripts/webskill-p1/fixtures/recorded-inspection-skill/SKILL.md`
+
+技能只指示模型：
+
+- `perceive_page`
+- 按 `role=combobox, name=问题属性` 选择 `规格不符`
+- 按 `role=textbox, name=问题描述` 填入 `测试`
+- 不保存、不提交
+
+真实 Octop Chatbot 执行结果：
+
+```text
+技能：recorded-inspection-page
+问题属性 = 规格不符
+问题描述 = 测试
+上下文 28.2k / 1049k
+```
+
+模型按语义目标执行，未使用 selector/坐标。运行中确认卡未出现，是因为该 origin+action
+已在此前测试中留下“不再询问”记忆；A-64/A-70 已单独验证确认卡路径。
