@@ -180,3 +180,25 @@ def test_capture_image_uses_same_origin_frame_absolute_box() -> None:
     )
     assert result["result"]["width"] == 100
     assert "Page.captureScreenshot" in client.calls
+
+
+def test_promotes_enterprise_title_cards_but_not_sensitive_inputs() -> None:
+    from octop.infra.control.browser.webskill.page_agent import _promoted_elements
+
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "attributes": ["title", "投资立项管理", "class", "rowItem"],
+            },
+            {
+                "nodeName": "INPUT",
+                "nodeId": 3,
+                "attributes": ["type", "password", "title", "password"],
+            },
+        ],
+    }
+    assert _promoted_elements(root) == [{"node_id": 2, "role": "link", "name": "投资立项管理"}]

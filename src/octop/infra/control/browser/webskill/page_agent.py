@@ -243,6 +243,60 @@ def _target(element: dict[str, Any], ref: str) -> dict[str, Any]:
     return target
 
 
+def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose clickable-looking divs the accessibility tree omits.
+
+    Enterprise UI kits often render menu cards as ``div[title]`` with a Vue
+    click handler and no ``role``/``href``. The SDK accessibility builder keeps
+    only native controls, so the model sees the page as textless while the
+    extension can act on those cards. Promote only elements with an explicit
+    title/button-like hint; this is a perception aid, not an authorization
+    bypass (the same scope and sensitive exclusions still apply).
+    """
+    promoted: list[dict[str, Any]] = []
+    sensitive_tags = {"script", "style", "template", "noscript"}
+
+    def visit(node: dict[str, Any]) -> None:
+        tag = str(node.get("nodeName") or "").lower()
+        if tag in sensitive_tags:
+            return
+        attrs = {
+            str(key): str(value)
+            for key, value in zip(
+                node.get("attributes", [])[::2], node.get("attributes", [])[1::2], strict=False
+            )
+        }
+        role = attrs.get("role", "").lower()
+        title = attrs.get("title", "").strip()
+        aria = attrs.get("aria-label", "").strip()
+        tabindex = attrs.get("tabindex", "")
+        # The nodeValue is usually on #text children, not the element; use the
+        # element's title/aria as the stable accessible name for these cards.
+        name = title or aria
+        if (
+            name
+            and tag not in {"html", "body", "iframe", "frame", "img", "input", "textarea", "select"}
+            and role not in {"button", "link", "tab", "menuitem", "option", "checkbox", "radio"}
+            and (title or aria or tabindex in {"0", "true"} or role in {"button", "link"})
+        ):
+            promoted.append(
+                {
+                    "node_id": node.get("nodeId"),
+                    "role": "link" if title else "button",
+                    "name": name[:300],
+                }
+            )
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                visit(child)
+        for shadow in node.get("shadowRoots", []):
+            if isinstance(shadow, dict):
+                visit(shadow)
+
+    visit(root)
+    return [node for node in promoted if isinstance(node.get("node_id"), int)]
+
+
 async def read_page(
     session: BrowserAgentSession,
     request: dict[str, Any],
@@ -362,6 +416,17 @@ async def read_page(
             ) from error
         if not isinstance(raw_elements, list):
             raise BrowserAgentError("PERCEPTION_FAILED", "The browser DOM response is invalid")
+        known_nodes = {
+            element.get("node_id") for element in raw_elements if isinstance(element, dict)
+        }
+        raw_elements = [
+            *raw_elements,
+            *[
+                element
+                for element in _promoted_elements(projected_root)
+                if element.get("node_id") not in known_nodes
+            ],
+        ]
         excluded = _sensitive_subtrees(projected_root)
         if any(element.get("framePath") for element in raw_elements if isinstance(element, dict)):
             raise BrowserAgentError(
