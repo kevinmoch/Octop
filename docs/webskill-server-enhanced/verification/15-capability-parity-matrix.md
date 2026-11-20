@@ -80,7 +80,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 43 | trace target `{role,name,frame}` | ✅ | `_target(frame=...)` 与 `_actual_target` 都回填 frame；release gate 新增 perception/action 两条断言 |
 | 44 | trace 不含 ref/selector/坐标 | ✅ | `_target` 契约测试 |
 | 45 | SDK 原生控件语义 parity | ✅ | `semanticParity.test.ts` 直接加载 SDK browser dist |
-| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture：SDK 无 hint → title span button / custom control `unlabeled control #2`；SDK + roleHints → combobox 但仍无 wrapper label；Octop `_field_controls` → combobox + `问题属性`。宿主标签推断是实际差异 |
+| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture 读取+动作均已对比：SDK action 能点击，但 action target 回退为 raw `generic` 且无 name；Octop target 由 ref signature/field bridge 得到 `combobox + 问题属性`。宿主标签推断和 action target 语义化仍是差异 |
 | 47 | 录制回放可迁移 | ➖ | Octop 录制回放是宿主内部机制，不是 WebSkill 技能契约 |
 | 48 | 文档/附件读取 | ✅ | 既有 readers、linked documents、PDF/DOCX/XLSX 测试 |
 
@@ -496,5 +496,24 @@ DOM 规则推断所有企业组件库的标题关系。
 新增 SDK 测试：
 
 ```text
-packages/browser/test/enterpriseControlParity.test.ts  2 passed
+packages/browser/test/enterpriseControlParity.test.ts  3 passed
 ```
+
+### 动作侧结果
+
+同一自定义控件：
+
+```text
+SDK:
+  executor.execute(click)  → ok
+  action target            → {role:"generic"}   // 无 name
+
+Octop:
+  read/field bridge        → combobox "问题属性"
+  action target            → role/name 来自 ref signature + wrapper label
+```
+
+SDK 的点击本身成功，但 action target 没有复用 reader 提升后的语义角色，
+也没有 wrapper label。这不是“点不到”，而是“点到了但 trace/审计里的目标身份丢失”。
+当前不修改 SDK；如果要统一，需要给 SDK action executor 增加 reader 语义 target
+查询，或让宿主注入 name hint。
