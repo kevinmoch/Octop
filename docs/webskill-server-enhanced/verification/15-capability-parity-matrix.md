@@ -362,7 +362,7 @@ Octop 本地已用修复后的 `@webskill/sdk` 构建产物重新构建
 当前 Octop 定向测试：
 
 ```text
-87 passed
+88 passed
 ```
 
 SDK agent 测试：
@@ -394,7 +394,7 @@ SDK agent 测试：
 - 新增 release gate 断言：
   - 感知 target 带 `frame: "iframe#orders"`
   - 动作 outcome target 带同一个 frame
-- 回归测试：`87 passed`
+- 回归测试：`88 passed`
 
 这直接补上了技能迁移契约里 `{role,name,frame}` 的 frame 部分。
 

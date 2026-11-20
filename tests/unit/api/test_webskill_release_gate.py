@@ -6,7 +6,12 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
-from octop.infra.control.browser.webskill.page_agent import _actual_target, _nest_nodes, _target
+from octop.infra.control.browser.webskill.page_agent import (
+    MAX_P1_NODES,
+    _actual_target,
+    _nest_nodes,
+    _target,
+)
 from octop.infra.control.browser.webskill.sessions import (
     SUPPORTED_ACTIONS,
     DocumentIdentity,
@@ -79,3 +84,9 @@ def test_action_outcome_target_carries_the_frame_label() -> None:
         _actual_target(SimpleNamespace(), entry, document, Client())  # type: ignore[arg-type]
     )
     assert target == {"role": "button", "name": "保存", "frame": "iframe#orders"}
+
+
+def test_p1_read_limit_does_not_preempt_sdk_paging() -> None:
+    # SDK's default segment budget is 1500 nodes; the Octop safety valve must sit
+    # above it or a large page fails before segmentPerception can emit a cursor.
+    assert MAX_P1_NODES > 1500
