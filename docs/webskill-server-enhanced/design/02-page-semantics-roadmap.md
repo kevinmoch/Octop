@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 50 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 54 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -234,8 +234,8 @@
 ## 4. 当前状态
 
 - 阶段 0：完成（45 个定向测试 + parity 文档）
-- 阶段 1：基本完成（fill 原生 setter、scroll 静默窗口、真实 hover、HTML5 drag、set/submit 均已有执行级测试；仍建议补真实控件矩阵）
-- 阶段 2：部分完成（action ref 已加布局/零尺寸检查；include/exclude scope 已用于 ref 发放；执行时实时 scope 复核待补）
+- 阶段 1：完成（click/fill/select/set/hover/drag/submit/scroll 均有执行级测试；fill 使用原生 setter；hover 走真实鼠标；drag 优先 HTML5；scroll 有静默窗口）
+- 阶段 2：基本完成（aria-hidden/hidden/inert/display/visibility、零尺寸、scope include/exclude 均已接入 ref 发放；执行前再次检查可见性；独立 actionScope 的 host 配置仍待补）
 - 阶段 3：部分完成（label/value/promotion 基础；click 探针/cursor 差分待补）
 - 阶段 4：基础（tabs/target 已有；嵌套 frame 自动发现待补）
 - 阶段 5-9：未开始

@@ -246,6 +246,35 @@ def _within_scope(
     return matched
 
 
+def _hidden_by_ancestor(node_id: int, root: dict[str, Any], parents: dict[int, int | None]) -> bool:
+    nodes: dict[int, dict[str, Any]] = {}
+
+    def visit(node: dict[str, Any]) -> None:
+        identifier = node.get("nodeId")
+        if isinstance(identifier, int):
+            nodes[identifier] = node
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+
+    visit(root)
+    current: int | None = node_id
+    while current is not None:
+        node = nodes.get(current)
+        if node is not None:
+            attrs = _attributes(node)
+            if attrs.get("hidden") is not None or attrs.get("inert") is not None:
+                return True
+            if str(attrs.get("aria-hidden", "")).lower() == "true":
+                return True
+            style = str(attrs.get("style", "")).replace(" ", "").lower()
+            if "display:none" in style or "visibility:hidden" in style:
+                return True
+        current = parents.get(current)
+    return False
+
+
 async def _scope_node_ids(
     client: Any, document_node_id: int, selectors: list[str]
 ) -> set[int] | None:
@@ -928,6 +957,7 @@ async def read_page(
             action_ref = (
                 role in ACTIONABLE_ROLES
                 and in_scope
+                and not _hidden_by_ancestor(element["node_id"], projected_root, parents)
                 and await _action_visible(client, backend_node_id)
             )
             needs_ref = action_ref or image_target
@@ -1170,7 +1200,9 @@ async def capture_image(
             client = attached.client
         elif entry.frame != "self":
             await assert_frame_identity_current(client, entry.frame)
-        entry = await _ensure_ref(client, session, ref, entry, browser, document)
+        entry = await _ensure_ref(
+            client, session, ref, entry, browser, document, require_visible=False
+        )
         source = await _capture_image_source(client, entry.backend_node_id, max_bytes)
         if source is not None and "data" in source:
             return {"type": "capture-image-result", "result": source}
@@ -1515,11 +1547,18 @@ async def _ensure_ref(
     entry: PageRef,
     browser: BrowserSession,
     document: DocumentIdentity,
+    *,
+    require_visible: bool = True,
 ) -> PageRef:
     if entry.backend_node_id <= 0:
         return entry
     try:
         await client.send("DOM.describeNode", {"backendNodeId": entry.backend_node_id})
+        if require_visible and not await _action_visible(client, entry.backend_node_id):
+            raise BrowserAgentError(
+                "PAGE_ACTION_STALE_REF",
+                "The element reference is no longer visible",
+            )
         return entry
     except Exception:  # noqa: BLE001 - attempt signature recovery below
         recovered = await _recover_ref(client, entry)
@@ -1987,7 +2026,9 @@ async def execute_action(
                             # Setting .value on them does nothing useful.
                             await interact.click(client, action_cache, ref=temporary_ref)
                             await asyncio.sleep(0.2)
-                            if await _click_dropdown_option(client, str(request["value"])):
+                            if await _click_dropdown_option(
+                                client, str(request["value"]), object_id
+                            ):
                                 # The option click selected the item; the
                                 # outcome is a select, not merely opening menu.
                                 result = ToolResult(

@@ -191,6 +191,25 @@ def test_fill_uses_native_setter_and_reports_readonly() -> None:
     assert "read-only" in denied["outcome"]["reason"]
 
 
+def test_click_uses_real_pointer_sequence() -> None:
+    client = ActionClient()
+    client.role = "button"
+    client.name = "提交"
+    result = _run(client, "click")
+    assert result["outcome"]["ok"] is True
+    assert any(event.get("type") == "mouseReleased" for event in client.input_events)
+
+
+def test_custom_combobox_select_uses_readback() -> None:
+    client = ActionClient()
+    client.role = "combobox"
+    client.name = "问题属性"
+    client.node_names[10] = "DIV"
+    result = _run(client, "select", value="规格不符")
+    assert result["outcome"]["ok"] is True
+    assert any("const wanted" in function for function in client.functions)
+
+
 def test_set_toggles_and_returns_noop_when_already_set() -> None:
     client = ActionClient()
     client.role = "checkbox"
@@ -264,3 +283,35 @@ def test_drag_requires_a_known_destination_and_sends_pointer_sequence() -> None:
         page_agent.wait_for_new_page_target = original
     assert result["outcome"]["ok"] is True
     assert sum(1 for event in client.input_events if event.get("type") == "mouseMoved") >= 2
+
+
+def test_drag_prefers_html5_data_transfer_when_available() -> None:
+    client = ActionClient()
+    client.name = "卡片"
+    client.native_drag = True
+    session, _, request, registry = _setup(client, "drag", value="ws_placeholder")
+    destination = next(ref for ref, entry in session.refs.items() if entry.backend_node_id == 11)
+    request["value"] = destination
+    browser = ActionBrowser(client)
+    original = page_agent.wait_for_new_page_target
+
+    async def no_new_target(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    page_agent.wait_for_new_page_target = no_new_target
+    try:
+        result = asyncio.run(
+            execute_action(
+                session,
+                request,
+                registry.issue_grant(session, document=session.document, request=request),
+                registry=registry,
+                resolver=_resolver(browser),
+                write_gate=lambda: True,
+            )
+        )
+    finally:
+        page_agent.wait_for_new_page_target = original
+    assert result["outcome"]["ok"] is True
+    assert any("dragstart" in function for function in client.functions)
+    assert client.input_events == []

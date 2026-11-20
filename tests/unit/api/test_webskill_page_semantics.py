@@ -10,6 +10,7 @@ import pytest
 from octop.infra.control.browser.webskill.page_agent import (
     _action_visible,
     _click_dropdown_option,
+    _hidden_by_ancestor,
     _live_value,
     _node_parents,
     _promoted_elements,
@@ -104,6 +105,25 @@ def test_action_scope_is_a_subtree_with_exclusions() -> None:
     assert _within_scope(3, parents, {1}, set()) is True
     assert _within_scope(4, parents, {2}, set()) is False
     assert _within_scope(3, parents, {1}, {2}) is False
+
+
+def test_hidden_ancestor_removes_action_eligibility() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "attributes": ["aria-hidden", "true"],
+                "children": [{"nodeName": "BUTTON", "nodeId": 3}],
+            },
+            {"nodeName": "BUTTON", "nodeId": 4},
+        ],
+    }
+    parents = _node_parents(root)
+    assert _hidden_by_ancestor(3, root, parents) is True
+    assert _hidden_by_ancestor(4, root, parents) is False
 
 
 def test_scope_frames_use_their_own_include_and_exclude() -> None:
