@@ -12,9 +12,11 @@ from octop.infra.control.browser.webskill.page_agent import (
     _action_visible,
     _assert_ref_in_action_scope,
     _click_dropdown_option,
+    _elevated_modal_backends,
     _file_inputs,
     _hidden_by_ancestor,
     _live_value,
+    _modal_names,
     _nest_nodes,
     _node_parents,
     _promoted_elements,
@@ -79,6 +81,15 @@ def test_refs_are_reused_only_for_the_same_signature_frame_and_document() -> Non
     assert same == first
     assert registry.issue_ref(session, 12, "self", '{"path":[1],"role":"button"}') != first
     assert registry.issue_ref(session, 13, "frame-1", '{"path":[0],"role":"button"}') != first
+    elevated = registry.issue_ref(
+        session,
+        14,
+        "self",
+        '{"path":[2],"role":"button"}',
+        provenance="modal-elevated",
+    )
+    assert session.refs[elevated].provenance == "modal-elevated"
+    assert session.refs[elevated].recovered is False
 
 
 def test_links_are_resolved_against_the_page_url() -> None:
@@ -126,6 +137,41 @@ def test_scrollable_elements_are_not_dropped_when_they_have_no_role() -> None:
             "backendNodeId": 20,
         }
     ]
+
+
+def test_modal_tracking_reads_names_and_marks_descendants() -> None:
+    class ModalClient:
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method == "Runtime.evaluate":
+                expression = str(params.get("expression") or "")
+                if "__octopPageChanges" in expression:
+                    return {"result": {"value": True}}
+                if "data-octop-modal-elevated" in expression and "querySelectorAll" in expression:
+                    return {"result": {"value": 1}}
+                return {"result": {"value": ["测试弹窗"]}}
+            if method == "DOM.getDocument":
+                return {
+                    "root": {
+                        "nodeId": 1,
+                        "nodeName": "#document",
+                        "children": [
+                            {
+                                "nodeId": 2,
+                                "backendNodeId": 20,
+                                "nodeName": "DIALOG",
+                                "attributes": [
+                                    "data-octop-modal-elevated",
+                                    "1",
+                                ],
+                            }
+                        ],
+                    }
+                }
+            raise AssertionError(method)
+
+    client = ModalClient()
+    assert asyncio.run(_modal_names(client)) == {"测试弹窗"}
+    assert asyncio.run(_elevated_modal_backends(client, {"测试弹窗"})) == {20}
 
 
 def test_scrollable_probe_reports_backend_directions() -> None:

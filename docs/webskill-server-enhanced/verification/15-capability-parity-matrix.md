@@ -11,9 +11,9 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   36 项  75%
-🟡 部分对齐    7 项  15%
-❌ 未实现      4 项   8%
+✅ 完全对齐   38 项  79%
+🟡 部分对齐    8 项  17%
+❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
 
@@ -38,9 +38,9 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 11 | cursor:pointer 提升 | ✅ | 父级差分探针 | 不做 CSS 级 hover 差分 |
 | 12 | DOM click listener 探针 | ✅ | `getEventListeners` 标记 | 依赖 CDP 上下文 |
 | 13 | actionable descendant 抑制 | ✅ | `_has_actionable_descendant` | — |
-| 14 | 模态提升 | ❌ | 无 | Agent 打开的 dialog 暂不自动纳入授权面 |
+| 14 | 模态提升 | ✅ | 动作后模态快照 + `elevatedModal`；真实 dialog 验证通过 |
 | 15 | 嵌套 frame 自动发现 | 🟡 | 递归 `discover_frame_routes`、OOPIF | 读取仍需按 frame 选择，不是一次全树 |
-| 16 | modal/frame provenance | ❌ | 无 | 感知节点没有 `provenance` |
+| 16 | modal/frame provenance | 🟡 | modal provenance + frame 字段；inline-frame provenance 未做 |
 | 17 | 子树续读 | ✅ | `perceive_page(ref=...)` | — |
 | 18 | paging | ✅ | SDK `segmentPerception` 消费 Octop 树 | 没有 Octop 侧 cursor UI |
 | 19 | ref 跨感知复用 | ✅ | `PageRef` signature 复用 | — |
@@ -65,7 +65,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 33 | back | ✅ | navigate.go_back | — |
 | 34 | noop / changes 元数据 | 🟡 | set 有 noop；已补 mutation changes 计数与 navigated | 无 status 文本；非 set 动作的 noop 判定仍简化 |
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
-| 36 | 模态动作提升 | ❌ | 无 | 与感知模态提升同缺口 |
+| 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
 | 38 | tab workset / 新页 | ✅ | target admit/switch、stream 跟随 | — |
 | 39 | 下载信号 | 🟡 | page_agent 有 downloads 基础设施 | 未在本轮矩阵做完整动作级回归 |
@@ -153,3 +153,27 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 `/Users/mochunhui/Git/web-skill-sdk/verify/agent/30-page-semantics-0.29.md` 已新增
 A-354 ~ A-363；`00-overview`、`01-environment/A-03`、`09-page-actions/A-70` 和
 `verify/README.md` 已加 0.29.0 delta 注解。旧 229 条仍作为 legacy 基线，不声称整体已升级。
+
+
+## 9. 模态提升验收
+
+真实页面临时 dialog：
+
+```text
+button 测试弹窗按钮 → dialog aria-label=测试弹窗
+```
+
+动作结果：
+
+```json
+{"ok":true,"target":{"role":"button","name":"测试弹窗按钮"},"elevatedModal":"测试弹窗"}
+```
+
+随后用限制 actionScope `{include:["#does-not-exist"]}` 感知：
+
+```json
+{"role":"button","name":"弹窗内按钮","provenance":"modal-elevated","ref":"ws_..."}
+```
+
+弹窗内按钮动作成功，证明 elevated modal ref 会绕过普通 actionScope，
+但普通范围外目标仍然拒绝。

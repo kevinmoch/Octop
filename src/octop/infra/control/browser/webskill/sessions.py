@@ -65,6 +65,8 @@ class PageRef:
     action_scope: str = ""
     # True when this PageRef was restored by signature after a re-render.
     recovered: bool = False
+    # "modal-elevated" for an element inside a dialog opened by this task.
+    provenance: str = ""
 
 
 @dataclass
@@ -84,6 +86,7 @@ class BrowserAgentSession:
     downloads_initialized: bool = False
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
+    elevated_modals: set[str] = field(default_factory=set)
     # Octop-only attachment bridge: bytes uploaded by the host immediately
     # before an attach action, consumed by that action.
     attachments: list[dict[str, Any]] = field(default_factory=list)
@@ -392,6 +395,7 @@ class BrowserAgentRegistry:
         frame: str = "self",
         signature: str = "",
         action_scope: str = "",
+        provenance: str = "",
     ) -> str:
         if signature:
             document_key = session.document.key if session.document else ""
@@ -409,6 +413,8 @@ class BrowserAgentRegistry:
             frame,
             signature,
             action_scope,
+            recovered=False,
+            provenance=provenance,
         )
         return ref
 

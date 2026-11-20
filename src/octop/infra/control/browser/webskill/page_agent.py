@@ -986,6 +986,99 @@ async def _scrollable_backends(client: Any) -> dict[int, list[str]]:
             )
 
 
+_MODAL_NAMES_JS = r"""(() => {
+    const visible = (el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    };
+    return [...document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')]
+        .filter(visible)
+        .map((el) => {
+            const labelled = el.getAttribute('aria-labelledby');
+            const by = labelled ? labelled.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)).filter(Boolean).map((x) => (x.innerText || x.textContent || '').trim()).filter(Boolean).join(' ') : '';
+            return (el.getAttribute('aria-label') || by || (el.innerText || el.textContent || '')).replace(/\s+/g, ' ').trim();
+        })
+        .filter(Boolean);
+})()"""
+
+
+async def _modal_names(client: Any) -> set[str]:
+    try:
+        reply = await client.send(
+            "Runtime.evaluate",
+            {"expression": _MODAL_NAMES_JS, "returnByValue": True},
+        )
+    except Exception:  # noqa: BLE001 - modal tracking is supplemental
+        return set()
+    value = reply.get("result", {}).get("value")
+    if not isinstance(value, list):
+        return set()
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
+
+
+_ELEVATED_MODAL_MARK_JS = r"""(() => {
+    const wanted = new Set(%s);
+    const visible = (el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    };
+    const nameOf = (el) => {
+        const labelled = el.getAttribute('aria-labelledby');
+        const by = labelled ? labelled.split(/\s+/).map((id) => el.ownerDocument.getElementById(id)).filter(Boolean).map((x) => (x.innerText || x.textContent || '').trim()).filter(Boolean).join(' ') : '';
+        return (el.getAttribute('aria-label') || by || (el.innerText || el.textContent || '')).replace(/\s+/g, ' ').trim();
+    };
+    let count = 0;
+    for (const modal of document.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"]')) {
+        if (!visible(modal) || !wanted.has(nameOf(modal))) continue;
+        modal.setAttribute('data-octop-modal-elevated', '1');
+        for (const el of modal.querySelectorAll('*')) el.setAttribute('data-octop-modal-elevated', '1');
+        count += 1;
+    }
+    return count;
+})()"""
+
+
+async def _elevated_modal_backends(client: Any, names: set[str]) -> set[int]:
+    if not names:
+        return set()
+    marked: set[int] = set()
+    expression = _ELEVATED_MODAL_MARK_JS % json.dumps(sorted(names), ensure_ascii=False)
+    try:
+        probe = await client.send(
+            "Runtime.evaluate", {"expression": expression, "returnByValue": True}
+        )
+        if not isinstance(probe.get("result", {}).get("value"), int):
+            return marked
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = raw.get("root", {})
+        if not isinstance(root, dict):
+            return marked
+
+        def visit(node: dict[str, Any]) -> None:
+            attrs = _attributes(node)
+            backend = node.get("backendNodeId")
+            if attrs.get("data-octop-modal-elevated") == "1" and isinstance(backend, int):
+                marked.add(backend)
+            for key in ("children", "shadowRoots"):
+                for child in node.get(key, []):
+                    if isinstance(child, dict):
+                        visit(child)
+
+        visit(root)
+        return marked
+    except Exception:  # noqa: BLE001 - provenance is supplemental
+        return marked
+    finally:
+        with contextlib.suppress(Exception):
+            await client.send(
+                "Runtime.evaluate",
+                {
+                    "expression": "document.querySelectorAll('[data-octop-modal-elevated]').forEach((el) => el.removeAttribute('data-octop-modal-elevated'))",
+                    "returnByValue": True,
+                },
+            )
+
+
 async def _action_visible(client: Any, backend_node_id: int) -> bool:
     """Action targets must occupy pixels, as in WebSkill's occupiesNoSpace gate."""
     try:
@@ -1192,6 +1285,7 @@ async def read_page(
         cursor_backends = await _cursor_pointer_backends(client)
         click_backends = await _click_listener_backends(client)
         scrollable_backends = await _scrollable_backends(client)
+        elevated_backends = await _elevated_modal_backends(client, session.elevated_modals)
         promoted = _promoted_elements(
             projected_root,
             cursor_backends=cursor_backends,
@@ -1309,6 +1403,7 @@ async def read_page(
         # refs on every perception. Only a real document change does.
         if session.document is None or session.document.key != after.key:
             session.refs.clear()
+            session.elevated_modals.clear()
         session.document = after
         node_paths = _node_paths(projected_root)
         parents = _node_parents(projected_root)
@@ -1372,8 +1467,11 @@ async def read_page(
             image_target = _capturable_image(element)
             if image_target:
                 role = "img"
-            in_scope = scope_include is None or _within_scope(
-                element["node_id"], parents, scope_include, scope_exclude
+            elevated_target = backend_node_id in elevated_backends
+            in_scope = (
+                elevated_target
+                or scope_include is None
+                or _within_scope(element["node_id"], parents, scope_include, scope_exclude)
             )
             is_file_input = (
                 str(element.get("tag") or "") == "input"
@@ -1406,6 +1504,7 @@ async def read_page(
                         **({"href": str(element.get("href"))} if element.get("href") else {}),
                         "path": node_paths.get(element["node_id"], []),
                         "frame": selected_frame,
+                        **({"provenance": "modal-elevated"} if elevated_target else {}),
                     },
                     separators=(",", ":"),
                     ensure_ascii=False,
@@ -1416,6 +1515,7 @@ async def read_page(
                     selected_frame,
                     signature,
                     action_scope_json,
+                    "modal-elevated" if elevated_target else "",
                 )
                 node["ref"] = node_ref
             if (
@@ -1428,6 +1528,10 @@ async def read_page(
                     node["value"] = value
             if scrollable_ref:
                 node["scrollable"] = scrollable
+            if elevated_target:
+                node["provenance"] = "modal-elevated"
+            if selected_frame != "self":
+                node["frame"] = selected_frame
             if _capturable_image(element):
                 node["capturable"] = True
                 image_candidates.append((node, node_ref or ""))
@@ -1947,6 +2051,8 @@ def _find_signature_nodes(root: dict[str, Any], signature: dict[str, Any]) -> li
 
 
 async def _assert_ref_in_action_scope(client: Any, entry: PageRef) -> None:
+    if entry.provenance == "modal-elevated":
+        return
     if not entry.action_scope:
         return
     try:
@@ -2598,6 +2704,7 @@ async def execute_action(
             noop = False
             scrolled_payload: dict[str, Any] | None = None
             await _start_change_observation(client)
+            modals_before = await _modal_names(client)
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
             action_cache = RefCache()
             try:
@@ -2984,6 +3091,11 @@ async def execute_action(
                         "reason": result.error or "The browser action failed",
                     },
                 }
+            await asyncio.sleep(0.2)
+            modals_after = await _modal_names(client)
+            new_modals = sorted(modals_after - modals_before)
+            if new_modals:
+                session.elevated_modals.update(new_modals)
             changes = await _stop_change_observation(client)
             evaluation: dict[str, Any] = {"expression": "location.href", "returnByValue": True}
             if attached is not None:
@@ -3002,6 +3114,8 @@ async def execute_action(
                 }
             if changes is not None and (changes["added"] or changes["removed"]):
                 outcome["changes"] = changes
+            if new_modals:
+                outcome["elevatedModal"] = new_modals[0]
             action_url = attached.url if attached is not None else document.url
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
