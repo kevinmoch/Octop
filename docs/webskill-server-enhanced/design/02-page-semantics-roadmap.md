@@ -241,3 +241,21 @@
 - 阶段 5-9：未开始
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
+
+## 5. 阶段 1/2 验收证据（本轮）
+
+- 自动化：`test_webskill_page_actions.py` 覆盖 click / fill（原生 setter + readonly）/
+  custom select 回读 / set 切换与 noop / hover 真实鼠标 / drag 指针兜底与 HTML5 /
+  submit / scroll 回读。
+- 自动化：`test_webskill_page_semantics.py` 覆盖 action scope 子树/排除、
+  aria-hidden/hidden 祖先、零尺寸/无布局 action ref、path 改变后的唯一签名恢复。
+- 真实受控页：
+  - `问题属性` select → `规格不符`，target `{role:"combobox", name:"问题属性"}`；
+  - `问题描述` fill → `测试`，target `{role:"textbox", name:"问题描述"}`；
+  - `问题属性` hover → ok；
+  - 页面回读值保持 `规格不符 / 监理 / 测试`。
+- 结果：54 个定向测试通过，ruff/mypy 通过。
+
+阶段 2 的已知宿主边界：P1 当前把 perception scope 同时作为 action ref 的发放范围；
+SDK 的 `PageActionPolicy.scope` 未通过 remote execute 协议下传，因此“独立 actionScope”
+尚未形成可配置的双范围；这属于宿主协议扩展，不是本次 SDK 修改。
