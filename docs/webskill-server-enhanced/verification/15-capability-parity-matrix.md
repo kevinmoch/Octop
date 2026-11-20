@@ -333,3 +333,8 @@ candidateId: cand-t7aj7oaa
 `action + target role/name/frame + 具体 value` 与 trace 做一对一形状匹配；
 `ref` 忽略，占位符/已脱敏值放宽。SDK 新增 AC-30.16 与
 `pageActionTrace.test.ts`（7 条），完整 agent 测试 537 passed。
+
+Octop 本地已用修复后的 `@webskill/sdk` 构建产物重新构建
+`dashboard/webskill`，并确认 bundle 含新的
+`does not match any page action` 校验。该 node_modules 替换是本地验证步骤；
+正式接入仍需把修复版 SDK 作为依赖升级/发布，`npm ci` 会重置当前替换。
