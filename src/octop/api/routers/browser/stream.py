@@ -608,12 +608,27 @@ async def run_browser_stream_session(
                 if control_owner_for(profile) != "user":
                     await asyncio.to_thread(set_control_owner, profile, "user")
                 browser_agent_registry.revoke_grants(profile=profile)
+                if msg.get("type") == "tab_switch":
+                    # Tab switching is a viewer command. Do not queue it behind
+                    # a model write lock or an in-flight page action: otherwise a
+                    # slow agent action makes every tab click look broken.
+                    try:
+                        await asyncio.wait_for(_handle_client_event(sess, msg), timeout=8.0)
+                    except TimeoutError:
+                        logger.warning("tab switch event timed out; stream kept open")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("tab switch event failed: %s", exc)
+                    continue
                 async with (
                     browser_agent_registry.write_lock(profile),
                     profile_lease(profile),
                 ):
-                    with contextlib.suppress(Exception):
-                        await _handle_client_event(sess, msg)
+                    try:
+                        await asyncio.wait_for(_handle_client_event(sess, msg), timeout=15.0)
+                    except TimeoutError:
+                        logger.warning("browser input event timed out; stream kept open")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("browser input event failed: %s", exc)
     except TimeoutError:
         await send_json({"type": "error", "message": "timed out waiting for start"})
     except WebSocketDisconnect:
