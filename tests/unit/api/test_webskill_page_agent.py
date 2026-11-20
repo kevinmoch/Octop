@@ -210,6 +210,8 @@ class FakeClient:
             if params == {"objectId": "button-object"}:
                 return {"nodeId": self.node_id}
             return {"nodeId": 0}
+        if method == "DOM.describeNode":
+            return {"node": {"nodeName": "BUTTON"}}
         if method == "DOM.scrollIntoViewIfNeeded":
             return {}
         if method == "DOM.getBoxModel":
@@ -382,6 +384,8 @@ class FrameClient(FakeClient):
             }
         if method == "DOM.resolveNode" and params == {"backendNodeId": 600}:
             return {"object": {"objectId": "frame-button-object"}}
+        if method == "DOM.describeNode" and params == {"backendNodeId": 600}:
+            return {"node": {"nodeName": "BUTTON"}}
         if (
             method == "Runtime.callFunctionOn"
             and params

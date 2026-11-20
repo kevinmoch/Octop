@@ -33,6 +33,10 @@ class FakeCaptureClient:
             return {"frameTree": {"frame": {"id": "frame-1", "loaderId": "loader-1"}}}
         if method == "Runtime.evaluate":
             return {"result": {"value": {"url": "https://example.test/", "title": "Example"}}}
+        if method == "DOM.describeNode":
+            if params and params.get("backendNodeId") == 5:
+                return {"node": {"nodeName": "BUTTON"}}
+            raise RuntimeError("node not found")
         if method == "DOM.scrollIntoViewIfNeeded":
             return {}
         if method == "DOM.getBoxModel":

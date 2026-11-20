@@ -17,7 +17,9 @@ UNCLAIMED_SESSION_TTL_SECONDS = 120.0
 MAX_SESSIONS_PER_USER = 8
 MAX_TICKETS_PER_SESSION = 4
 MAX_MODEL_TARGETS = 8
-SUPPORTED_ACTIONS = frozenset({"click", "fill", "select", "scroll", "back"})
+SUPPORTED_ACTIONS = frozenset(
+    {"click", "fill", "select", "scroll", "back", "set", "hover", "drag", "submit"}
+)
 DOCUMENT_REF = "@document"
 
 
@@ -46,6 +48,8 @@ class PageRef:
     backend_node_id: int
     document_key: str
     frame: str = "self"
+    # JSON identity used to restore a ref after the DOM node is replaced.
+    signature: str = ""
 
 
 @dataclass
@@ -131,6 +135,10 @@ def action_digest(request: dict[str, Any]) -> str:
         raise BrowserAgentError("ACTION_INVALID", "Select requires an option value")
     if action == "scroll" and value not in {"up", "down", "left", "right"}:
         raise BrowserAgentError("ACTION_INVALID", "Scroll requires a supported direction")
+    if action == "set" and value not in {"true", "false"}:
+        raise BrowserAgentError("ACTION_INVALID", "Set requires true or false")
+    if action == "drag" and (not isinstance(value, str) or not value):
+        raise BrowserAgentError("ACTION_INVALID", "Drag requires a destination reference")
     normalized = {
         "ref": ref,
         "action": action,
@@ -358,11 +366,18 @@ class BrowserAgentRegistry:
         return grant
 
     def issue_ref(
-        self, session: BrowserAgentSession, backend_node_id: int, frame: str = "self"
+        self,
+        session: BrowserAgentSession,
+        backend_node_id: int,
+        frame: str = "self",
+        signature: str = "",
     ) -> str:
         ref = f"ws_{secrets.token_hex(12)}"
         session.refs[ref] = PageRef(
-            backend_node_id, session.document.key if session.document else "", frame
+            backend_node_id,
+            session.document.key if session.document else "",
+            frame,
+            signature,
         )
         return ref
 

@@ -177,6 +177,42 @@ async def document_identity(
     )
 
 
+def _node_paths(root: dict[str, Any]) -> dict[int, list[int]]:
+    paths: dict[int, list[int]] = {}
+
+    def visit(node: dict[str, Any], path: list[int]) -> None:
+        node_id = node.get("nodeId")
+        if isinstance(node_id, int):
+            paths[node_id] = path
+        children = [
+            child
+            for child in node.get("children", [])
+            if isinstance(child, dict) and child.get("nodeName") != "#text"
+        ]
+        for index, child in enumerate(children):
+            visit(child, [*path, index])
+        for shadow in node.get("shadowRoots", []):
+            if isinstance(shadow, dict):
+                visit(shadow, path)
+
+    visit(root, [])
+    return paths
+
+
+def _node_at_path(root: dict[str, Any], path: list[int]) -> dict[str, Any] | None:
+    node = root
+    for index in path:
+        children = [
+            child
+            for child in node.get("children", [])
+            if isinstance(child, dict) and child.get("nodeName") != "#text"
+        ]
+        if index < 0 or index >= len(children):
+            return None
+        node = children[index]
+    return node
+
+
 def _attributes(node: dict[str, Any]) -> dict[str, str]:
     raw = node.get("attributes", [])
     return dict(zip(raw[::2], raw[1::2], strict=False)) if isinstance(raw, list) else {}
@@ -771,11 +807,8 @@ async def read_page(
             or session.document.key != after.key
         ):
             session.refs.clear()
-        else:
-            for ref, entry in list(session.refs.items()):
-                if entry.frame == selected_frame:
-                    session.refs.pop(ref, None)
         session.document = after
+        node_paths = _node_paths(projected_root)
         nodes: list[dict[str, Any]] = []
         targets: list[dict[str, Any]] = []
         image_candidates: list[tuple[dict[str, Any], str]] = []
@@ -790,10 +823,23 @@ async def read_page(
             if _capturable_image(element):
                 role = "img"
             needs_ref = role in ACTIONABLE_ROLES or _capturable_image(element)
-            node_ref: str | None = (
-                registry.issue_ref(session, backend_node_id, selected_frame) if needs_ref else None
-            )
-            node = _node(element, node_ref)
+            node = _node(element, None)
+            node_ref: str | None = None
+            if needs_ref:
+                signature = json.dumps(
+                    {
+                        "role": node.get("role"),
+                        "tag": str(element.get("tag") or "").lower(),
+                        **({"name": node.get("name")} if node.get("name") else {}),
+                        **({"href": node.get("href")} if node.get("href") else {}),
+                        "path": node_paths.get(element["node_id"], []),
+                        "frame": selected_frame,
+                    },
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                node_ref = registry.issue_ref(session, backend_node_id, selected_frame, signature)
+                node["ref"] = node_ref
             if (
                 node_ref
                 and role in {"textbox", "searchbox", "combobox", "checkbox", "radio", "switch"}
@@ -1016,6 +1062,7 @@ async def capture_image(
             client = attached.client
         elif entry.frame != "self":
             await assert_frame_identity_current(client, entry.frame)
+        entry = await _ensure_ref(client, session, ref, entry, browser, document)
         source = await _capture_image_source(client, entry.backend_node_id, max_bytes)
         if source is not None and "data" in source:
             return {"type": "capture-image-result", "result": source}
@@ -1253,6 +1300,75 @@ async def issue_action_grant(
             await model_attachment.close()
 
 
+async def _recover_ref(
+    client: Any,
+    entry: PageRef,
+) -> PageRef | None:
+    if not entry.signature:
+        return None
+    try:
+        signature = json.loads(entry.signature)
+    except json.JSONDecodeError:
+        return None
+    path = signature.get("path")
+    expected_tag = str(signature.get("tag") or "").lower()
+    if not isinstance(path, list) or not all(isinstance(index, int) for index in path):
+        return None
+    try:
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+    except Exception:  # noqa: BLE001
+        return None
+    root = raw.get("root", {})
+    node = _node_at_path(root, path)
+    if not isinstance(node, dict):
+        return None
+    tag = str(node.get("nodeName") or "").lower()
+    if expected_tag and tag != expected_tag:
+        return None
+    backend_node_id = node.get("backendNodeId")
+    if not isinstance(backend_node_id, int) or backend_node_id <= 0:
+        return None
+    return replace(entry, backend_node_id=backend_node_id)
+
+
+async def _ensure_ref(
+    client: Any,
+    session: BrowserAgentSession,
+    ref: str,
+    entry: PageRef,
+    browser: BrowserSession,
+    document: DocumentIdentity,
+) -> PageRef:
+    if entry.backend_node_id <= 0:
+        return entry
+    try:
+        await client.send("DOM.describeNode", {"backendNodeId": entry.backend_node_id})
+        return entry
+    except Exception:  # noqa: BLE001 - attempt signature recovery below
+        recovered = await _recover_ref(client, entry)
+        if recovered is None:
+            raise BrowserAgentError(
+                "PAGE_ACTION_STALE_REF",
+                "The element reference is unknown or expired",
+            ) from None
+        target = await _actual_target(browser, recovered, document, client)
+        try:
+            signature = json.loads(entry.signature)
+        except json.JSONDecodeError:
+            signature = {}
+        expected_role = signature.get("role")
+        expected_name = signature.get("name")
+        if (isinstance(expected_role, str) and expected_role != target.get("role")) or (
+            isinstance(expected_name, str) and expected_name != target.get("name")
+        ):
+            raise BrowserAgentError(
+                "PAGE_ACTION_STALE_REF",
+                "The element reference no longer identifies the same control",
+            ) from None
+        session.refs[ref] = recovered
+        return recovered
+
+
 async def _actual_target(
     browser: BrowserSession, entry: PageRef, document: DocumentIdentity, client: Any = None
 ) -> dict[str, Any]:
@@ -1315,6 +1431,49 @@ async def _actual_target(
     if target.get("secret") is not True:
         target.pop("secret", None)
     return target
+
+
+_TOGGLE_STATE_FUNCTION = """function() {
+    const aria = this.getAttribute('aria-checked') ?? this.getAttribute('aria-pressed');
+    const current = aria !== null ? aria === 'true' : (this.tagName === 'INPUT' ? Boolean(this.checked) : undefined);
+    return { toggle: current !== undefined, current: current === true };
+}"""
+
+_HOVER_FUNCTION = """function() {
+    const r = this.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const base = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, button: 0 };
+    const noBubble = { ...base, bubbles: false };
+    const pointer = { pointerId: 1, pointerType: 'mouse', isPrimary: true };
+    const P = this.ownerDocument.defaultView?.PointerEvent;
+    if (P) {
+        this.dispatchEvent(new P('pointerover', { ...base, ...pointer }));
+        this.dispatchEvent(new P('pointerenter', { ...noBubble, ...pointer }));
+    }
+    this.dispatchEvent(new MouseEvent('mouseover', base));
+    this.dispatchEvent(new MouseEvent('mouseenter', noBubble));
+    if (P) this.dispatchEvent(new P('pointermove', { ...base, ...pointer }));
+    this.dispatchEvent(new MouseEvent('mousemove', base));
+    return true;
+}"""
+
+_SUBMIT_FUNCTION = """function() {
+    const form = this.tagName === 'FORM' ? this : this.form;
+    if (!form || typeof form.requestSubmit !== 'function') return false;
+    form.requestSubmit();
+    return true;
+}"""
+
+
+async def _element_center(client: Any, backend_node_id: int) -> tuple[float, float]:
+    box = await client.send("DOM.getBoxModel", {"backendNodeId": backend_node_id})
+    quad = box.get("model", {}).get("border", [])
+    if not isinstance(quad, list) or len(quad) != 8:
+        raise BrowserAgentError("PAGE_ACTION_STALE_REF", "The element has no visible box")
+    xs = [float(quad[index]) for index in (0, 2, 4, 6)]
+    ys = [float(quad[index]) for index in (1, 3, 5, 7)]
+    return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
 
 
 async def _click_dropdown_option(
@@ -1463,6 +1622,7 @@ async def execute_action(
                 await client.send("DOM.getDocument", {"depth": -1})
             else:
                 await assert_frame_identity_current(client, entry.frame)
+            entry = await _ensure_ref(client, session, ref, entry, browser, document)
             if (
                 model_attachment is not None
                 and attached is None
@@ -1490,6 +1650,7 @@ async def execute_action(
                     },
                 }
             action = request["action"]
+            noop = False
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
             action_cache = RefCache()
             try:
@@ -1568,6 +1729,132 @@ async def execute_action(
                             direction=request["value"],
                             ref=temporary_ref,
                         )
+                    elif action == "set":
+                        state = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _TOGGLE_STATE_FUNCTION,
+                                "returnByValue": True,
+                            },
+                        )
+                        info = state.get("result", {}).get("value")
+                        if not isinstance(info, dict) or info.get("toggle") is not True:
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": "The element is not a toggle",
+                                },
+                            }
+                        desired = request["value"] == "true"
+                        if info.get("current") is desired:
+                            result = ToolResult(
+                                success=True,
+                                content="Already in the requested state",
+                                metrics=ActionMetrics(
+                                    action="set",
+                                    duration_ms=0,
+                                    dom_nodes_scanned=0,
+                                    estimated_tokens=0,
+                                ),
+                            )
+                            noop = True
+                        else:
+                            result = await interact.click(client, action_cache, ref=temporary_ref)
+                            noop = False
+                    elif action == "hover":
+                        await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _HOVER_FUNCTION,
+                                "returnByValue": True,
+                            },
+                        )
+                        result = ToolResult(
+                            success=True,
+                            content="Hovered",
+                            metrics=ActionMetrics(
+                                action="hover",
+                                duration_ms=0,
+                                dom_nodes_scanned=0,
+                                estimated_tokens=0,
+                            ),
+                        )
+                    elif action == "submit":
+                        submitted = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _SUBMIT_FUNCTION,
+                                "returnByValue": True,
+                            },
+                        )
+                        if submitted.get("result", {}).get("value") is not True:
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": "The element does not belong to a form",
+                                },
+                            }
+                        result = ToolResult(
+                            success=True,
+                            content="Submitted",
+                            metrics=ActionMetrics(
+                                action="submit",
+                                duration_ms=0,
+                                dom_nodes_scanned=0,
+                                estimated_tokens=0,
+                            ),
+                        )
+                    elif action == "drag":
+                        destination_ref = str(request["value"])
+                        destination_entry = registry.resolve_ref(session, destination_ref, document)
+                        if destination_entry.frame != entry.frame:
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": "Dragging across frames is not supported",
+                                },
+                            }
+                        start_x, start_y = await _element_center(client, entry.backend_node_id)
+                        end_x, end_y = await _element_center(
+                            client, destination_entry.backend_node_id
+                        )
+                        for event_type, x, y, buttons in (
+                            ("mouseMoved", start_x, start_y, 0),
+                            ("mousePressed", start_x, start_y, 1),
+                            ("mouseMoved", (start_x + end_x) / 2, (start_y + end_y) / 2, 1),
+                            ("mouseMoved", end_x, end_y, 1),
+                            ("mouseReleased", end_x, end_y, 0),
+                        ):
+                            await client.send(
+                                "Input.dispatchMouseEvent",
+                                {
+                                    "type": event_type,
+                                    "x": x,
+                                    "y": y,
+                                    "button": "left",
+                                    "buttons": buttons,
+                                    "clickCount": 1,
+                                },
+                            )
+                        result = ToolResult(
+                            success=True,
+                            content="Dragged",
+                            metrics=ActionMetrics(
+                                action="drag",
+                                duration_ms=0,
+                                dom_nodes_scanned=0,
+                                estimated_tokens=0,
+                            ),
+                        )
                     else:
                         return {
                             "type": "execute-result",
@@ -1599,6 +1886,8 @@ async def execute_action(
             current = await client.send("Runtime.evaluate", evaluation)
             current_url = str(current.get("result", {}).get("value") or "")
             outcome: dict[str, Any] = {"ok": True, "target": target}
+            if noop:
+                outcome["noop"] = True
             action_url = attached.url if attached is not None else document.url
             if current_url and current_url != action_url:
                 outcome["navigated"] = True
