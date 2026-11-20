@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   39 项  81%
-🟡 部分对齐    7 项  15%
+✅ 完全对齐   38 项  79%
+🟡 部分对齐    8 项  17%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -42,7 +42,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 15 | 嵌套 frame 自动发现 | 🟡 | 递归 `discover_frame_routes`、OOPIF | 读取仍需按 frame 选择，不是一次全树 |
 | 16 | modal/frame provenance | 🟡 | modal provenance + frame 字段；inline-frame provenance 未做 |
 | 17 | 子树续读 | ✅ | `perceive_page(ref=...)` | — |
-| 18 | paging | ✅ | SDK `segmentPerception` 消费 Octop 树 | 没有 Octop 侧 cursor UI |
+| 18 | paging | 🟡 | 宿主注入了 `pagePerceptionPaging`，SDK 侧有 `segmentPerception` | 没有 Octop 侧 cursor UI，也没有独立续读验收；A-359 仍 N/A |
 | 19 | ref 跨感知复用 | ✅ | `PageRef` signature 复用 | — |
 | 20 | path 改变后的恢复 | 🟡 | 唯一 role/name/href 恢复 | 未覆盖行/列表上下文签名 |
 | 21 | 同名歧义拒绝 | ✅ | 唯一匹配才恢复，否则 stale | — |
