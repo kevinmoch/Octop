@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   41 项  85%
-🟡 部分对齐    5 项  10%
+✅ 完全对齐   42 项  88%
+🟡 部分对齐    4 项   8%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -63,7 +63,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 31 | scroll | ✅ | 真实容器、步长、静默窗口、atEnd/movedBy | — |
 | 32 | attach | 🟡 | Octop 文件桥 + DataTransfer；真实隐藏 input 已验证 | 不是跨宿主协议；SDK/extension 用系统选择器 |
 | 33 | back | ✅ | navigate.go_back | — |
-| 34 | noop / changes 元数据 | 🟡 | click/set/hover/drag/back 有 noop；mutation added/removed、status 文本、navigated；status 会脱敏动作值 | click 仍缺 SDK 的“已打开浮层不算 noop”判据；fill/select/scroll 按 SDK 语义不报 noop |
+| 34 | noop / changes 元数据 | ✅ | click/set/hover/drag/back 有 noop；click 已补 `popoverOpenBeside` 等价判据；fill/select/scroll 按 SDK 语义不报 noop；changes/status/navigated 完整 | — |
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
@@ -640,3 +640,22 @@ test_back_without_navigation_is_noop
 仍有一个小差异：SDK 的 click 会用 `popoverOpenBeside()` 把
 “点击前浮层已经开着”排除出 noop；Octop 目前只看 DOM changes/status/
 navigation/modal。这个差异已保留在矩阵 🟡 说明中，未在本轮硬造。
+
+
+## 23. click 浮层 noop 判据补齐（2026-11-21）
+
+新增 `_popover_open_beside`，对齐 SDK 的 `popoverOpenBeside()`：
+
+- 目标 `aria-expanded="true"` → 不算 noop
+- 父层内存在 `absolute/fixed` 且可见、包含可操作内容的浮层 → 不算 noop
+- 只检查父层；不向上扩大，避免把无关区块算进来
+- 仅在 click 后调用；失败按「没有浮层」处理，保留 noop 信号
+
+新增测试：
+
+```text
+test_click_with_an_already_open_popover_is_not_noop
+```
+
+当前 page action 测试：18 passed。
+矩阵第 34 行从 🟡 改为 ✅。

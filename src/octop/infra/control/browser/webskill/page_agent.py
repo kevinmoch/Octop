@@ -2271,6 +2271,32 @@ async def _actual_target(
     return target
 
 
+_POPOVER_OPEN_FUNCTION = r"""function() {
+  if (this.getAttribute('aria-expanded') === 'true') return true;
+  const parent = this.parentElement;
+  if (!parent) return false;
+  const view = this.ownerDocument.defaultView;
+  if (!view) return false;
+  const hidden = (el) => {
+    if (el.hasAttribute('hidden')) return true;
+    if (el.getAttribute('aria-hidden') === 'true') return true;
+    const inline = el.getAttribute('style') || '';
+    if (/display\s*:\s*none|visibility\s*:\s*hidden/i.test(inline)) return true;
+    const style = view.getComputedStyle(el);
+    return style.display === 'none' || style.visibility === 'hidden';
+  };
+  const content = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="option"],[role="menuitem"],[role="gridcell"],[role="tab"],[role="checkbox"],[role="radio"]';
+  for (const candidate of parent.querySelectorAll('*')) {
+    if (candidate === this || this.contains(candidate) || candidate.contains(this)) continue;
+    const style = view.getComputedStyle(candidate);
+    if (style.position !== 'absolute' && style.position !== 'fixed') continue;
+    if (hidden(candidate)) continue;
+    if (candidate.querySelector(content)) return true;
+  }
+  return false;
+}"""
+
+
 _SCROLL_FUNCTION = r"""async function(direction) {
     const vertical = direction === 'up' || direction === 'down';
     const forward = direction === 'down' || direction === 'right';
@@ -2624,6 +2650,22 @@ async def _status_text(client: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+async def _popover_open_beside(client: Any, object_id: str) -> bool:
+    """Mirror the SDK's click noop exemption for an already-open popover."""
+    try:
+        reply = await client.send(
+            "Runtime.callFunctionOn",
+            {
+                "objectId": object_id,
+                "functionDeclaration": _POPOVER_OPEN_FUNCTION,
+                "returnByValue": True,
+            },
+        )
+        return reply.get("result", {}).get("value") is True
+    except Exception:  # noqa: BLE001 - supplemental noop evidence
+        return False
+
+
 async def _start_change_observation(client: Any) -> None:
     with contextlib.suppress(Exception):
         await client.send(
@@ -2739,6 +2781,8 @@ async def execute_action(
                 }
             action = request["action"]
             noop = False
+            popover_open = False
+            object_id: str | None = None
             scrolled_payload: dict[str, Any] | None = None
             await _start_change_observation(client)
             modals_before = await _modal_names(client)
@@ -2771,6 +2815,7 @@ async def execute_action(
                     action_cache.store(temporary_ref, node_id)
                     if action == "click":
                         result = await interact.click(client, action_cache, ref=temporary_ref)
+                        popover_open = await _popover_open_beside(client, object_id)
                     elif action == "fill":
                         filled = await client.send(
                             "Runtime.callFunctionOn",
@@ -3199,6 +3244,7 @@ async def execute_action(
                 and not outcome.get("changes")
                 and not outcome.get("elevatedModal")
                 and not noop
+                and not popover_open
             ):
                 # Align with the SDK's no-reaction verdict: click, hover, drag
                 # and back are all allowed to report noop. fill/select keep the

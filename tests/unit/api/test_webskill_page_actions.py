@@ -32,6 +32,7 @@ class ActionClient:
         self.fill_reason: str | None = None
         self.status_text: str | None = None
         self.change_counts = {"added": 2, "removed": 1}
+        self.popover_open = False
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = params or {}
@@ -110,6 +111,8 @@ class ActionClient:
                 return {"result": {"value": True}}
             if "pointerover" in declaration:
                 return {"result": {"value": True}}
+            if "parentElement" in declaration and "aria-expanded" in declaration:
+                return {"result": {"value": self.popover_open}}
             if "scrollHeight" in declaration:
                 return {"result": {"value": {"ok": True, "movedBy": 120, "atEnd": True}}}
             if "const wanted" in declaration:
@@ -296,6 +299,17 @@ def test_click_without_page_reaction_is_noop() -> None:
     assert result["outcome"]["ok"] is True
     assert result["outcome"]["noop"] is True
     assert "changes" not in result["outcome"]
+
+
+def test_click_with_an_already_open_popover_is_not_noop() -> None:
+    client = ActionClient()
+    client.role = "button"
+    client.name = "筛选"
+    client.change_counts = {"added": 0, "removed": 0}
+    client.popover_open = True
+    result = _run(client, "click")
+    assert result["outcome"]["ok"] is True
+    assert "noop" not in result["outcome"]
 
 
 def test_click_reports_status_text_and_redacts_the_action_value() -> None:
