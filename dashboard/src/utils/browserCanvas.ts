@@ -11,12 +11,27 @@ export function getCanvasCoords(
   if (!canvas) return { x: 0, y: 0 };
   const rect = canvas.getBoundingClientRect();
   if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
-  return {
-    x: Math.round((e.clientX - rect.left) * scaleX),
-    y: Math.round((e.clientY - rect.top) * scaleY),
-  };
+  // The canvas is rendered with object-fit: contain. Its CSS box can have a
+  // different aspect ratio from the streamed JPEG, so mapping by independent
+  // X/Y scales sends hover and drag coordinates to the wrong remote pixel
+  // (notably table headers, filter icons and horizontal scrollbars).
+  const scale = Math.min(
+    rect.width / canvas.width,
+    rect.height / canvas.height,
+  );
+  const displayWidth = canvas.width * scale;
+  const displayHeight = canvas.height * scale;
+  const offsetX = (rect.width - displayWidth) / 2;
+  const offsetY = (rect.height - displayHeight) / 2;
+  const x = Math.min(
+    canvas.width,
+    Math.max(0, (e.clientX - rect.left - offsetX) / scale),
+  );
+  const y = Math.min(
+    canvas.height,
+    Math.max(0, (e.clientY - rect.top - offsetY) / scale),
+  );
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /** Paint a JPEG base64 frame onto a canvas (WebSocket stream). */
