@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   39 项  81%
-🟡 部分对齐    7 项  15%
+✅ 完全对齐   40 项  83%
+🟡 部分对齐    6 项  13%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -80,7 +80,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 43 | trace target `{role,name,frame}` | ✅ | `_target(frame=...)` 与 `_actual_target` 都回填 frame；release gate 新增 perception/action 两条断言 |
 | 44 | trace 不含 ref/selector/坐标 | ✅ | `_target` 契约测试 |
 | 45 | SDK 原生控件语义 parity | ✅ | `semanticParity.test.ts` 直接加载 SDK browser dist |
-| 46 | 企业自定义控件双执行器实测 | 🟡 | 同一 enterprise fixture 读取+动作均已对比：SDK action target 已从 `generic` 修为 `combobox + unlabeled control #2`；Octop 仍是 `combobox + 问题属性`。角色对齐，wrapper label 仍是宿主特有差异 |
+| 46 | 企业自定义控件双执行器实测 | ✅ | 同一 fixture：SDK 配置 `roleHints[].name` 后读取和 action target 都为 `combobox + 问题属性`；Octop `_field_controls` 同样；宿主需在装配期提供 name hint |
 | 47 | 录制回放可迁移 | ➖ | Octop 录制回放是宿主内部机制，不是 WebSkill 技能契约 |
 | 48 | 文档/附件读取 | ✅ | 既有 readers、linked documents、PDF/DOCX/XLSX 测试 |
 
@@ -525,3 +525,43 @@ Octop 仍多出 wrapper label `问题属性`，因为宿主 `_field_controls` �
 这是 name hint 差异，不再是 action target 整体丢失语义。
 
 剩余选择：保留 Octop 宿主增强，或给 SDK 增加 name hint 契约。
+
+
+## 20. RoleHint name hint 落地（2026-11-21）
+
+SDK `RoleHint` 新增可选：
+
+```ts
+name?: {
+  root?: string;
+  selectors: readonly string[];
+}
+```
+
+企业控件配置：
+
+```ts
+roleHints: [{
+  role: 'combobox',
+  selectors: ['.kd-cq-select'],
+  name: { root: '.kd-cq-field', selectors: ['.kd-cq-field-title-wrap'] }
+}]
+```
+
+结果：
+
+```text
+perception:    combobox / 问题属性
+action target: combobox / 问题属性
+```
+
+Octop 的 `_field_controls` 读取与 target 也是：
+
+```text
+combobox / 问题属性
+```
+
+因此企业控件读取和 action target 都已对齐；前提是宿主在装配期提供
+name hint（extension 默认配置尚未加这一条）。
+
+SDK browser 测试：873 passed。
