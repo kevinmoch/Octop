@@ -849,6 +849,13 @@ async def execute_action(
                 previous_target_ids,  # noqa: SLF001
             )
             if new_target is not None:
+                # A user click that opens a tab is a foreground navigation in a
+                # normal browser. The model target follows the new page, and the
+                # browser's active tab must follow too; otherwise the viewer keeps
+                # rendering the old page and the UI loses Chrome's default action.
+                await browser._internal.client.send(  # noqa: SLF001
+                    "Target.activateTarget", {"targetId": new_target}
+                )
                 if admit_model_target(session, new_target):
                     session.document = None
                     session.refs.clear()

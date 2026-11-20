@@ -44,6 +44,7 @@ class FakeClient:
         self.evaluation_context_ids: list[int] = []
         self.detached: list[str] = []
         self.page_target_available = True
+        self.activated_target: str | None = None
         self.new_target_url: str | None = None
         self.open_target_on_release: str | None = None
         self.frame_url = "https://cross.example.test/frame"
@@ -86,6 +87,10 @@ class FakeClient:
             return {}
         if method == "Target.attachToTarget":
             return {"sessionId": "cross-session-1"}
+        if method == "Target.activateTarget":
+            assert params and isinstance(params.get("targetId"), str)
+            self.activated_target = params["targetId"]
+            return {}
         if method == "Target.getTargets":
             infos: list[dict[str, Any]] = []
             if self.page_target_available:
@@ -619,7 +624,7 @@ async def test_tab_switch_does_not_silently_retarget_model(
     assert session.model_target == "target-1"
 
 
-async def test_new_target_updates_model_without_switching_view(
+async def test_new_target_updates_model_and_activates_view(
     registry: BrowserAgentRegistry,
 ) -> None:
     browser = FrameBrowser()
@@ -643,7 +648,7 @@ async def test_new_target_updates_model_without_switching_view(
     assert session.model_target == "target-2"
     assert session.document is None
     assert not session.refs
-    assert browser.active_target == "target-1"
+    assert browser.client.activated_target == "target-2"
     child = await read_page(
         session,
         {"type": "perceive", "scope": {"include": ["body"]}},
