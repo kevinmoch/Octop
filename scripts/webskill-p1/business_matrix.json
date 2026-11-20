@@ -1,0 +1,7 @@
+[
+  {"name": "现场巡检问题", "tab": "现场巡检问题", "expectFields": ["问题属性", "问题描述"]},
+  {"name": "日常检查", "tab": "日常检查", "expectFields": []},
+  {"name": "质量检查", "tab": "质量检查", "expectFields": []},
+  {"name": "工程管理", "tab": "工程管理", "expectFields": []},
+  {"name": "基建-云解决方案", "tab": "基建-云解决方案", "expectFields": []}
+]

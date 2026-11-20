@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 74 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 75 passed；SDK 语义 parity test 1 passed；transport 4 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -444,3 +444,32 @@ button 测试拖拽
 - `page_semantics_smoke.py` 增加 `--budget-ms` / `--perceive-budget-ms`，超预算退出非 0。
 - 当前真实预算：perceive ~81ms（预算 2000ms），fill/hover <500ms（预算 5000ms）。
 - 测试：`_keyboard_replace` 行为测试、audit `durationMs`、smoke 实际运行。
+
+
+## 20. 阶段 13：CCS 业务矩阵与写入恢复
+
+脚本：
+
+- `scripts/webskill-p1/business_matrix_smoke.py`
+- `scripts/webskill-p1/business_matrix.json`
+
+真实只读矩阵（全部感知成功，owner 最终 agent）：
+
+| Tab | nodes | targets | perceive |
+|---|---:|---:|---:|
+| 现场巡检问题 | 81 | 46 | 71ms |
+| 日常检查 | 20 | 10 | 67ms |
+| 质量检查 | 101 | 86 | 166ms |
+| 工程管理 | 214 | 188 | 174ms |
+| 基建-云解决方案 | 89 | 72 | 70ms |
+
+`--write` 额外执行写入/恢复 smoke：
+
+```text
+规格不符 → 产地不符 → 规格不符
+测试 → 测试暂存 → 测试
+```
+
+不点击保存/提交/审批，退出码 0。
+
+- 配置唯一性和首页存在性测试：`test_webskill_business_matrix.py`。
