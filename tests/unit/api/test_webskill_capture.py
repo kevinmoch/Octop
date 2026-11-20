@@ -202,3 +202,13 @@ def test_promotes_enterprise_title_cards_but_not_sensitive_inputs() -> None:
         ],
     }
     assert _promoted_elements(root) == [{"node_id": 2, "role": "link", "name": "投资立项管理"}]
+
+
+def test_promoted_name_is_emitted_in_node_shape() -> None:
+    from octop.infra.control.browser.webskill.page_agent import _node
+
+    assert _node({"role": "link", "name": "工程管理"}, "ws_ref") == {
+        "role": "link",
+        "ref": "ws_ref",
+        "name": "工程管理",
+    }

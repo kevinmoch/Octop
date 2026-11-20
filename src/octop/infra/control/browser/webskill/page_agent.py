@@ -222,7 +222,13 @@ def _node(element: dict[str, Any], ref: str) -> dict[str, Any]:
     name = (
         ""
         if _secret(element)
-        else str(element.get("accessibleName") or element.get("text") or element.get("label") or "")
+        else str(
+            element.get("accessibleName")
+            or element.get("text")
+            or element.get("label")
+            or element.get("name")
+            or ""
+        )
     )
     node: dict[str, Any] = {"role": role, "ref": ref}
     if name:
