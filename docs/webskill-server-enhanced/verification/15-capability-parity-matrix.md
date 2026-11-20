@@ -12,8 +12,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 
 ```text
 ✅ 完全对齐   42 项  88%
-🟡 部分对齐    4 项   8%
-❌ 未实现      1 项   2%
+🟡 部分对齐    5 项  10%
+❌ 未实现      0 项   0%
 ➖ 宿主特有     1 项   2%
 ```
 
@@ -70,7 +70,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 38 | tab workset / 新页 | ✅ | target admit/switch、stream 跟随 | — |
 | 39 | 下载信号 | ✅ | 真实 act_on_page click 触发 blob download；浏览器 Download 事件 `report.txt`；模型收到 `1 download` | — |
 | 40 | frame 内动作 | ✅ | frame/OOPIF 测试 | 跨 frame drag 明确拒绝 |
-| 41 | attach 跨宿主可移植 | ❌ | Octop-only | 需要 SDK 文件选择协议 |
+| 41 | attach 跨宿主可移植 | 🟡 | SDK `PageAgentRequest.files` + handler 消费 + extension `file-pick` host wrapper 已落地；真实运行仍需带该字段的 SDK 版本 | 依赖升级后做真实 extension attach 验收 |
 | 42 | 执行 target 语义身份 | ✅ | ref signature 回填 role/name；非主 frame 的 perception target 和 action outcome 现在都带 `frame`，trace 无 selector/坐标 | — |
 
 ## 4. 技能迁移/宿主矩阵
@@ -659,3 +659,40 @@ test_click_with_an_already_open_popover_is_not_noop
 
 当前 page action 测试：18 passed。
 矩阵第 34 行从 🟡 改为 ✅。
+
+
+## 24. 跨宿主 attach 协议（2026-11-21）
+
+### 协议
+
+`PageAgentRequest` 的 execute 变体新增可选：
+
+```ts
+interface PageAgentFile {
+  name: string;
+  type?: string;
+  data: string; // base64
+}
+
+{ type: 'execute'; request: PageActionRequest; files?: readonly PageAgentFile[] }
+```
+
+### 安全边界
+
+- `files` 是**宿主 → 页面**字段，模型面 `act_on_page` 仍没有文件参数
+- 只允许 `action === 'attach'` 携带 files；其他动作直接 `VALIDATION_FAILED`
+- 最多 5 个文件、单文件 10 MB、总计 20 MB
+- 无 files 时仍走页面侧 `pickFiles` 用户手势路径
+- handler 把文件放入一次性的 pickFiles 队列，执行后清空
+
+### Extension 宿主
+
+side panel 的 `pageActionUi` 使用既有 `file-pick` 交互卡选择文件，
+包装 transport 后在 execute 请求上附带 files；页面侧 handler 消费后走同一套
+DOM attach 执行器。
+
+### 当前状态
+
+SDK 已新增协议、handler、3 条单测和 extension host wrapper；
+但 extension 当前安装的是 SDK 0.29.0，运行时会忽略 `files`，因此还没有做
+真实 extension attach 端到端验收。矩阵第 41 行从 ❌ 改为 🟡。
