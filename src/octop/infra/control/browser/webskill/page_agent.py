@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import secrets
@@ -13,6 +14,7 @@ from urllib.parse import urlsplit
 from octop_browser.actions import interact, navigate
 from octop_browser.dom.builder import DOMBuilder
 from octop_browser.dom.refs import RefCache
+from octop_browser.models import ActionMetrics, ToolResult
 from octop_browser.session import BrowserSession
 
 from .frames import (
@@ -312,6 +314,101 @@ def _image_elements(root: dict[str, Any], excluded: set[int]) -> list[dict[str, 
     return images
 
 
+def _text_content(node: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    def visit(current: dict[str, Any]) -> None:
+        if current.get("nodeName") == "#text" and isinstance(current.get("nodeValue"), str):
+            parts.append(current["nodeValue"])
+        for child in current.get("children", []):
+            if isinstance(child, dict):
+                visit(child)
+
+    visit(node)
+    return " ".join(part.strip() for part in parts if part.strip())
+
+
+def _field_controls(root: dict[str, Any], excluded: set[int]) -> list[dict[str, Any]]:
+    """Infer labels for enterprise form fields whose label has no ``for``/aria link.
+
+    The control kit renders ``div[data-field-item]`` with a title span and a
+    nested input/custom combobox. The accessibility builder sees the control
+    but not the sibling title, so the model receives an unnamed textbox. This
+    bridge exposes the same field name the page displays.
+    """
+    controls: list[dict[str, Any]] = []
+    field_markers = {"kd-cq-field", "kd-cq-field-with-title"}
+
+    def find_label(node: dict[str, Any]) -> str:
+        tag = str(node.get("nodeName") or "").lower()
+        attrs = _attributes(node)
+        title = attrs.get("title", "").strip()
+        if title and tag in {"span", "label"}:
+            return title
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                found = find_label(child)
+                if found:
+                    return found
+        return ""
+
+    def find_control(node: dict[str, Any]) -> dict[str, Any] | None:
+        tag = str(node.get("nodeName") or "").lower()
+        attrs = _attributes(node)
+        node_id = node.get("nodeId")
+        classes = set(str(attrs.get("class", "")).split())
+        if isinstance(node_id, int) and node_id not in excluded:
+            if tag in {"input", "textarea", "select"}:
+                return {"tag": tag, "node_id": node_id}
+            if (
+                tag == "div"
+                and ("kd-cq-select" in classes or attrs.get("role") in {"combobox", "listbox"})
+                and attrs.get("tabindex", "") not in {"", "-1"}
+            ):
+                return {"tag": tag, "node_id": node_id, "role": "combobox"}
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                found = find_control(child)
+                if found is not None:
+                    return found
+        for shadow in node.get("shadowRoots", []):
+            if isinstance(shadow, dict):
+                found = find_control(shadow)
+                if found is not None:
+                    return found
+        return None
+
+    def visit(node: dict[str, Any]) -> None:
+        tag = str(node.get("nodeName") or "").lower()
+        attrs = _attributes(node)
+        classes = set(str(attrs.get("class", "")).split())
+        if tag not in {"script", "style", "template", "noscript"} and (
+            attrs.get("data-field-item") == "true" or classes & field_markers
+        ):
+            label = find_label(node)
+            control = find_control(node)
+            if label and control is not None and control["node_id"] not in excluded:
+                controls.append(
+                    {
+                        "tag": control["tag"],
+                        "role": control.get("role")
+                        or ("combobox" if control["tag"] == "select" else "textbox"),
+                        "node_id": control["node_id"],
+                        "accessibleName": label,
+                    }
+                )
+        for key in ("children", "shadowRoots"):
+            for child in node.get(key, []):
+                if isinstance(child, dict):
+                    visit(child)
+        content = node.get("contentDocument")
+        if isinstance(content, dict):
+            visit(content)
+
+    visit(root)
+    return controls
+
+
 def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
     """Expose clickable-looking divs the accessibility tree omits.
 
@@ -325,7 +422,7 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
     promoted: list[dict[str, Any]] = []
     sensitive_tags = {"script", "style", "template", "noscript"}
 
-    def visit(node: dict[str, Any]) -> None:
+    def visit(node: dict[str, Any], in_field_title: bool = False) -> None:
         tag = str(node.get("nodeName") or "").lower()
         if tag in sensitive_tags:
             return
@@ -342,8 +439,13 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
         # The nodeValue is usually on #text children, not the element; use the
         # element's title/aria as the stable accessible name for these cards.
         name = title or aria
+        classes = str(attrs.get("class", ""))
+        title_context = (
+            in_field_title or "kd-cq-field-title-wrap" in classes or "_3wxkawCQ" in classes
+        )
         if (
-            name
+            not title_context
+            and name
             and tag not in {"html", "body", "iframe", "frame", "img", "input", "textarea", "select"}
             and role not in {"button", "link", "tab", "menuitem", "option", "checkbox", "radio"}
             and (title or aria or tabindex in {"0", "true"} or role in {"button", "link"})
@@ -355,12 +457,26 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
                     "name": name[:300],
                 }
             )
+        elif (
+            not title_context
+            and tag in {"li", "div"}
+            and "dropdown-menu-item" in classes
+            and isinstance(node.get("nodeId"), int)
+            and _text_content(node)
+        ):
+            promoted.append(
+                {
+                    "node_id": node.get("nodeId"),
+                    "role": "option",
+                    "name": _text_content(node)[:300],
+                }
+            )
         for child in node.get("children", []):
             if isinstance(child, dict):
-                visit(child)
+                visit(child, title_context)
         for shadow in node.get("shadowRoots", []):
             if isinstance(shadow, dict):
-                visit(shadow)
+                visit(shadow, title_context)
 
     visit(root)
     return [node for node in promoted if isinstance(node.get("node_id"), int)]
@@ -495,6 +611,23 @@ async def read_page(
             ],
         ]
         excluded = _sensitive_subtrees(projected_root)
+        field_controls = _field_controls(projected_root, excluded)
+        by_node = {
+            element.get("node_id"): element
+            for element in raw_elements
+            if isinstance(element, dict) and isinstance(element.get("node_id"), int)
+        }
+        for field in field_controls:
+            existing = by_node.get(field["node_id"])
+            if existing is not None:
+                # The control's displayed value (or selected label) is not its
+                # field name. Always bind the explicit wrapper title so the model
+                # sees "问题属性"/"问题描述" instead of "规格不符"/"测试".
+                existing["accessibleName"] = field["accessibleName"]
+                if field["role"] in {"combobox", "textbox"}:
+                    existing["role"] = field["role"]
+            else:
+                raw_elements.append(field)
         if image_options is not None:
             known_nodes = {
                 element.get("node_id")
@@ -1050,6 +1183,51 @@ async def _actual_target(
     return target
 
 
+async def _click_dropdown_option(client: Any, value: str) -> bool:
+    """Choose a custom-kit dropdown item by its visible text.
+
+    These comboboxes are ``div[tabindex=0]`` widgets, not native ``select``
+    elements. After the authorized ref is clicked open, the matching item is
+    a portal ``li`` outside the field, so it is selected by text rather than by
+    a model-supplied selector.
+    """
+    expression = f"""(() => {{
+        const wanted = {json.dumps(value, ensure_ascii=False)}.trim();
+        const visible = (el) => {{
+            const r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== "hidden";
+        }};
+        const nodes = [...document.querySelectorAll(
+            '[role="option"], li, [class*="dropdown-menu-item"], [class*="option"]'
+        )];
+        const exact = nodes.filter((el) => visible(el) && (el.innerText || el.textContent || "").trim() === wanted);
+        const target = exact[0] || nodes.find((el) =>
+            visible(el) && (el.getAttribute("aria-label") || el.getAttribute("data-value") || "").trim() === wanted
+        );
+        if (!target) return false;
+        const rect = target.getBoundingClientRect();
+        const init = {{
+            bubbles: true,
+            cancelable: true,
+            view: window,
+            clientX: rect.left + 4,
+            clientY: rect.top + 4,
+            button: 0,
+        }};
+        target.dispatchEvent(new PointerEvent("pointerdown", init));
+        target.dispatchEvent(new MouseEvent("mousedown", init));
+        target.dispatchEvent(new PointerEvent("pointerup", init));
+        target.dispatchEvent(new MouseEvent("mouseup", init));
+        target.dispatchEvent(new MouseEvent("click", init));
+        return true;
+    }})()"""
+    result = await client.send(
+        "Runtime.evaluate",
+        {"expression": expression, "returnByValue": True, "awaitPromise": True},
+    )
+    return result.get("result", {}).get("value") is True
+
+
 async def execute_action(
     session: BrowserAgentSession,
     request: dict[str, Any],
@@ -1108,6 +1286,15 @@ async def execute_action(
             ):
                 await client.send("DOM.getDocument", {"depth": -1})
             target = await _actual_target(browser, entry, document, client)
+            target_tag = ""
+            if entry.backend_node_id > 0:
+                try:
+                    described_node = await client.send(
+                        "DOM.describeNode", {"backendNodeId": entry.backend_node_id}
+                    )
+                    target_tag = str(described_node.get("node", {}).get("nodeName") or "").lower()
+                except Exception:  # noqa: BLE001 - tag is only used for select routing
+                    target_tag = ""
             if target.get("secret") is True:
                 return {
                     "type": "execute-result",
@@ -1153,9 +1340,43 @@ async def execute_action(
                             client, action_cache, text=request["value"], ref=temporary_ref
                         )
                     elif action == "select":
-                        result = await interact.select_value(
-                            client, action_cache, value=request["value"], ref=temporary_ref
-                        )
+                        if target_tag == "select":
+                            result = await interact.select_value(
+                                client,
+                                action_cache,
+                                value=request["value"],
+                                ref=temporary_ref,
+                            )
+                        else:
+                            # Vendor comboboxes are div[tabindex=0] widgets.
+                            # Setting .value on them does nothing useful.
+                            await interact.click(client, action_cache, ref=temporary_ref)
+                            await asyncio.sleep(0.2)
+                            if await _click_dropdown_option(client, str(request["value"])):
+                                # The option click selected the item; the
+                                # outcome is a select, not merely opening menu.
+                                result = ToolResult(
+                                    success=True,
+                                    content=f"Selected {request['value']}",
+                                    metrics=ActionMetrics(
+                                        action="select",
+                                        duration_ms=0,
+                                        dom_nodes_scanned=0,
+                                        estimated_tokens=0,
+                                    ),
+                                )
+                            else:
+                                return {
+                                    "type": "execute-result",
+                                    "outcome": {
+                                        "ok": False,
+                                        "target": target,
+                                        "reason": (
+                                            "The dropdown did not expose an option "
+                                            f"matching {request['value']!r}"
+                                        ),
+                                    },
+                                }
                     elif action == "scroll":
                         result = await interact.scroll(
                             client,

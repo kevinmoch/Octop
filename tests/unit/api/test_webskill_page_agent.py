@@ -16,6 +16,8 @@ from octop_browser.models import ActionMetrics, ToolResult
 from octop.infra.control.browser.webskill.frames import FrameRoute, discover_frame_routes
 from octop.infra.control.browser.webskill.oopif import OopifSession, attach_oopif_route
 from octop.infra.control.browser.webskill.page_agent import (
+    _click_dropdown_option,
+    _field_controls,
     execute_action,
     issue_action_grant,
     public_error_code,
@@ -743,6 +745,59 @@ async def test_closed_model_target_fails_instead_of_following_view(
             registry=registry,
         )
     assert error.value.code == "PAGE_TAB_EXPIRED"
+
+
+def test_field_labels_are_inferred_from_enterprise_field_wrappers() -> None:
+    root = {
+        "nodeId": 1,
+        "nodeName": "#document",
+        "children": [
+            {
+                "nodeId": 2,
+                "nodeName": "DIV",
+                "attributes": ["class", "kd-cq-field", "data-field-item", "true"],
+                "children": [
+                    {
+                        "nodeName": "DIV",
+                        "attributes": ["class", "kd-cq-field-title-wrap"],
+                        "children": [
+                            {
+                                "nodeName": "SPAN",
+                                "attributes": ["title", "问题属性"],
+                                "children": [{"nodeName": "#text", "nodeValue": "问题属性"}],
+                            }
+                        ],
+                    },
+                    {
+                        "nodeId": 3,
+                        "nodeName": "DIV",
+                        "attributes": ["class", "kd-cq-select", "tabindex", "0"],
+                    },
+                    {
+                        "nodeId": 4,
+                        "nodeName": "INPUT",
+                        "attributes": ["class", "kd-cq-input"],
+                    },
+                ],
+            }
+        ],
+    }
+    fields = _field_controls(root, set())
+    assert {field["accessibleName"] for field in fields} == {"问题属性"}
+    assert {field["role"] for field in fields} == {"combobox"}
+
+
+async def test_custom_dropdown_option_selects_by_visible_text() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    class EvalClient:
+        async def send(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+            calls.append((method, params))
+            return {"result": {"value": True}}
+
+    assert await _click_dropdown_option(EvalClient(), "规格不符") is True
+    assert calls[0][0] == "Runtime.evaluate"
+    assert "规格不符" in calls[0][1]["expression"]
 
 
 async def test_image_request_captures_page_image(

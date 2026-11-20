@@ -654,7 +654,9 @@ async def run_browser_stream_session(
                 # merely moving the cursor, producing RESOURCE_NOT_ALLOWED on
                 # the next fill/click/scroll. Only a press, drag, key, wheel or
                 # navigation takes control; a buttonless move stays passive.
-                human_action = msg.get("type") != "mousemove" or bool(msg.get("buttons"))
+                human_action = msg.get("type") not in {"mousemove", "resize"} or bool(
+                    msg.get("buttons")
+                )
                 if human_action:
                     # Human input wins before it waits for an in-progress model write.
                     if control_owner_for(profile) != "user":
