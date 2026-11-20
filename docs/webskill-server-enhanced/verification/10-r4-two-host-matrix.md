@@ -24,7 +24,12 @@
 
 - 扩展宿主已在 Playwright Chromium 中打开：side panel、options、service worker 均正常；`host-probe.json=passed`。
 - 扩展宿主已重跑 pageTabs、paging、pageImage、PDF、downloads；`resources.json=passed`，页面错误 0。
-- 这轮扩展宿主使用 **scripted model** 驱动真实扩展/页面/下载/授权卡；不是外部 DeepSeek 模型完成全部任务。
+- 扩展宿主的 **DOCX/PPTX/大屏/viewer** 已用 DeepSeek 真实重跑：
+  - `deepseek-docs-docx.json=passed`
+  - `deepseek-docs-pptx.json=passed`
+  - `deepseek-docs-screen.json=passed`
+  - 模型 `deepseek-flash`，viewer `view.html` 可见标题与正文/三页/大屏指标。
+- 资源矩阵（pageTabs/paging/pageImage/PDF/downloads）的已存证据仍使用 **scripted model**；DeepSeek 资源重跑脚本尚未纳入本轮证据。
 - **仍不能宣称“两宿主完整能力对等”**：文档 PPTX/大屏、真实模型矩阵和 Office GUI 仍未覆盖。
 - 测试 CA、历史 K8s 证据、单宿主结果都不能替代两宿主对等。
 
