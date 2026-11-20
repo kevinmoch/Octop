@@ -170,7 +170,10 @@ async def _stream_loop(
     capture_context = (
         contextlib.nullcontext(None)
         if listen_only
-        else capture_subscription(profile, lambda: _capture_profile_jpeg(profile))
+        else capture_subscription(
+            f"{profile}:{id(sess)}",
+            lambda: _capture_jpeg(sess),
+        )
     )
     async with capture_context as subscription:
         while is_connected():
@@ -386,7 +389,29 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
     elif t == "tab_switch":
         tab_id = msg.get("tab_id")
         if tab_id is not None:
-            await sess.switch_tab(str(tab_id))
+            result = await sess.switch_tab(str(tab_id))
+            if not getattr(result, "success", False):
+                # The client may still hold a target id from before a browser
+                # restart. Resolve the current tab by its visible identity
+                # instead of leaving the user stuck on the old frame.
+                tabs = await sess.list_tabs()
+                metadata = (getattr(tabs, "metadata", None) or {}).get("tabs", [])
+                wanted_url = str(msg.get("tab_url") or "")
+                wanted_title = str(msg.get("tab_title") or "")
+                fallback = next(
+                    (
+                        tab
+                        for tab in metadata
+                        if isinstance(tab, dict)
+                        and (
+                            (wanted_url and tab.get("url") == wanted_url)
+                            or (wanted_title and tab.get("title") == wanted_title)
+                        )
+                    ),
+                    None,
+                )
+                if fallback is not None and fallback.get("tab_id") != tab_id:
+                    await sess.switch_tab(str(fallback["tab_id"]))
     elif t == "tab_close":
         tab_id = msg.get("tab_id")
         if tab_id is not None:
