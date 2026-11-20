@@ -1431,6 +1431,36 @@ async def _actual_target(
     return target
 
 
+_SCROLL_FUNCTION = r"""async function(direction) {
+    const vertical = direction === 'up' || direction === 'down';
+    const forward = direction === 'down' || direction === 'right';
+    const canScroll = (el) => {
+        if (!el) return false;
+        const style = getComputedStyle(el);
+        return vertical
+            ? (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay') && el.scrollHeight > el.clientHeight
+            : (style.overflowX === 'auto' || style.overflowX === 'scroll' || style.overflowX === 'overlay') && el.scrollWidth > el.clientWidth;
+    };
+    let container = this;
+    while (container && container !== document.body && container !== document.documentElement && !canScroll(container)) {
+        container = container.parentElement;
+    }
+    if (!container || (!canScroll(container) && container !== document.body && container !== document.documentElement)) {
+        container = document.scrollingElement || document.documentElement;
+    }
+    const extent = vertical ? container.clientHeight : container.clientWidth;
+    const before = vertical ? container.scrollTop : container.scrollLeft;
+    const step = Math.max(extent - 64, Math.round(extent / 2), 1);
+    const target = before + (forward ? step : -step);
+    if (vertical) container.scrollTop = target; else container.scrollLeft = target;
+    await new Promise((resolve) => setTimeout(resolve, 180));
+    const after = vertical ? container.scrollTop : container.scrollLeft;
+    const max = vertical ? container.scrollHeight - container.clientHeight : container.scrollWidth - container.clientWidth;
+    const atEnd = forward ? after >= max - 1 : after <= 0;
+    return { ok: true, movedBy: Math.abs(after - before), atEnd };
+}"""
+
+
 _TOGGLE_STATE_FUNCTION = """function() {
     const aria = this.getAttribute('aria-checked') ?? this.getAttribute('aria-pressed');
     const current = aria !== null ? aria === 'true' : (this.tagName === 'INPUT' ? Boolean(this.checked) : undefined);
@@ -1649,6 +1679,7 @@ async def execute_action(
                 }
             action = request["action"]
             noop = False
+            scrolled_payload: dict[str, Any] | None = None
             temporary_ref = f"ws_exec_{secrets.token_hex(12)}"
             action_cache = RefCache()
             try:
@@ -1721,11 +1752,38 @@ async def execute_action(
                                     },
                                 }
                     elif action == "scroll":
-                        result = await interact.scroll(
-                            client,
-                            action_cache,
-                            direction=request["value"],
-                            ref=temporary_ref,
+                        scroll_reply = await client.send(
+                            "Runtime.callFunctionOn",
+                            {
+                                "objectId": object_id,
+                                "functionDeclaration": _SCROLL_FUNCTION,
+                                "arguments": [{"value": request["value"]}],
+                                "awaitPromise": True,
+                                "returnByValue": True,
+                            },
+                        )
+                        scrolled_payload = scroll_reply.get("result", {}).get("value")
+                        if (
+                            not isinstance(scrolled_payload, dict)
+                            or scrolled_payload.get("ok") is not True
+                        ):
+                            return {
+                                "type": "execute-result",
+                                "outcome": {
+                                    "ok": False,
+                                    "target": target,
+                                    "reason": "The target has no scrollable region in that direction",
+                                },
+                            }
+                        result = ToolResult(
+                            success=True,
+                            content=f"Scrolled {request['value']}",
+                            metrics=ActionMetrics(
+                                action="scroll",
+                                duration_ms=0,
+                                dom_nodes_scanned=0,
+                                estimated_tokens=0,
+                            ),
                         )
                     elif action == "set":
                         state = await client.send(
@@ -1886,6 +1944,11 @@ async def execute_action(
             outcome: dict[str, Any] = {"ok": True, "target": target}
             if noop:
                 outcome["noop"] = True
+            if scrolled_payload is not None:
+                outcome["scrolled"] = {
+                    "atEnd": bool(scrolled_payload.get("atEnd")),
+                    "movedBy": int(scrolled_payload.get("movedBy") or 0),
+                }
             action_url = attached.url if attached is not None else document.url
             if current_url and current_url != action_url:
                 outcome["navigated"] = True

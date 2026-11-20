@@ -75,6 +75,8 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
   click 监听器探针和 cursor:pointer 的完整判定）。
 - action 句柄只发给可操作 role、图片取像和可滚动容器；generic 容器仍可读，
   但不发 ref。
+- ref 跨感知保留；同一签名复用 ref；DOM 节点替换后按 path/tag/role/name 验证恢复。
+- 新增 set/hover/drag/submit；attach 明确不在 P1 能力面内。
 - tab 切换优先于模型写锁；hover/resize 不抢 owner；手动点击新窗口会自动跟随 target。
 
 ## 3. 仍存在的差异（必须明确）
@@ -84,12 +86,12 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 | 感知结构 | 保留 DOM 父子树 | flat elements | 模型对层级/重复控件上下文较弱 |
 | 隐藏/零尺寸 | 过滤 action 句柄并隐藏节点 | 仅敏感/字段过滤，未完整做布局过滤 | 可能提供不可见控件 |
 | role promotion | click 探针 + cursor 差分 + roleHints | class/id/title/tabindex/href 启发式 | 无 class 语义的纯 JS 控件可能漏点 |
-| ref 恢复 | 签名恢复 + 跨感知复用 | backendNodeId + documentKey；重渲染即可能失效 | 多步 React/Vue 表单可能中途 stale ref |
+| ref 恢复 | 签名恢复 + 跨感知复用 | 已补：签名 path/tag/role/name 恢复；同签名复用 ref | 签名路径变化时仍会 stale |
 | action scope | 独立于读取范围 | 当前 body 读取/操作，敏感仅部分剪枝 | 边界比参考实现宽 |
 | 子树续读 / 分页 | 支持 ref 子树 + cursor | 明确 `PERCEPTION_SUBTREE_UNSUPPORTED` | 大页面只能整页读 |
 | 嵌套帧 | 自动发现并可路由 | 仅当前选中帧/有限 OOPIF 路由 | 跨 iframe 控件可能读不到 |
-| 动作集合 | click/fill/select/set/scroll/hover/drag/attach | click/fill/select/scroll/back | 复选框、拖拽、附件类技能无法直接迁移 |
-| scroll | 找真实滚动容器 + 静默等待 | wheel at element center, fixed 300px | 虚拟列表/横向容器行为不一致 |
+| 动作集合 | click/fill/select/set/scroll/hover/drag/attach | 已补 set/hover/drag/submit；attach 不支持 | 附件类技能无法直接迁移 |
+| scroll | 找真实滚动容器 + 静默等待 | 已按滚动容器计算步长并回读 atEnd/movedBy；未做完整静默窗口 | 虚拟列表异步加载仍可能读到旧行 |
 | 新建 Tab | tab watcher + workset | stream target activation | 已补主路径，模型侧 workset 语义仍弱 |
 
 ## 4. 技能兼容规则
@@ -118,7 +120,19 @@ P1 的 `describe(ref)` 返回与页面一致的 role/name，原始 WebSkill 生�
 | 新窗口 | 手动点击后 active target 跟随；Tab 仍可切换 |
 | owner | hover/resize 不切 user；点击画布才 user；助手 focus 回 agent |
 
-## 6. 结论
+## 6. 当前自动化覆盖
+
+| 测试 | 覆盖 |
+|---|---|
+| `test_webskill_page_agent.py` | 页面读取、frame、图片、字段标题、自定义 select、字段名称/值 |
+| `test_webskill_capture.py` | 图片取像、预算、OOPIF、title promotion |
+| `test_webskill_page_semantics.py` | ref 复用/签名恢复、live value、select 回读、generic promotion、动作集合与 attach 拒绝 |
+| `test_browser_stream_frames.py` | stream frame/nav 基础行为 |
+
+当前共 40 个相关测试通过；`attach`、完整 flat→tree、签名路径变化后的恢复、
+跨 iframe 自动发现和完整滚动静默窗口仍是明确的后续项。
+
+## 7. 结论
 
 当前 Octop 已经与 WebSkill 在**可访问名、值、原生/自定义 select、目标身份和 tab 主路径**
 上对齐；原始 LLM 技能依赖的 `role + name + value + action` 契约已可用。
