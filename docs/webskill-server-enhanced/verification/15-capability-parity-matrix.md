@@ -562,6 +562,13 @@ combobox / 问题属性
 ```
 
 因此企业控件读取和 action target 都已对齐；前提是宿主在装配期提供
-name hint（extension 默认配置尚未加这一条）。
+name hint。该默认配置已同步到：
+
+- SDK extension：`examples/browser-extension/src/shared/scopes.ts`
+- ccs-monorepo：`ccs-ai-proxy` / `ccs-ai-assistant` 的 `scopes.ts`
+- web-skill-site：`src/demo/webskill/perception.ts`
+
+三段下游均通过各自 typecheck；运行时仍需使用带 `RoleHint.name` 的 SDK 版本，
+旧 0.29.0 包装版本会忽略 `name`，但 role hint 仍生效。
 
 SDK browser 测试：873 passed。
