@@ -440,13 +440,15 @@ def _absolute_href(base_url: str, href: str) -> str:
     return urljoin(base_url, href) if href else ""
 
 
-def _target(element: dict[str, Any], ref: str) -> dict[str, Any]:
+def _target(element: dict[str, Any], ref: str, *, frame: str = "self") -> dict[str, Any]:
     node = _node(element, ref)
     target = {"ref": ref, "role": node["role"]}
     if "name" in node:
         target["name"] = node["name"]
     if _secret(element):
         target["secret"] = True
+    if frame != "self":
+        target["frame"] = frame
     return target
 
 
@@ -1537,7 +1539,7 @@ async def read_page(
                 image_candidates.append((node, node_ref or ""))
             nodes.append(node)
             if node_ref:
-                targets.append(_target(element, node_ref))
+                targets.append(_target(element, node_ref, frame=selected_frame))
         result: dict[str, Any] = {
             "nodes": _nest_nodes(elements, nodes, parents),
             "page": {
@@ -2259,6 +2261,8 @@ async def _actual_target(
         target["role"] = expected_role
     if isinstance(expected_name, str) and expected_name and target.get("secret") is not True:
         target["name"] = expected_name
+    if entry.frame != "self":
+        target["frame"] = entry.frame
     return target
 
 

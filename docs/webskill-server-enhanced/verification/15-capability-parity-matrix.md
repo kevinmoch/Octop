@@ -71,13 +71,13 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 39 | 下载信号 | 🟡 | page_agent 有 downloads 基础设施 | 未在本轮矩阵做完整动作级回归 |
 | 40 | frame 内动作 | ✅ | frame/OOPIF 测试 | 跨 frame drag 明确拒绝 |
 | 41 | attach 跨宿主可移植 | ❌ | Octop-only | 需要 SDK 文件选择协议 |
-| 42 | 执行 target 语义身份 | ✅ | ref signature 回填 role/name，trace 无 selector/坐标 | — |
+| 42 | 执行 target 语义身份 | ✅ | ref signature 回填 role/name；非主 frame 的 perception target 和 action outcome 现在都带 `frame`，trace 无 selector/坐标 | — |
 
 ## 4. 技能迁移/宿主矩阵
 
 | # | 能力 | 状态 | 证据 |
 |---:|---|---|---|
-| 43 | trace target `{role,name,frame}` | ✅ | `test_webskill_release_gate.py`、SDK parity test |
+| 43 | trace target `{role,name,frame}` | ✅ | `_target(frame=...)` 与 `_actual_target` 都回填 frame；release gate 新增 perception/action 两条断言 |
 | 44 | trace 不含 ref/selector/坐标 | ✅ | `_target` 契约测试 |
 | 45 | SDK 原生控件语义 parity | ✅ | `semanticParity.test.ts` 直接加载 SDK browser dist |
 | 46 | 企业自定义控件双执行器实测 | 🟡 | SDK 原生 fixture；未跑真实 extension 全链路 |
@@ -362,7 +362,7 @@ Octop 本地已用修复后的 `@webskill/sdk` 构建产物重新构建
 当前 Octop 定向测试：
 
 ```text
-85 passed
+87 passed
 ```
 
 SDK agent 测试：
@@ -380,3 +380,20 @@ SDK agent 测试：
 - downloads 未做完整动作级回归
 - 企业自定义控件双执行器未实测
 - 跨宿主 attach 仍需协议
+
+
+## 17. frame 目标身份修正（2026-11-21）
+
+对照发现一个真实缺口：矩阵曾把 trace target `{role,name,frame}` 记为已对齐，
+但 `_target` 和 `_actual_target` 实际没有回填 frame。
+
+已修正：
+
+- `_target(..., frame=selected_frame)`：感知结果里的 `targets` 带 frame
+- `_actual_target`：动作结果 target 带 `entry.frame`
+- 新增 release gate 断言：
+  - 感知 target 带 `frame: "iframe#orders"`
+  - 动作 outcome target 带同一个 frame
+- 回归测试：`87 passed`
+
+这直接补上了技能迁移契约里 `{role,name,frame}` 的 frame 部分。
