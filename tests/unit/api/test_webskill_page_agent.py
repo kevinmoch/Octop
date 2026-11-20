@@ -162,6 +162,20 @@ class FakeClient:
                             "attributes": ["type", "password"],
                         },
                         {
+                            "nodeId": 60,
+                            "backendNodeId": 600,
+                            "nodeName": "DIV",
+                            "attributes": ["style", "display:none"],
+                            "children": [
+                                {
+                                    "nodeId": 61,
+                                    "backendNodeId": 601,
+                                    "nodeName": "BUTTON",
+                                    "children": [{"nodeName": "#text", "nodeValue": "Hidden"}],
+                                }
+                            ],
+                        },
+                        {
                             "nodeId": 30,
                             "backendNodeId": 301,
                             "nodeName": "DIV",
@@ -566,6 +580,30 @@ async def test_perceive_confirm_grant_and_single_click(
         )
     assert error.value.code == "GRANT_INVALID"
     assert len(browser.clicks) == 1
+
+
+async def test_hidden_nodes_are_removed_from_the_read_tree(
+    registry: BrowserAgentRegistry,
+) -> None:
+    browser = FakeBrowser()
+    session = registry.create(1, "user-1")
+    reply = await read_page(
+        session,
+        {"type": "perceive", "scope": {"include": ["body"]}},
+        resolver=resolver_for(browser),
+        registry=registry,
+    )
+
+    def flatten(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for node in nodes:
+            result.append(node)
+            result.extend(flatten(node.get("children", [])))
+        return result
+
+    names = [node.get("name") for node in flatten(reply["result"]["nodes"])]
+    assert "Hidden" not in names
+    assert "Run once" in names
 
 
 async def test_dom_insertion_keeps_original_backend_node(

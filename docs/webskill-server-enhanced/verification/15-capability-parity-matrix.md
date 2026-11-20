@@ -11,8 +11,8 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 在本矩阵的 **48 项页面语义、动作和技能迁移能力**中：
 
 ```text
-✅ 完全对齐   38 项  79%
-🟡 部分对齐    8 项  17%
+✅ 完全对齐   39 项  81%
+🟡 部分对齐    7 项  15%
 ❌ 未实现      1 项   2%
 ➖ 宿主特有     1 项   2%
 ```
@@ -46,7 +46,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 19 | ref 跨感知复用 | ✅ | `PageRef` signature 复用 | — |
 | 20 | path 改变后的恢复 | 🟡 | 唯一 role/name/href 恢复 | 未覆盖行/列表上下文签名 |
 | 21 | 同名歧义拒绝 | ✅ | 唯一匹配才恢复，否则 stale | — |
-| 22 | 隐藏节点从读取树剪除 | 🟡 | 只剪 action ref，节点仍可能保留 | 与 WebSkill 的剪枝不完全一致 |
+| 22 | 隐藏节点从读取树剪除 | ✅ | `read_page` 的 `elements` 过滤隐藏祖先；隐藏图片/文件输入保留宿主取像/attach 通路；新增真实读取树测试 | — |
 
 ## 3. 动作能力矩阵
 
@@ -338,3 +338,45 @@ Octop 本地已用修复后的 `@webskill/sdk` 构建产物重新构建
 `dashboard/webskill`，并确认 bundle 含新的
 `does not match any page action` 校验。该 node_modules 替换是本地验证步骤；
 正式接入仍需把修复版 SDK 作为依赖升级/发布，`npm ci` 会重置当前替换。
+
+
+## 16. 读取/操作能力复核（2026-11-21）
+
+本轮对照修正了一处矩阵误判：
+
+- 第 22 行原先写“只剪 action ref，节点仍可能保留”，但 `read_page` 实际已经在
+  构造 `elements` 时调用 `_hidden_by_ancestor`，隐藏节点不会进入可读树；
+  只有可抓取图片和隐藏文件输入被保留给宿主能力。
+- 新增测试 `test_hidden_nodes_are_removed_from_the_read_tree`，验证隐藏子树不进入
+  `result.nodes`，可见按钮仍在。
+
+修正后矩阵：
+
+```text
+✅ 39 项
+🟡 7 项
+❌ 1 项（跨宿主 attach）
+➖ 1 项
+```
+
+当前 Octop 定向测试：
+
+```text
+85 passed
+```
+
+SDK agent 测试：
+
+```text
+537 passed
+```
+
+仍保留的读取/操作差异：
+
+- 嵌套 frame 仍需按 frame 选择，不是一次全树
+- inline-frame provenance 未做
+- paging 的 Octop cursor UI 未单独验证
+- 非 click/set 动作的 noop 仍简化
+- downloads 未做完整动作级回归
+- 企业自定义控件双执行器未实测
+- 跨宿主 attach 仍需协议
