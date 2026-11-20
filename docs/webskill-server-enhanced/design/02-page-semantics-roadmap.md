@@ -1,6 +1,6 @@
 # Octop PageAgent 与 WebSkill 页面语义对齐路线
 
-> 状态：执行中。基线提交 `607f2074`；当前定向测试 63 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
+> 状态：执行中。基线提交 `607f2074`；当前定向测试 66 passed。阶段 1 的 hover/HTML5 drag 已完成，阶段 2/3 的剩余项见下。
 > 参考：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。
 > 目标：把页面读取、操作和技能迁移从“逐页手工修”收敛为分阶段、可自动验收的契约。
@@ -240,8 +240,10 @@ host 侧选择文件 → `/attachments` API → PageAgent `DataTransfer`，SDK �
 - 阶段 3：完成（label/value/href、cursor:pointer 父级差分、DOM click 探针、actionable descendant 抑制均已实现并测试；scrollable 方向作为后续元数据增强）
 - 阶段 4：完成（同源嵌套 frame 自动发现、嵌套 frame refs、投影选择、OOPIF、动态导航失效、target workset 已有测试，共 20 项 frame/target 相关断言）
 - 阶段 5：完成 Octop-only 版本（host 文件选择 → attachments API → PageAgent DataTransfer；SDK 未改）
-- 阶段 6：部分完成（ref 子树读取已实现并测试；完整树形 children、cursor/paging 待补）
-- 阶段 7-9：部分/未开始
+- 阶段 6：完成（树形 children、ref 子树、客户端 paging 输入树已具备；真实页面 roots=63/flat=83）
+- 阶段 7：完成（path/tag/role/name/href 唯一恢复；歧义拒绝）
+- 阶段 8：部分（语义 target 契约测试；双执行器技能 fixture 待补）
+- 阶段 9：未开始
 
 - 阶段 7：部分完成（精确 path/tag/role/name 恢复；path 改变后按唯一 role/name/href 恢复已实现并测试）
 
@@ -307,3 +309,15 @@ OOPIF attach/detach/导航、target workset、new target 激活。
 - 测试：`test_subtree_reads_only_the_referenced_subtree` 验证全页 ref → 子树只含该目标，
   以及缺失 ref 的结构化错误。
 - 树形 `children`、cursor/paging 仍未实现，阶段 6 不宣称完整。
+
+
+## 10. 阶段 6/7 验收（本轮）
+
+- 感知输出改为 `PerceivedNode` 树：真实页面 roots=63、flat=83，
+  targets=48；字段 role/name/value/ref 保持正确。
+- `perceive_page(ref=...)` 只返回该子树；未知 ref / 跨 frame 有结构化错误。
+- 分页由 SDK 的 `segmentPerception` 处理，P1 负责提供合法树。
+- ref 恢复支持 path 不变、path 改变后按唯一 role/name/href 恢复；
+  同名歧义返回 `PAGE_ACTION_STALE_REF`，不猜测目标。
+- 测试：tree nesting、subtree、ambiguous recovery、semantic target shape。
+- 技能 target 契约测试断言只含 `ref/role/name`，不含 selector/坐标。

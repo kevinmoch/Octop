@@ -912,6 +912,33 @@ async def _live_value(client: Any, backend_node_id: int) -> str | None:
     return value[:200] if value else None
 
 
+def _nest_nodes(
+    elements: list[dict[str, Any]],
+    nodes: list[dict[str, Any]],
+    parents: dict[int, int | None],
+) -> list[dict[str, Any]]:
+    """Project the flat CDP element list back into PerceivedNode children."""
+    by_dom_id: dict[int, dict[str, Any]] = {}
+    for element, node in zip(elements, nodes, strict=False):
+        node_id = element.get("node_id")
+        if isinstance(node_id, int):
+            by_dom_id[node_id] = node
+    roots: list[dict[str, Any]] = []
+    for element, node in zip(elements, nodes, strict=False):
+        node_id = element.get("node_id")
+        if not isinstance(node_id, int):
+            continue
+        parent_id = parents.get(node_id)
+        while parent_id is not None and parent_id not in by_dom_id:
+            parent_id = parents.get(parent_id)
+        if parent_id is None:
+            roots.append(node)
+        else:
+            parent = by_dom_id[parent_id]
+            parent.setdefault("children", []).append(node)
+    return roots
+
+
 async def read_page(
     session: BrowserAgentSession,
     request: dict[str, Any],
@@ -1252,7 +1279,7 @@ async def read_page(
             if node_ref:
                 targets.append(_target(element, node_ref))
         result: dict[str, Any] = {
-            "nodes": nodes,
+            "nodes": _nest_nodes(elements, nodes, parents),
             "page": {
                 "url": selected_url,
                 **({"title": selected_title} if selected_title else {}),

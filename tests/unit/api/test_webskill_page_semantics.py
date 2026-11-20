@@ -13,10 +13,12 @@ from octop.infra.control.browser.webskill.page_agent import (
     _file_inputs,
     _hidden_by_ancestor,
     _live_value,
+    _nest_nodes,
     _node_parents,
     _promoted_elements,
     _recover_ref,
     _scope_selectors,
+    _target,
     _within_scope,
 )
 from octop.infra.control.browser.webskill.sessions import (
@@ -228,6 +230,23 @@ def test_generic_promotion_recognises_class_and_href_signals() -> None:
     assert {"node_id": 3, "role": "link", "name": "查看详情"} in promoted
 
 
+def test_perceived_nodes_keep_their_children_when_rebuilt_as_a_tree() -> None:
+    elements = [
+        {"node_id": 1, "tag": "div"},
+        {"node_id": 2, "tag": "button"},
+        {"node_id": 3, "tag": "input"},
+    ]
+    nodes = [{"role": "generic"}, {"role": "button"}, {"role": "textbox"}]
+    parents = {1: None, 2: 1, 3: 1}
+    roots = _nest_nodes(elements, nodes, parents)
+    assert roots == [
+        {
+            "role": "generic",
+            "children": [{"role": "button"}, {"role": "textbox"}],
+        }
+    ]
+
+
 def test_invisible_file_inputs_are_exposed_for_attach() -> None:
     root = {
         "nodeName": "BODY",
@@ -254,6 +273,51 @@ def test_invisible_file_inputs_are_exposed_for_attach() -> None:
             "accessibleName": "上传附件",
         }
     ]
+
+
+def test_ambiguous_signature_recovery_is_rejected() -> None:
+    class DuplicateClient:
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method == "DOM.getDocument":
+                return {
+                    "root": {
+                        "nodeId": 1,
+                        "nodeName": "#document",
+                        "children": [
+                            {
+                                "nodeId": 2,
+                                "backendNodeId": 20,
+                                "nodeName": "BUTTON",
+                                "attributes": ["title", "保存"],
+                            },
+                            {
+                                "nodeId": 3,
+                                "backendNodeId": 21,
+                                "nodeName": "BUTTON",
+                                "attributes": ["title", "保存"],
+                            },
+                        ],
+                    }
+                }
+            raise AssertionError(method)
+
+    entry = PageRef(
+        backend_node_id=999,
+        document_key="document-key",
+        frame="self",
+        signature=json.dumps({"path": [9], "tag": "button", "role": "button", "name": "保存"}),
+    )
+    assert asyncio.run(_recover_ref(DuplicateClient(), entry)) is None
+
+
+def test_action_target_has_semantic_identity_only() -> None:
+    target = _target(
+        {"tag": "button", "role": "button", "accessibleName": "保存"},
+        "ws_ref",
+    )
+    assert target == {"ref": "ws_ref", "role": "button", "name": "保存"}
+    assert "selector" not in target
+    assert "x" not in target and "y" not in target
 
 
 def test_cursor_pointer_is_supplemental_promotion_evidence() -> None:
