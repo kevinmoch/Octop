@@ -254,3 +254,27 @@
 .dockHandle:hover::after {
   background: var(--fn-color-brand, #6366f1);
 }
+
+/* WebSkill wants its own AI/Console tabs at the very top. Keep only the
+   close/dock controls floating at the right, without a title row. */
+.headerOverlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 4;
+  width: auto;
+  max-width: 70%;
+  padding: 3px 4px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.headerOverlay .title {
+  display: none;
+}
+
+.headerOverlay .actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  max-width: none;
+}

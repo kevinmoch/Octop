@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Spin } from "antd";
+import { Alert, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import AssistantFrame, {
   type AssistantPlacement,
@@ -95,7 +95,8 @@ export default function WebSkillFrame({
   const { mode } = useTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
-  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [frameLoaded, setFrameLoaded] = useState(false);
+  const handoffRef = useRef(false);
   const locale = i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en";
   const frameUrl = new URL(
     `${import.meta.env.BASE_URL}webskill/`,
@@ -112,6 +113,34 @@ export default function WebSkillFrame({
     );
   }, []);
 
+  const requestAgentControl = useCallback(() => {
+    if (!browserProfile || handoffRef.current) {
+      return;
+    }
+    handoffRef.current = true;
+    void browserApi
+      .handoff(browserProfile, "agent", "WebSkill panel focus")
+      .catch((error) => showApiError(error, t("webskill.handoffFailed"), t))
+      .finally(() => {
+        window.setTimeout(() => {
+          handoffRef.current = false;
+        }, 500);
+      });
+  }, [browserProfile, controlOwner, t]);
+
+  useEffect(() => {
+    if (!frameLoaded || !frameRef.current) return;
+    const doc = frameRef.current.contentDocument;
+    if (!doc) return;
+    const onInteract = () => requestAgentControl();
+    doc.addEventListener("pointerdown", onInteract, true);
+    doc.addEventListener("focusin", onInteract, true);
+    return () => {
+      doc.removeEventListener("pointerdown", onInteract, true);
+      doc.removeEventListener("focusin", onInteract, true);
+    };
+  }, [frameLoaded, requestAgentControl]);
+
   useEffect(() => {
     const listener = (event: MessageEvent<unknown>) => {
       if (
@@ -123,6 +152,10 @@ export default function WebSkillFrame({
       if (typeof data !== "object" || data === null) return;
       const message = data as Record<string, unknown>;
       if (message.channel !== CHANNEL) return;
+      if (message.type === "interact") {
+        requestAgentControl();
+        return;
+      }
       if (message.type === "ready" && sessionId) {
         send({ type: "init", sessionId, userId, locale, theme: mode });
         setReady(true);
@@ -429,37 +462,13 @@ export default function WebSkillFrame({
       placementLocked={placementLocked}
       placements={["right", "bottom", "float"]}
       hidden={hidden}
-      title="WebSkill"
+      title={null}
+      overlayHeader
       onClose={onClose}
-      headerExtra={
-        <Button
-          size="small"
-          type="link"
-          disabled={!sessionId || !browserProfile || handoffBusy}
-          onClick={() => {
-            const profile = browserProfile;
-            if (!sessionId || !profile) return;
-            setHandoffBusy(true);
-            void browserApi
-              .handoff(
-                profile,
-                controlOwner === "user" ? "agent" : "user",
-                "WebSkill explicit handoff",
-              )
-              .catch((error) =>
-                showApiError(error, t("webskill.handoffFailed"), t),
-              )
-              .finally(() => setHandoffBusy(false));
-          }}
-        >
-          {controlOwner === "user"
-            ? t("webskill.returnControl")
-            : t("webskill.takeControl")}
-        </Button>
-      }
       bodyClassName="webskill-frame-body"
     >
       <div
+        onPointerDownCapture={() => requestAgentControl()}
         style={{
           height: "100%",
           minHeight: 0,
@@ -491,6 +500,7 @@ export default function WebSkillFrame({
             ref={frameRef}
             title="WebSkill"
             src={frameUrl}
+            onLoad={() => setFrameLoaded(true)}
             sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
             style={{
               display: "block",

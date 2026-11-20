@@ -66,6 +66,9 @@ interface BrowserViewerProps {
   /** Called whenever a frame is painted (parent tracks readiness). */
   onFrameReadyChange?: (ready: boolean) => void;
 
+  /** Called before a user click enters the remote viewport. */
+  onUserTakeover?: () => void;
+
   /** Reconnect handler shown in the error / connecting placeholder. */
   onReconnect?: () => void;
 
@@ -106,6 +109,7 @@ export const BrowserViewer = forwardRef<
     addressBarExtra,
     overlay,
     onFrameReadyChange,
+    onUserTakeover,
     onReconnect,
     connectingHint,
   },
@@ -289,6 +293,7 @@ export const BrowserViewer = forwardRef<
           styles.viewportContainer,
           interactive && styles.viewportInteractive,
         )}
+        onPointerDownCapture={() => onUserTakeover?.()}
       >
         {isError ? (
           <div className={styles.placeholder}>

@@ -712,6 +712,20 @@ export default function RemoteBrowserPage({
     }
   }, [browserProfile, enhanced, navUrl, startStream, t]);
 
+  const userHandoffRef = useRef(false);
+  const requestUserControl = useCallback(() => {
+    if (!browserProfile || userHandoffRef.current) return;
+    userHandoffRef.current = true;
+    void browserApi
+      .handoff(browserProfile, "user", "canvas interaction")
+      .catch(() => undefined)
+      .finally(() => {
+        window.setTimeout(() => {
+          userHandoffRef.current = false;
+        }, 500);
+      });
+  }, [browserProfile]);
+
   const closeSession = useCallback(() => {
     disconnect();
     closeAgentSession();
@@ -1305,6 +1319,7 @@ export default function RemoteBrowserPage({
                   interactive={Boolean(session)}
                   bookmarked={currentBookmarked}
                   onToggleBookmark={toggle}
+                  onUserTakeover={requestUserControl}
                   addressBarExtra={
                     <>
                       <Button

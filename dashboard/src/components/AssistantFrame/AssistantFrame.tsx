@@ -131,6 +131,7 @@ export default function AssistantFrame({
   hidden = false,
   title,
   headerExtra,
+  overlayHeader = false,
   onClose,
   children,
   bodyClassName,
@@ -156,6 +157,8 @@ export default function AssistantFrame({
   hidden?: boolean;
   title: ReactNode;
   headerExtra?: ReactNode;
+  /** Keep close/dock controls floating over the body instead of consuming a row. */
+  overlayHeader?: boolean;
   onClose: () => void;
   children: ReactNode;
   bodyClassName?: string;
@@ -351,7 +354,9 @@ export default function AssistantFrame({
       ))}
       <div className={overlay ? styles.glass : styles.dockShell}>
         <div
-          className={styles.header}
+          className={`${styles.header}${
+            overlayHeader ? ` ${styles.headerOverlay}` : ""
+          }`}
           data-float={floating ? "1" : "0"}
           onPointerDown={onHeaderPointerDown}
         >
