@@ -29,6 +29,7 @@ class ActionClient:
         self.node_names = {10: "INPUT", 11: "DIV"}
         self.native_drag = False
         self.fill_reason: str | None = None
+        self.status_text: str | None = None
 
     async def send(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = params or {}
@@ -42,6 +43,8 @@ class ActionClient:
             expression = str(params.get("expression") or "")
             if expression == "location.href":
                 return {"result": {"value": self.url}}
+            if 'role="status"' in expression and self.status_text is not None:
+                return {"result": {"value": self.status_text}}
             if "__octopPageChanges" in expression:
                 if "MutationObserver" in expression:
                     return {"result": {"value": True}}
@@ -260,6 +263,15 @@ def test_click_reports_dom_changes() -> None:
     result = _run(client, "click")
     assert result["outcome"]["ok"] is True
     assert result["outcome"]["changes"] == {"added": 2, "removed": 1}
+
+
+def test_click_reports_status_text_and_redacts_the_action_value() -> None:
+    client = ActionClient()
+    client.role = "button"
+    client.name = "提交"
+    client.status_text = "Saved VERIFY-STATUS"
+    result = _run(client, "click", value="VERIFY-STATUS")
+    assert result["outcome"]["changes"]["status"] == "Saved [redacted]"
 
 
 def test_click_uses_real_pointer_sequence() -> None:

@@ -2587,6 +2587,34 @@ _CHANGE_OBSERVER_STOP = r"""(() => {
 })()"""
 
 
+_STATUS_TEXT_JS = r"""(() => {
+    const visible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+    };
+    const text = (el) => String((el.textContent || '')).replace(/\s+/g, ' ').trim();
+    const nodes = [...document.querySelectorAll('[role="status"], [role="alert"], .messages .message, .messages li')]
+        .filter(visible)
+        .map(text)
+        .filter(Boolean);
+    const value = nodes.at(-1);
+    return value === undefined ? null : value.slice(0, 200);
+})()"""
+
+
+async def _status_text(client: Any) -> str | None:
+    try:
+        reply = await client.send(
+            "Runtime.evaluate",
+            {"expression": _STATUS_TEXT_JS, "returnByValue": True},
+        )
+    except Exception:  # noqa: BLE001 - status text is supplemental
+        return None
+    value = reply.get("result", {}).get("value")
+    return value if isinstance(value, str) and value else None
+
+
 async def _start_change_observation(client: Any) -> None:
     with contextlib.suppress(Exception):
         await client.send(
@@ -3096,6 +3124,7 @@ async def execute_action(
             new_modals = sorted(modals_after - modals_before)
             if new_modals:
                 session.elevated_modals.update(new_modals)
+            status_text = None if target.get("secret") is True else await _status_text(client)
             changes = await _stop_change_observation(client)
             evaluation: dict[str, Any] = {"expression": "location.href", "returnByValue": True}
             if attached is not None:
@@ -3112,8 +3141,15 @@ async def execute_action(
                     "atEnd": bool(scrolled_payload.get("atEnd")),
                     "movedBy": int(scrolled_payload.get("movedBy") or 0),
                 }
-            if changes is not None and (changes["added"] or changes["removed"]):
-                outcome["changes"] = changes
+            if status_text is not None:
+                request_value = request.get("value")
+                if isinstance(request_value, str) and request_value:
+                    status_text = status_text.replace(request_value, "[redacted]")
+            if changes is not None and (changes["added"] or changes["removed"] or status_text):
+                outcome["changes"] = {
+                    **changes,
+                    **({"status": status_text} if status_text else {}),
+                }
             if new_modals:
                 outcome["elevatedModal"] = new_modals[0]
             action_url = attached.url if attached is not None else document.url
