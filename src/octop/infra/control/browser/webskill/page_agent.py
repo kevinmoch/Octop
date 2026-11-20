@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import re
 import secrets
@@ -579,7 +580,30 @@ def _field_controls(root: dict[str, Any], excluded: set[int]) -> list[dict[str, 
     return controls
 
 
-def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
+def _has_actionable_descendant(node: dict[str, Any]) -> bool:
+    for key in ("children", "shadowRoots"):
+        for child in node.get(key, []):
+            if not isinstance(child, dict):
+                continue
+            tag = str(child.get("nodeName") or "").lower()
+            attrs = _attributes(child)
+            role = str(attrs.get("role", "")).lower()
+            if (
+                tag in {"a", "button", "input", "select", "textarea"}
+                or role in ACTIONABLE_ROLES
+                or attrs.get("contenteditable") == "true"
+            ):
+                return True
+            if _has_actionable_descendant(child):
+                return True
+    return False
+
+
+def _promoted_elements(
+    root: dict[str, Any],
+    cursor_backends: set[int] | None = None,
+    click_backends: set[int] | None = None,
+) -> list[dict[str, Any]]:
     """Expose clickable-looking divs the accessibility tree omits.
 
     Enterprise UI kits often render menu cards as ``div[title]`` with a Vue
@@ -614,6 +638,17 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
         interactive_token = INTERACTIVE_TOKEN.search(class_and_id) is not None
         text = _text_content(node)
         name = title or aria or text
+        backend_id = node.get("backendNodeId")
+        cursor_pointer = (
+            isinstance(backend_id, int)
+            and cursor_backends is not None
+            and backend_id in cursor_backends
+        )
+        click_listener = (
+            isinstance(backend_id, int)
+            and click_backends is not None
+            and backend_id in click_backends
+        )
         title_context = (
             in_field_title or "kd-cq-field-title-wrap" in classes or "_3wxkawCQ" in classes
         )
@@ -623,12 +658,15 @@ def _promoted_elements(root: dict[str, Any]) -> list[dict[str, Any]]:
             and tag not in {"html", "body", "iframe", "frame", "img", "input", "textarea", "select"}
             and role not in {"button", "link", "tab", "menuitem", "option", "checkbox", "radio"}
             and role in PROMOTABLE_ROLES
+            and not _has_actionable_descendant(node)
             and (
                 title
                 or aria
                 or tabindex not in {"", "-1"}
                 or interactive_token
                 or href
+                or cursor_pointer
+                or click_listener
                 or role in {"button", "link", "option", "tab", "menuitem"}
             )
         ):
@@ -678,6 +716,123 @@ _LIVE_VALUE_FUNCTION = r"""function() {
     }
     return '';
 }"""
+
+
+_CURSOR_PROBE_JS = r"""(() => {
+    let count = 0;
+    for (const el of document.querySelectorAll('*')) {
+        if (count >= 8000) break;
+        try {
+            const cursor = getComputedStyle(el).cursor;
+            const parent = el.parentElement;
+            const parentCursor = parent ? getComputedStyle(parent).cursor : '';
+            if (cursor === 'pointer' && parentCursor !== 'pointer') {
+                el.setAttribute('data-octop-cursor-probe', '1');
+                count += 1;
+            }
+        } catch (_) {}
+    }
+    return count;
+})()"""
+
+
+async def _cursor_pointer_backends(client: Any) -> set[int]:
+    marked: set[int] = set()
+    try:
+        probe = await client.send(
+            "Runtime.evaluate",
+            {"expression": _CURSOR_PROBE_JS, "returnByValue": True},
+        )
+        if not isinstance(probe.get("result", {}).get("value"), int):
+            return marked
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = raw.get("root", {})
+        if not isinstance(root, dict):
+            return marked
+
+        def visit(node: dict[str, Any]) -> None:
+            attrs = _attributes(node)
+            backend = node.get("backendNodeId")
+            if attrs.get("data-octop-cursor-probe") == "1" and isinstance(backend, int):
+                marked.add(backend)
+            for key in ("children", "shadowRoots"):
+                for child in node.get(key, []):
+                    if isinstance(child, dict):
+                        visit(child)
+
+        visit(root)
+        return marked
+    except Exception:  # noqa: BLE001 - cursor is supplemental promotion evidence
+        return marked
+    finally:
+        with contextlib.suppress(Exception):
+            await client.send(
+                "Runtime.evaluate",
+                {
+                    "expression": "document.querySelectorAll('[data-octop-cursor-probe]').forEach((el) => el.removeAttribute('data-octop-cursor-probe'))",
+                    "returnByValue": True,
+                },
+            )
+
+
+_CLICK_PROBE_JS = r"""(() => {
+    let count = 0;
+    if (typeof getEventListeners !== 'function') return 0;
+    for (const el of document.querySelectorAll('*')) {
+        if (count >= 8000) break;
+        try {
+            const listeners = getEventListeners(el);
+            if (listeners && Array.isArray(listeners.click) && listeners.click.length > 0) {
+                el.setAttribute('data-octop-click-probe', '1');
+                count += 1;
+            }
+        } catch (_) {}
+    }
+    return count;
+})()"""
+
+
+async def _click_listener_backends(client: Any) -> set[int]:
+    marked: set[int] = set()
+    try:
+        probe = await client.send(
+            "Runtime.evaluate",
+            {
+                "expression": _CLICK_PROBE_JS,
+                "returnByValue": True,
+                "includeCommandLineAPI": True,
+            },
+        )
+        if not isinstance(probe.get("result", {}).get("value"), int):
+            return marked
+        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = raw.get("root", {})
+        if not isinstance(root, dict):
+            return marked
+
+        def visit(node: dict[str, Any]) -> None:
+            attrs = _attributes(node)
+            backend = node.get("backendNodeId")
+            if attrs.get("data-octop-click-probe") == "1" and isinstance(backend, int):
+                marked.add(backend)
+            for key in ("children", "shadowRoots"):
+                for child in node.get(key, []):
+                    if isinstance(child, dict):
+                        visit(child)
+
+        visit(root)
+        return marked
+    except Exception:  # noqa: BLE001 - click probing is supplemental
+        return marked
+    finally:
+        with contextlib.suppress(Exception):
+            await client.send(
+                "Runtime.evaluate",
+                {
+                    "expression": "document.querySelectorAll('[data-octop-click-probe]').forEach((el) => el.removeAttribute('data-octop-click-probe'))",
+                    "returnByValue": True,
+                },
+            )
 
 
 async def _action_visible(client: Any, backend_node_id: int) -> bool:
@@ -840,7 +995,13 @@ async def read_page(
         known_nodes = {
             element.get("node_id") for element in raw_elements if isinstance(element, dict)
         }
-        promoted = _promoted_elements(projected_root)
+        cursor_backends = await _cursor_pointer_backends(client)
+        click_backends = await _click_listener_backends(client)
+        promoted = _promoted_elements(
+            projected_root,
+            cursor_backends=cursor_backends,
+            click_backends=click_backends,
+        )
         by_node = {
             element.get("node_id"): element
             for element in raw_elements

@@ -227,6 +227,57 @@ def test_generic_promotion_recognises_class_and_href_signals() -> None:
     assert {"node_id": 3, "role": "link", "name": "查看详情"} in promoted
 
 
+def test_cursor_pointer_is_supplemental_promotion_evidence() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "backendNodeId": 20,
+                "children": [{"nodeName": "#text", "nodeValue": "更多"}],
+            }
+        ],
+    }
+    assert _promoted_elements(root) == []
+    promoted = _promoted_elements(root, cursor_backends={20})
+    assert {"node_id": 2, "role": "button", "name": "更多"} in promoted
+
+
+def test_dom_click_listener_is_supplemental_promotion_evidence() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "backendNodeId": 20,
+                "children": [{"nodeName": "#text", "nodeValue": "打开"}],
+            }
+        ],
+    }
+    promoted = _promoted_elements(root, click_backends={20})
+    assert {"node_id": 2, "role": "button", "name": "打开"} in promoted
+
+
+def test_parent_with_actionable_descendant_is_not_promoted_again() -> None:
+    root = {
+        "nodeName": "BODY",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "DIV",
+                "nodeId": 2,
+                "attributes": ["title", "拥有按钮的卡片"],
+                "children": [{"nodeName": "BUTTON", "nodeId": 3}],
+            }
+        ],
+    }
+    assert _promoted_elements(root) == []
+
+
 def test_action_contract_includes_set_hover_drag_submit_but_not_attach() -> None:
     assert {"set", "hover", "drag", "submit"} <= SUPPORTED_ACTIONS
     assert "attach" not in SUPPORTED_ACTIONS
