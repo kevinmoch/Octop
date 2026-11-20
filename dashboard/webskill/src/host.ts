@@ -52,6 +52,7 @@ import {
 } from "./recordingSkills";
 import { OctopPageAgentTransport } from "./transport";
 import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
+import { createPageActionConsent } from "./pageActionConsent";
 import { pdfDocumentReader, pdfExtractor } from "./pdf";
 
 export type ConsolePage = NonNullable<ConsoleProps["initialPage"]>;
@@ -114,6 +115,17 @@ export async function createWebSkillHost(
     audit,
   });
   const pageActionUi: { current?: PageActionUi } = {};
+  const pageActionConsent = createPageActionConsent({
+    origin: () => {
+      if (currentPage?.url === undefined) return undefined;
+      try {
+        return new URL(currentPage.url).origin;
+      } catch {
+        return undefined;
+      }
+    },
+    locale: () => init.locale,
+  });
   const tabPort = new OctopTabWorksetPort(bridge);
   let pageActions: PageActionPolicy | undefined;
   const pageTabs = new TabWorksetPolicy({
@@ -130,6 +142,7 @@ export async function createWebSkillHost(
         pageActionUi.current?.request(input) ??
         Promise.resolve({ id: input.id, cancelled: true }),
     },
+    consent: pageActionConsent,
     audit,
     diagnose: (ref) => explainResolution(targets.resolve(ref)),
     describePage: () => currentPage,
