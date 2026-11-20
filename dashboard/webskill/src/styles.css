@@ -26,26 +26,33 @@ body {
 .host-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
+  justify-content: flex-start;
+  height: 32px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .host-header nav {
   display: flex;
-  gap: 4px;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
 }
 .host-tab {
   border: 0;
-  border-radius: 6px;
-  padding: 6px 10px;
+  border-radius: 0;
+  padding: 0;
   cursor: pointer;
   background: transparent;
   color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
 }
 .host-tab[aria-pressed="true"] {
-  background: var(--secondary);
-  color: var(--secondary-foreground);
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 600;
 }
 .host-stage {
   color: var(--muted-foreground);
