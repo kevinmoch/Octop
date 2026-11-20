@@ -55,6 +55,7 @@ from octop.infra.control.browser.frame_hub import capture_subscription
 from octop.infra.control.browser.webskill.lease import profile_lease
 from octop.infra.control.browser.webskill.ownership import set_control_owner
 from octop.infra.control.browser.webskill.sessions import browser_agent_registry
+from octop.infra.control.browser.webskill.targets import wait_for_new_page_target
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -69,6 +70,7 @@ if Version(__version__) >= Version("1.1.0"):
 
 _FRAME_INTERVAL_S = 1 / 12
 _SESSION_INTERVAL_S = 1.0
+_MOUSE_TARGETS: dict[int, set[str]] = {}
 
 
 def _normalize_nav_url(raw: str) -> str:
@@ -312,6 +314,42 @@ async def _dispatch_key(sess: Any, msg: dict[str, Any]) -> None:
     )
 
 
+async def _snapshot_mouse_targets(sess: Any) -> None:
+    try:
+        targets = await asyncio.wait_for(
+            sess._internal.client.send("Target.getTargets"),
+            timeout=0.5,  # noqa: SLF001
+        )
+    except Exception:  # noqa: BLE001 - a click can still be forwarded
+        _MOUSE_TARGETS.pop(id(sess), None)
+        return
+    _MOUSE_TARGETS[id(sess)] = {
+        str(info.get("targetId"))
+        for info in targets.get("targetInfos", [])
+        if isinstance(info, dict) and info.get("type") == "page" and info.get("targetId")
+    }
+
+
+async def _activate_new_mouse_target(sess: Any) -> None:
+    previous = _MOUSE_TARGETS.pop(id(sess), None)
+    if not previous:
+        return
+    try:
+        target_id = await wait_for_new_page_target(
+            sess._internal.client,
+            previous,
+            timeout=1.0,  # noqa: SLF001
+        )
+    except Exception:  # noqa: BLE001 - target enumeration is best effort
+        return
+    if not target_id:
+        return
+    try:
+        await asyncio.wait_for(sess.switch_tab(target_id), timeout=2.0)
+    except Exception:  # noqa: BLE001 - normal click remains usable
+        logger.debug("new target activation failed", exc_info=True)
+
+
 async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
     t = msg.get("type")
     if t == "navigate":
@@ -336,6 +374,9 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
         buttons = _cdp_buttons(msg, button=button, event=str(t))
         click_count = _cdp_click_count(msg)
         if t == "mousedown":
+            # Remember the target set before the press so a link opening a new
+            # window can be detected after the matching release.
+            await _snapshot_mouse_targets(sess)
             await _dispatch_mouse(
                 sess,
                 event_type="mousePressed",
@@ -355,6 +396,10 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
                 buttons=0,
                 click_count=click_count,
             )
+            # Opening a link in a new window must also move the viewer to that
+            # target, as Chrome does for a user click. Otherwise the new tab is
+            # visible while the stream client remains attached to the old page.
+            await _activate_new_mouse_target(sess)
         else:
             await _dispatch_mouse(
                 sess,
@@ -618,6 +663,16 @@ async def run_browser_stream_session(
                         logger.warning("tab switch event timed out; stream kept open")
                     except Exception as exc:  # noqa: BLE001
                         logger.warning("tab switch event failed: %s", exc)
+                    continue
+                if msg.get("type") == "mousemove":
+                    # Hover is best-effort. It must never hold the write lock or
+                    # sit in front of a tab click when CDP is slow.
+                    try:
+                        await asyncio.wait_for(_handle_client_event(sess, msg), timeout=0.2)
+                    except TimeoutError:
+                        logger.debug("browser mousemove timed out; dropped")
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("browser mousemove failed: %s", exc)
                     continue
                 async with (
                     browser_agent_registry.write_lock(profile),
