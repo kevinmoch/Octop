@@ -649,10 +649,17 @@ async def run_browser_stream_session(
             if msg.get("type") == "stop":
                 break
             if sess is not None:
-                # Human input wins before it waits for an in-progress model write.
-                if control_owner_for(profile) != "user":
-                    await asyncio.to_thread(set_control_owner, profile, "user")
-                browser_agent_registry.revoke_grants(profile=profile)
+                # Hovering is not a takeover. Treating every mousemove as human
+                # control revoked the model's one-shot grants while the user was
+                # merely moving the cursor, producing RESOURCE_NOT_ALLOWED on
+                # the next fill/click/scroll. Only a press, drag, key, wheel or
+                # navigation takes control; a buttonless move stays passive.
+                human_action = msg.get("type") != "mousemove" or bool(msg.get("buttons"))
+                if human_action:
+                    # Human input wins before it waits for an in-progress model write.
+                    if control_owner_for(profile) != "user":
+                        await asyncio.to_thread(set_control_owner, profile, "user")
+                    browser_agent_registry.revoke_grants(profile=profile)
                 if msg.get("type") == "tab_switch":
                     # Tab switching is a viewer command. Do not queue it behind
                     # a model write lock or an in-flight page action: otherwise a

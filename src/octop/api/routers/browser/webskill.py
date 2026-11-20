@@ -284,6 +284,13 @@ async def issue_grant(
             await ensure_downloads(session, resolver=resolve_harness_session)
         except Exception:
             logger.info("WebSkill download setup unavailable; continuing without downloads")
+        # The composer hands control to the assistant asynchronously on the
+        # same click/Enter that submits the prompt. Give that handoff a short
+        # grace period so the first action of a turn is not rejected by a race.
+        for _ in range(15):
+            if control_owner_for(session.profile) != "user":
+                break
+            await asyncio.sleep(0.1)
         grant = await issue_action_grant(
             session,
             body.request,

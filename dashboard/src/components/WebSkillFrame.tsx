@@ -135,9 +135,12 @@ export default function WebSkillFrame({
     const onInteract = () => requestAgentControl();
     doc.addEventListener("pointerdown", onInteract, true);
     doc.addEventListener("focusin", onInteract, true);
+    // Composer submission via Enter may happen without a fresh pointerdown.
+    doc.addEventListener("keydown", onInteract, true);
     return () => {
       doc.removeEventListener("pointerdown", onInteract, true);
       doc.removeEventListener("focusin", onInteract, true);
+      doc.removeEventListener("keydown", onInteract, true);
     };
   }, [frameLoaded, requestAgentControl]);
 
