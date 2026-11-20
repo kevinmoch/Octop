@@ -13,6 +13,7 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 from octop_browser.actions import interact, navigate
+from octop_browser.cdp.client import CDPSessionError
 from octop_browser.dom.builder import DOMBuilder
 from octop_browser.dom.refs import RefCache
 from octop_browser.models import ActionMetrics, ToolResult
@@ -580,6 +581,23 @@ _LIVE_VALUE_FUNCTION = r"""function() {
 }"""
 
 
+async def _action_visible(client: Any, backend_node_id: int) -> bool:
+    """Action targets must occupy pixels, as in WebSkill's occupiesNoSpace gate."""
+    try:
+        box = await client.send("DOM.getBoxModel", {"backendNodeId": backend_node_id})
+    except CDPSessionError:
+        return False
+    except Exception:  # noqa: BLE001 - test/legacy clients may not implement getBoxModel
+        return True
+    model = box.get("model", {})
+    quad = model.get("border") or model.get("content") or []
+    if not isinstance(quad, list) or len(quad) != 8:
+        return True
+    xs = [float(quad[index]) for index in (0, 2, 4, 6)]
+    ys = [float(quad[index]) for index in (1, 3, 5, 7)]
+    return max(xs) - min(xs) > 0 and max(ys) - min(ys) > 0
+
+
 async def _live_value(client: Any, backend_node_id: int) -> str | None:
     try:
         resolved = await client.send("DOM.resolveNode", {"backendNodeId": backend_node_id})
@@ -818,9 +836,11 @@ async def read_page(
                     "Could not bind a visible control to its backend node identity",
                 )
             role = _role(element)
-            if _capturable_image(element):
+            image_target = _capturable_image(element)
+            if image_target:
                 role = "img"
-            needs_ref = role in ACTIONABLE_ROLES or _capturable_image(element)
+            action_ref = role in ACTIONABLE_ROLES and await _action_visible(client, backend_node_id)
+            needs_ref = action_ref or image_target
             node = _node(element, None)
             node_ref: str | None = None
             if needs_ref:

@@ -8,6 +8,7 @@ import json
 import pytest
 
 from octop.infra.control.browser.webskill.page_agent import (
+    _action_visible,
     _click_dropdown_option,
     _live_value,
     _promoted_elements,
@@ -81,6 +82,27 @@ def test_signature_recovery_uses_dom_path_and_tag() -> None:
     assert recovered is not None
     assert recovered.backend_node_id == 20
     assert "DOM.getDocument" in client.calls
+
+
+def test_action_visibility_rejects_no_layout_and_zero_size() -> None:
+    from octop_browser.cdp.client import CDPSessionError
+
+    class BoxClient:
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method != "DOM.getBoxModel":
+                raise AssertionError(method)
+            if self.mode == "error":
+                raise CDPSessionError("not laid out")
+            if self.mode == "zero":
+                return {"model": {"border": [0, 0, 0, 0, 0, 0, 0, 0]}}
+            return {"model": {"border": [10, 10, 30, 10, 30, 30, 10, 30]}}
+
+    assert asyncio.run(_action_visible(BoxClient("visible"), 1)) is True
+    assert asyncio.run(_action_visible(BoxClient("zero"), 1)) is False
+    assert asyncio.run(_action_visible(BoxClient("error"), 1)) is False
 
 
 def test_live_value_reads_text_control_state() -> None:
