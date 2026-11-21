@@ -729,3 +729,37 @@ SDK 已新增协议、handler、3 条单测和 extension host wrapper；
 当前定向测试：95 passed。
 
 这修复的是**外部关闭标签页**；模型自己调用 close_page_tab 的路径原本就会更新指针。
+
+
+## 26. 标签页顺序稳定化（2026-11-21）
+
+现象：
+
+- CCS 首页依次打开工程管理、质量检查、日常检查、巡检
+- 网络流故障后标签页操作不可用
+- 强制刷新后标签顺序反转
+- 关闭第一个标签后，过一段时间第一个标签变成最后一个
+
+根因：
+
+- 后端标签列表来自 Chrome `/json`，该顺序不是稳定的 tab-strip 顺序
+- dashboard 重连后按新的 `/json` 顺序重建 tab bar
+- 前端 `mergeBrowserTabsStable` 只能在同一次页面生命周期内保持顺序；
+  刷新后状态清空，于是接受新的不稳定顺序
+
+修复：
+
+- 后端 `harness_list_tabs` 增加按 CDP 端口维护的稳定顺序缓存
+- 首次观察时记录 target 顺序
+- 重连后按缓存顺序返回，不再跟随 `/json` 抖动
+- 关闭的 target 从缓存移除；新标签追加到末尾
+- 保留 `active` 仍由 sticky target 决定
+
+测试：
+
+```text
+test_stable_tab_order_survives_reconnect_and_close
+```
+
+网络流断开本身仍由 dashboard 的 reconnect/periodic refresh 处理；本次修复的是
+重连后标签顺序不再反转。
