@@ -110,3 +110,23 @@ async def test_shutdown_browser_forces_current_user_profile() -> None:
         profile="user-7",
         kill=True,
     )
+
+
+def test_stable_tab_order_survives_reconnect_and_close() -> None:
+    port = 9331
+    harness_mod._TAB_ORDER.pop(port, None)
+    harness_mod._TAB_NEXT.pop(port, None)
+
+    def page(target: str) -> dict[str, object]:
+        return {"type": "page", "id": target, "url": f"https://{target}.test"}
+
+    first = harness_mod._stable_tab_pages(port, [page("A"), page("B")])
+    assert [item["id"] for item in first] == ["A", "B"]
+
+    # /json order changed after a stream reconnect; the visible order must not.
+    second = harness_mod._stable_tab_pages(port, [page("B"), page("A")])
+    assert [item["id"] for item in second] == ["A", "B"]
+
+    # Closing the first tab keeps B before newly appended C.
+    third = harness_mod._stable_tab_pages(port, [page("C"), page("B")])
+    assert [item["id"] for item in third] == ["B", "C"]

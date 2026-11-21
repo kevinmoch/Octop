@@ -220,6 +220,30 @@ async def harness_page_url(sess: Any) -> str:
         return ""
 
 
+# Chrome's /json order is not a stable tab-strip order: it can change after a
+# dashboard reconnect or after a tab is closed. Keep the first observed order
+# per CDP port, append new targets, and drop closed ones. This is deliberately
+# host-side state: the model and the viewer must see the same stable sequence.
+_TAB_ORDER: dict[int, dict[str, int]] = {}
+_TAB_NEXT: dict[int, int] = {}
+
+
+def _stable_tab_pages(port: int, pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    order = _TAB_ORDER.setdefault(port, {})
+    next_index = _TAB_NEXT.setdefault(port, 0)
+    live = {str(page.get("id")) for page in pages if page.get("id") is not None}
+    for target in list(order):
+        if target not in live:
+            order.pop(target, None)
+    for page in pages:
+        target = str(page.get("id"))
+        if target not in order:
+            order[target] = next_index
+            next_index += 1
+    _TAB_NEXT[port] = next_index
+    return sorted(pages, key=lambda page: order.get(str(page.get("id")), next_index))
+
+
 async def harness_list_tabs(sess: Any) -> list[dict[str, Any]]:
     """List open page targets in a harness session (CDP /json)."""
     import aiohttp
@@ -237,7 +261,7 @@ async def harness_list_tabs(sess: Any) -> list[dict[str, Any]]:
         logger.debug("harness_list_tabs failed: %s", exc)
         return []
 
-    pages = [t for t in targets if t.get("type") == "page"]
+    pages = _stable_tab_pages(port, [t for t in targets if t.get("type") == "page"])
     current_target_id = None
     try:
         current_target_id = sess._internal._profile.load_target()  # noqa: SLF001
