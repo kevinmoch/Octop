@@ -14,6 +14,7 @@ from octop_browser.session import BrowserSession
 
 from .page_agent import resolve_browser
 from .sessions import BrowserAgentError, BrowserAgentSession
+from .targets import recover_target_from_tabs
 
 TAB_HANDLE_PREFIX = "tab_"
 MAX_HANDLE_LEN = 80
@@ -62,15 +63,24 @@ async def _tabs_metadata(browser: BrowserSession) -> dict[str, dict[str, Any]]:
 
 
 def _ensure_base(session: BrowserAgentSession, tabs: dict[str, dict[str, Any]]) -> str:
-    if session.base_target_id is None:
+    if session.base_target_id is None or session.base_target_id not in tabs:
         active = next((tab for tab in tabs.values() if tab.get("active") is True), None)
         target = active.get("tab_id") if active is not None else None
         if not isinstance(target, str) or target not in tabs:
             target = next(iter(tabs), None)
         if not isinstance(target, str):
             raise BrowserAgentError("PAGE_TAB_UNKNOWN", "No page target is available")
+        previous_base = session.base_target_id
         session.base_target_id = target
-        session.model_target = target
+        if previous_base is not None:
+            session.model_targets.discard(previous_base)
+            for handle, mapped in list(session.tab_handles.items()):
+                if mapped == previous_base:
+                    session.tab_handles.pop(handle, None)
+        if session.model_target not in tabs:
+            session.model_target = target
+        session.document = None
+        session.refs.clear()
     if session.base_target_id not in session.model_targets:
         session.model_targets.add(session.base_target_id)
     handle_for_target(session, session.base_target_id)
@@ -92,6 +102,9 @@ async def list_workset_tabs(
     browser = await resolve_browser(session, resolver)
     tabs = await _tabs_metadata(browser)
     _ensure_base(session, tabs)
+    # A user may close the model target outside `close_page_tab`; the tab list
+    # itself must not be a dead end. Follow the active live tab and refresh refs.
+    recover_target_from_tabs(session, tabs)
     output: list[dict[str, Any]] = []
     for target in _workset_targets(session):
         metadata = tabs.get(target)

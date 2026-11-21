@@ -48,6 +48,7 @@ from .targets import (
     admit_model_target,
     attach_model_target,
     page_target_ids,
+    recover_closed_model_target,
     wait_for_new_page_target,
 )
 
@@ -154,9 +155,16 @@ async def document_identity(
         isinstance(info, dict) and info.get("type") == "page" and info.get("targetId") == target
         for info in targets.get("targetInfos", [])
     ):
-        raise BrowserAgentError(
-            "PAGE_TAB_EXPIRED", "The model target was closed; select a target explicitly"
-        )
+        # The user closed the tab outside the model-side close tool. Follow the
+        # tab they are now looking at instead of trapping the model on a dead
+        # target; refs/document are invalidated by the recovery helper.
+        recovered = await recover_closed_model_target(session, browser)
+        if recovered is None:
+            raise BrowserAgentError(
+                "PAGE_TAB_EXPIRED", "The model target was closed; select a target explicitly"
+            )
+        target = recovered
+        session.model_targets.add(target)
     tree = await client.send("Page.getFrameTree")
     page = await client.send(
         "Runtime.evaluate",

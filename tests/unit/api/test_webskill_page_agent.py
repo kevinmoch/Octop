@@ -259,7 +259,12 @@ class FakeBrowser:
         return tool_result(f"Activated tab {tab_id}")
 
     async def list_tabs(self) -> ToolResult:
-        return tool_result("", metadata={"tabs": [{"tab_id": self.active_target, "active": True}]})
+        tabs = (
+            [{"tab_id": self.active_target, "active": True}]
+            if self.client.page_target_available
+            else []
+        )
+        return tool_result("", metadata={"tabs": tabs})
 
     async def dom_tree(self, *, level: str) -> ToolResult:
         assert level == "structured"

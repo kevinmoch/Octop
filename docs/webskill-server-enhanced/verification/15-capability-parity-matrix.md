@@ -696,3 +696,36 @@ DOM attach 执行器。
 SDK 已新增协议、handler、3 条单测和 extension host wrapper；
 但 extension 当前安装的是 SDK 0.29.0，运行时会忽略 `files`，因此还没有做
 真实 extension attach 端到端验收。矩阵第 41 行从 ❌ 改为 🟡。
+
+
+## 25. 外部关闭模型标签页恢复（2026-11-21）
+
+用户复现：
+
+1. 模型在巡检页自动填写成功
+2. 用户手动关闭该标签页，切到“日常检查”
+3. 读取当前页持续返回
+   `The model target was closed; select a target explicitly`
+4. 页面标签列表也不可用
+
+根因：
+
+- `session.model_target` 仍指向已关闭 target
+- `document_identity` 直接抛 `PAGE_TAB_EXPIRED`
+- `base_target_id` / `tab_handles` 也可能残留已关闭目标
+- tab list 没有把用户当前 active 页面接回 workset
+
+修复：
+
+- 新增 `recover_target_from_tabs`：
+  - 优先当前 active 页面
+  - 其次仍存活的 base
+  - 再次任意存活 workset
+  - 清理已关闭 target/handle、清空 document/refs
+- `attach_model_target`、`document_identity`、`list_workset_tabs` 都走恢复
+- base 被关闭时用 active 页面替换
+- 新增 3 条目标恢复单测
+
+当前定向测试：95 passed。
+
+这修复的是**外部关闭标签页**；模型自己调用 close_page_tab 的路径原本就会更新指针。
