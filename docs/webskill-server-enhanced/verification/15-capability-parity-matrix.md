@@ -763,3 +763,37 @@ test_stable_tab_order_survives_reconnect_and_close
 
 网络流断开本身仍由 dashboard 的 reconnect/periodic refresh 处理；本次修复的是
 重连后标签顺序不再反转。
+
+
+## 27. tab-switch 重连队列（2026-11-21）
+
+`useBrowserStream` 的 `switchTab` 现在：
+
+1. WebSocket OPEN：立即发送 `tab_switch`，清空队列
+2. WebSocket 不在 OPEN：
+   - 记住最新一次 tab switch（id/url/title）
+   - 乐观标记该 tab 为 active
+   - 触发一次自动 reconnect（连接中不重复触发）
+3. 新连接收到第一份 `tabs` 快照后：
+   - 重放排队的 `tab_switch`
+   - 再次标记 active
+   - 清空队列
+
+实现细节：
+
+- 只排队 tab switch，不重放 click/fill 等有副作用的输入
+- 多次点击只保留最后一次
+- 旧 socket 的 close 不会重置新连接的 reconnect 标志
+- 连接构造异常也会清除 reconnect 标志，下一次点击可以再次尝试
+- `disconnect()` 清空队列
+
+新增测试：
+
+```text
+dashboard/src/hooks/useBrowserStream.test.ts
+```
+
+覆盖“断流点击 B → 自动建新连接 → 首个 tabs 快照后发送 tab_switch B”。
+
+注意：如果 TCP 仍保持 OPEN 但消息静默丢失，浏览器无法立即判定断流；
+本次队列覆盖的是 WebSocket 已关闭或 reconnect 窗口内的情况。

@@ -81,6 +81,13 @@ export function useBrowserStream() {
   const connectionGenerationRef = useRef(0);
   const callbacksRef = useRef<BrowserStreamCallbacks | null>(null);
   const statusRef = useRef<BrowserStreamState>("idle");
+  const reconnectRef = useRef<(() => void) | null>(null);
+  const reconnectRequestedRef = useRef(false);
+  const pendingTabSwitchRef = useRef<{
+    tabId: number | string;
+    url?: string;
+    title?: string;
+  } | null>(null);
   const [status, setStatus] = useState<BrowserStreamState>("idle");
   const [currentUrl, setCurrentUrl] = useState("");
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
@@ -104,6 +111,9 @@ export function useBrowserStream() {
       options: ConnectOptions = {},
     ) => {
       callbacksRef.current = callbacks;
+      reconnectRef.current = () => {
+        connect(url, width, height, callbacks, options);
+      };
       updateStatus("connecting");
 
       // Close any existing connection
@@ -128,6 +138,7 @@ export function useBrowserStream() {
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
+          reconnectRequestedRef.current = false;
           const startMsg: Record<string, unknown> = {
             type: "start",
             url,
@@ -163,6 +174,23 @@ export function useBrowserStream() {
               );
               const activeTab = msg.tabs.find((t) => t.active);
               if (activeTab) setCurrentUrl(activeTab.url);
+              // A tab switch requested while the stream was down is replayed
+              // after the new connection has received its first tab snapshot.
+              const pending = pendingTabSwitchRef.current;
+              if (pending !== null && ws.readyState === WebSocket.OPEN) {
+                pendingTabSwitchRef.current = null;
+                ws.send(
+                  JSON.stringify({
+                    type: "tab_switch",
+                    tab_id: pending.tabId,
+                    ...(pending.url ? { tab_url: pending.url } : {}),
+                    ...(pending.title ? { tab_title: pending.title } : {}),
+                  }),
+                );
+                setTabs((prevTabs) =>
+                  markBrowserTabActive(prevTabs, pending.tabId),
+                );
+              }
             } else if (msg.type === "error") {
               console.error("[BrowserStream] Server error:", msg.message);
               callbacksRef.current?.onError?.(msg.message ?? "Unknown error");
@@ -201,6 +229,7 @@ export function useBrowserStream() {
 
         ws.onclose = () => {
           if (generation !== connectionGenerationRef.current) return;
+          reconnectRequestedRef.current = false;
           if (
             statusRef.current !== "stopped" &&
             statusRef.current !== "idle" &&
@@ -215,6 +244,7 @@ export function useBrowserStream() {
         wsRef.current = ws;
       })().catch((error: unknown) => {
         if (generation !== connectionGenerationRef.current) return;
+        reconnectRequestedRef.current = false;
         callbacksRef.current?.onError?.(
           error instanceof Error ? error.message : "Browser connection failed",
         );
@@ -242,22 +272,41 @@ export function useBrowserStream() {
     [sendEvent],
   );
 
-  /** Switch to a tab by id. */
+  /** Switch to a tab by id, queuing the switch across a reconnect. */
   const switchTab = useCallback(
     (tabId: number | string) => {
       // Include the visible URL/title as a fallback: after a browser restart the
       // old target id may be stale even though the tab label is still rendered.
       // The server can then resolve the current target by identity.
       const tab = tabs.find((item) => String(item.id) === String(tabId));
-      if (
-        sendEvent({
-          type: "tab_switch",
-          tab_id: tabId,
-          ...(tab?.url ? { tab_url: tab.url } : {}),
-          ...(tab?.title ? { tab_title: tab.title } : {}),
-        })
-      ) {
+      const event = {
+        type: "tab_switch",
+        tab_id: tabId,
+        ...(tab?.url ? { tab_url: tab.url } : {}),
+        ...(tab?.title ? { tab_title: tab.title } : {}),
+      };
+      if (sendEvent(event)) {
+        pendingTabSwitchRef.current = null;
         setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
+        return;
+      }
+
+      // The stream is down (network interruption or a reconnect window).
+      // Keep the user's intended target and replay it once the first tab
+      // snapshot arrives on the new socket. Do not open a second reconnect
+      // while the existing one is still connecting.
+      pendingTabSwitchRef.current = {
+        tabId,
+        ...(tab?.url ? { url: tab.url } : {}),
+        ...(tab?.title ? { title: tab.title } : {}),
+      };
+      setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
+      if (
+        statusRef.current !== "connecting" &&
+        !reconnectRequestedRef.current
+      ) {
+        reconnectRequestedRef.current = true;
+        reconnectRef.current?.();
       }
     },
     [sendEvent, tabs],
@@ -295,6 +344,8 @@ export function useBrowserStream() {
       }
       wsRef.current = null;
     }
+    pendingTabSwitchRef.current = null;
+    reconnectRequestedRef.current = false;
     updateStatus("idle");
     setTabs([]);
   }, [updateStatus]);
