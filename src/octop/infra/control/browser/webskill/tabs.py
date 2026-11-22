@@ -132,6 +132,8 @@ async def focus_workset_tab(
     if target not in tabs or target not in session.model_targets:
         session.tab_handles.pop(handle, None)
         session.model_targets.discard(target)
+        session.document = None
+        session.refs.clear()
         raise BrowserAgentError("PAGE_TAB_EXPIRED", "The page target is no longer available")
     session.model_target = target
     session.document = None
@@ -230,3 +232,8 @@ async def follow_active_workset_tab(
 
 def reset_workset(session: BrowserAgentSession) -> None:
     session.tab_handles.clear()
+    base = session.base_target_id
+    session.model_targets = {base} if base is not None else set()
+    session.model_target = base
+    session.document = None
+    session.refs.clear()

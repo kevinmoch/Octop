@@ -67,15 +67,14 @@ async def attach_model_target(session: BrowserAgentSession, browser: Any) -> Oop
         return None
     try:
         return await attach_page_target(browser._internal.client, session.model_target)  # noqa: SLF001
-    except BrowserAgentError as error:
-        if error.code == "WRITE_LOCKED":
-            raise
-        raise BrowserAgentError(
-            "PAGE_TAB_EXPIRED", "The model target is no longer available"
-        ) from error
+    except BrowserAgentError:
+        # Preserve the attach error's own code. A transient CDP/session failure
+        # is not evidence that the user closed the model target.
+        raise
     except Exception as error:
         raise BrowserAgentError(
-            "PAGE_TAB_EXPIRED", "The model target is no longer available"
+            "TOOL_EXECUTION_FAILED",
+            "The model target could not be attached",
         ) from error
 
 
