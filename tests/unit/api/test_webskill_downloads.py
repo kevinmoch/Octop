@@ -16,9 +16,10 @@ from octop.infra.control.browser.webskill.sessions import BrowserAgentSession
 
 
 class FakeDownloadClient:
-    def __init__(self) -> None:
+    def __init__(self, *, reject_allow_and_name: bool = False) -> None:
         self.listeners: dict[str, list[object]] = {}
         self.calls: list[str] = []
+        self.reject_allow_and_name = reject_allow_and_name
 
     def on(self, event: str, callback: object) -> None:
         self.listeners.setdefault(event, []).append(callback)
@@ -32,6 +33,8 @@ class FakeDownloadClient:
         self.calls.append(method)
         assert method == "Browser.setDownloadBehavior"
         assert isinstance(params, dict)
+        if self.reject_allow_and_name and params.get("behavior") == "allowAndName":
+            raise RuntimeError("allowAndName is not supported")
         return {}
 
     def emit(self, event: str, params: dict[str, object]) -> None:
@@ -243,3 +246,53 @@ def test_cleanup_detaches_listeners_and_ignores_late_events() -> None:
         assert list_downloads(session) == []
 
     asyncio.run(scenario())
+
+
+def test_allow_and_name_falls_back_to_exact_suggested_name() -> None:
+    client = FakeDownloadClient(reject_allow_and_name=True)
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(session, resolver=_resolver(browser))
+        assert session.download_guid_named is False
+        directory = Path(session.download_dir or "")
+        (directory / "fallback.txt").write_bytes(b"fallback")
+        client.emit(
+            "Browser.downloadWillBegin",
+            {"guid": "guid-fallback", "suggestedFilename": "fallback.txt"},
+        )
+        client.emit(
+            "Browser.downloadProgress",
+            {"guid": "guid-fallback", "state": "completed"},
+        )
+        await asyncio.sleep(0.15)
+
+    asyncio.run(scenario())
+    entries = list_downloads(session)
+    assert [entry["name"] for entry in entries] == ["fallback.txt"]
+    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+    cleanup_downloads(session)
+
+
+def test_second_session_cannot_take_over_profile_downloads() -> None:
+    client = FakeDownloadClient()
+    browser = FakeDownloadBrowser(client)
+    first = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(first, resolver=_resolver(browser))
+        second = BrowserAgentSession(id="session-2", user_id=1, profile="user-1")
+        try:
+            await ensure_downloads(second, resolver=_resolver(browser))
+        except Exception as error:
+            assert getattr(error, "code", "") == "DOWNLOAD_SESSION_BUSY"
+        else:
+            raise AssertionError("a second owner must be rejected")
+        assert second.downloads_initialized is False
+
+    asyncio.run(scenario())
+    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+    cleanup_downloads(first)

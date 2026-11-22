@@ -375,3 +375,29 @@ def test_legacy_stream_jwt_has_a_versioned_removal_gate() -> None:
         with pytest.raises(RuntimeError, match="must be removed"):
             importlib.reload(stream)
     importlib.reload(stream)
+
+
+async def test_explicit_follow_requires_origin_and_moves_model_target(
+    tmp_path, isolated_registry: BrowserAgentRegistry
+) -> None:
+    async with octop_client(tmp_path) as (client, _server):
+        await bootstrap_admin(client, tmp_path)
+        auth = await auth_header(client)
+        session_id = await new_session(client, auth)
+        blocked = await client.post(
+            f"/api/browser-agent/sessions/{session_id}/tabs/follow",
+            headers={
+                **auth,
+                "Origin": "https://attacker.invalid",
+                "Sec-Fetch-Site": "same-origin",
+            },
+        )
+        assert blocked.status_code == 403, blocked.text
+        allowed = await client.post(
+            f"/api/browser-agent/sessions/{session_id}/tabs/follow",
+            headers={**auth, **ORIGIN_HEADERS},
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["focused"].startswith("tab_")
+        session = isolated_registry.get(session_id, 1)
+        assert session.model_target == "target-1"
