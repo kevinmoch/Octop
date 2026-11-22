@@ -854,7 +854,7 @@ pageActionSemanticTarget.test.ts
 测试：
 
 ```text
-test_downloads.py  7 passed
+test_downloads.py  9 passed
 ```
 
 注：CDP 不提供 GUID → 实际路径的可靠映射；精确文件名缺失时只能失败关闭，
