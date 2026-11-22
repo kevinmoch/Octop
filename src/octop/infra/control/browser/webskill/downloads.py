@@ -54,10 +54,26 @@ def _completed_file(directory: Path, preferred: str, guid: str | None = None) ->
     # share a suggested filename. If the browser did not honor it, fall back to
     # the exact suggested filename; never fall back to "the newest file".
     if guid is not None:
-        by_guid = next((item for item in files if item.name == guid), None)
-        if by_guid is not None:
-            return by_guid
+        # In GUID mode there is no suggested-name fallback: that would reintroduce
+        # the exact concurrent/collision ambiguity allowAndName was chosen to
+        # remove. Missing GUID means the download is not published.
+        return next((item for item in files if item.name == guid), None)
     return next((item for item in files if item.name == preferred), None)
+
+
+def _allow_and_name_unsupported(error: Exception) -> bool:
+    text = str(error).lower()
+    return any(
+        token in text
+        for token in (
+            "allowandname",
+            "behavior",
+            "not supported",
+            "unsupported",
+            "invalid parameters",
+            "unknown parameter",
+        )
+    )
 
 
 async def ensure_downloads(
@@ -125,20 +141,32 @@ async def ensure_downloads(
                 },
             )
             session.download_guid_named = True
-        except Exception:
-            # Older Chrome builds do not support allowAndName. Keep the exact
-            # suggested-name path as a fail-closed fallback.
-            try:
-                await client.send(
-                    "Browser.setDownloadBehavior",
-                    {
-                        "behavior": "allow",
-                        "downloadPath": str(directory),
-                        "eventsEnabled": True,
-                    },
-                )
-                session.download_guid_named = False
-            except Exception:
+        except Exception as error:
+            # Only a recognizable "behavior not supported" error may fall back.
+            # A transient CDP error must not silently change the whole profile's
+            # download mode.
+            if _allow_and_name_unsupported(error):
+                try:
+                    await client.send(
+                        "Browser.setDownloadBehavior",
+                        {
+                            "behavior": "allow",
+                            "downloadPath": str(directory),
+                            "eventsEnabled": True,
+                        },
+                    )
+                    session.download_guid_named = False
+                except Exception:
+                    _detach_listeners(session, client)
+                    session.download_listeners = []
+                    session.download_client = None
+                    shutil.rmtree(directory, ignore_errors=True)
+                    session.download_dir = None
+                    async with _PROFILE_LOCK:
+                        if _PROFILE_OWNER.get(session.profile) == session.id:
+                            _PROFILE_OWNER.pop(session.profile, None)
+                    raise
+            else:
                 _detach_listeners(session, client)
                 session.download_listeners = []
                 session.download_client = None
@@ -183,19 +211,23 @@ async def _finish_download(
             break
         await asyncio.sleep(0.05)
     if source is None:
+        _remember_failure(session, guid, meta["name"], "download file was not published")
         return
     try:
         size = source.stat().st_size
     except OSError:
+        _remember_failure(session, guid, meta["name"], "download file disappeared")
         return
     if size > MAX_DOWNLOAD_BYTES:
         source.unlink(missing_ok=True)
+        _remember_failure(session, guid, meta["name"], "download exceeds the size limit")
         return
     download_id = _new_id()
     target = directory / download_id
     try:
         source.replace(target)
     except OSError:
+        _remember_failure(session, guid, meta["name"], "download file could not be stored")
         return
     content_type = mimetypes.guess_type(meta["name"])[0] or "application/octet-stream"
     session.downloads[download_id] = DownloadRecord(
@@ -206,6 +238,18 @@ async def _finish_download(
         at=meta["at"],
         path=target,
     )
+
+
+def _remember_failure(session: BrowserAgentSession, guid: str, name: str, reason: str) -> None:
+    session.download_failures.append(
+        {
+            "guid": guid,
+            "name": name[:300],
+            "reason": reason,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+    )
+    del session.download_failures[:-50]
 
 
 def _purge_expired(session: BrowserAgentSession) -> None:
@@ -235,6 +279,10 @@ def list_downloads(session: BrowserAgentSession) -> list[dict[str, Any]]:
     ]
 
 
+def list_download_failures(session: BrowserAgentSession) -> list[dict[str, str]]:
+    return list(session.download_failures)
+
+
 def read_download(session: BrowserAgentSession, download_id: str) -> tuple[str, bytes]:
     _purge_expired(session)
     record = session.downloads.get(download_id)
@@ -256,6 +304,7 @@ def cleanup_downloads(session: BrowserAgentSession) -> None:
     session.download_guid_named = False
     session.downloads.clear()
     session.download_guids.clear()
+    session.download_failures.clear()
     for task in list(session.download_tasks):
         task.cancel()
     session.download_tasks.clear()

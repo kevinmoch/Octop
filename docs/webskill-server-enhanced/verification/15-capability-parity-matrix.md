@@ -67,7 +67,7 @@ Octop 范围：P1 PageAgent / 宿主；不包含 SDK 的 skill 管理、文档�
 | 35 | recovered outcome 标记 | ✅ | 恢复 ref 带 `recovered=True`，execute 回填 outcome | — |
 | 36 | 模态动作提升 | ✅ | elevated modal ref 绕过 actionScope；真实弹窗内按钮点击成功 |
 | 37 | 确认/授权/审计 | ✅ | PageActionPolicy + host UI + audit duration | — |
-| 38 | tab workset / 新页 | ✅ | target admit/switch、stream 跟随 | — |
+| 38 | tab workset / 新页 | ✅ | target admit；新页只改 modelTarget，不切换用户 viewTarget | — |
 | 39 | 下载信号 | ✅ | 真实 act_on_page click 触发 blob download；浏览器 Download 事件 `report.txt`；模型收到 `1 download` | — |
 | 40 | frame 内动作 | ✅ | frame/OOPIF 测试 | 跨 frame drag 明确拒绝 |
 | 41 | attach 跨宿主可移植 | 🟡 | SDK `PageAgentRequest.files` + handler 消费 + extension `file-pick` host wrapper 已落地；真实运行仍需带该字段的 SDK 版本 | 依赖升级后做真实 extension attach 验收 |
@@ -820,15 +820,16 @@ downloadConsent.test.ts    2 passed
 ## 29. semantic action target 实时性（2026-11-22 评审整改）
 
 此前 reader 缓存了发放时的语义 role/name，动态改名后 action target 会显示旧名字。
-现在 `targetOf` 额外记录 raw role/name，并在 describe 时重算：
+`targetOf` 现在记录发放时的 semantic role/name、hint 与 promotion 输入指纹。
+只要当前 raw role/name、hint 或 promotion 指纹发生变化，旧 ref 明确返回
+**stale**（`null`）：
 
-- 当前 raw role/name 变化 → 使用当前值，不再复用旧缓存
-- 企业 wrapper title 变化 → 重新计算 `RoleHint.name`
-- `ref`/secret 仍按实时 DOM 判断
-- 确认卡、outcome target、trace 共用同一个 describe 结果
-- hint **被移除/清空**、roleHint 选择器不再匹配、普通 promotion 信号
-  （tabindex/title/class/cursor/click probe）消失时，同样回退到实时 raw 语义，
-  不再保留旧名称
+- `describe` 返回 undefined，不展示旧身份确认卡
+- `execute` 明确失败，reason 要求重新感知
+- **不会把 raw role/name 当成实时 semantic projection**（例如把仍是 button 的
+  promoted 控件误降级为 generic）
+- 用户需要重新 perception；新 reader 的结果才是当前语义
+- secret 仍按实时 DOM 判断
 
 新增：
 
@@ -878,7 +879,8 @@ test_downloads.py  9 passed
 ### 31.2 hint 移除/清空
 
 `targetOf` 现在记录发放时的 hint role/name 和 promotion 输入指纹；
-describe 时一致才复用缓存，否则使用实时 raw/当前 hint。新增：
+describe 时一致才复用缓存，否则旧 ref 明确 stale，由 pageAction 拒绝 describe/execute。
+新增：
 
 ```text
 drops stale name when hint disappears

@@ -769,8 +769,10 @@ export default function RemoteBrowserPage({
     });
   }, [closeSession, modal, t]);
 
+  const [followingActiveTab, setFollowingActiveTab] = useState(false);
   const followActiveAgentTab = useCallback(async () => {
-    if (!agentSessionId) return;
+    if (!agentSessionId || followingActiveTab) return;
+    setFollowingActiveTab(true);
     try {
       await browserAgentApi.followActive(agentSessionId);
       antMessage.success(t("remoteBrowser.followActiveDone", "已跟随当前页面"));
@@ -780,8 +782,10 @@ export default function RemoteBrowserPage({
         t("remoteBrowser.followActiveFailed", "跟随当前页面失败"),
         t,
       );
+    } finally {
+      setFollowingActiveTab(false);
     }
-  }, [agentSessionId, antMessage, t]);
+  }, [agentSessionId, antMessage, followingActiveTab, t]);
 
   const refreshView = useCallback(async () => {
     const profileId = profileIdRef.current;
@@ -1348,6 +1352,8 @@ export default function RemoteBrowserPage({
                           <Button
                             size="small"
                             icon={<Crosshair size={14} />}
+                            loading={followingActiveTab}
+                            disabled={followingActiveTab}
                             onClick={() => void followActiveAgentTab()}
                             aria-label={t(
                               "remoteBrowser.followActive",

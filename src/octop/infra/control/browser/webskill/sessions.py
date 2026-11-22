@@ -80,6 +80,7 @@ class BrowserAgentSession:
     model_targets: set[str] = field(default_factory=set)
     tab_handles: dict[str, str] = field(default_factory=dict)
     downloads: dict[str, Any] = field(default_factory=dict)
+    download_failures: list[dict[str, str]] = field(default_factory=list)
     download_guids: dict[str, dict[str, str]] = field(default_factory=dict)
     download_dir: str | None = None
     downloads_initialized: bool = False

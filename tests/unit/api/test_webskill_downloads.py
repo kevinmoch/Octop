@@ -211,12 +211,18 @@ def test_ambiguous_download_name_is_not_bound_to_the_newest_file(tmp_path: Path)
             "Browser.downloadProgress",
             {"guid": "guid-missing", "state": "completed"},
         )
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(1.2)
 
     asyncio.run(scenario())
     assert list_downloads(session) == []
-    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+    from octop.infra.control.browser.webskill.downloads import (
+        cleanup_downloads,
+        list_download_failures,
+    )
 
+    failures = list_download_failures(session)
+    assert len(failures) == 1
+    assert failures[0]["reason"] == "download file was not published"
     cleanup_downloads(session)
 
 
@@ -296,3 +302,72 @@ def test_second_session_cannot_take_over_profile_downloads() -> None:
     from octop.infra.control.browser.webskill.downloads import cleanup_downloads
 
     cleanup_downloads(first)
+
+
+def test_two_same_named_guids_keep_distinct_bytes() -> None:
+    client = FakeDownloadClient()
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(session, resolver=_resolver(browser))
+        directory = Path(session.download_dir or "")
+        (directory / "guid-a").write_bytes(b"alpha")
+        (directory / "guid-b").write_bytes(b"beta")
+        for guid in ("guid-a", "guid-b"):
+            client.emit(
+                "Browser.downloadWillBegin",
+                {"guid": guid, "suggestedFilename": "same.txt"},
+            )
+        for guid in ("guid-b", "guid-a"):
+            client.emit(
+                "Browser.downloadProgress",
+                {"guid": guid, "state": "completed"},
+            )
+        for _ in range(20):
+            if len(list_downloads(session)) == 2:
+                break
+            await asyncio.sleep(0.05)
+
+    asyncio.run(scenario())
+    entries = list_downloads(session)
+    assert len(entries) == 2
+    assert {entry["name"] for entry in entries} == {"same.txt"}
+    bodies = {read_download(session, entry["id"])[1] for entry in entries}
+    assert bodies == {b"alpha", b"beta"}
+    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+    cleanup_downloads(session)
+
+
+def test_guid_mode_does_not_fall_back_to_suggested_name() -> None:
+    client = FakeDownloadClient()
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(session, resolver=_resolver(browser))
+        assert session.download_guid_named is True
+        directory = Path(session.download_dir or "")
+        (directory / "suggested.txt").write_bytes(b"must not be used")
+        client.emit(
+            "Browser.downloadWillBegin",
+            {"guid": "missing-guid", "suggestedFilename": "suggested.txt"},
+        )
+        client.emit(
+            "Browser.downloadProgress",
+            {"guid": "missing-guid", "state": "completed"},
+        )
+        await asyncio.sleep(1.2)
+
+    asyncio.run(scenario())
+    assert list_downloads(session) == []
+    from octop.infra.control.browser.webskill.downloads import (
+        cleanup_downloads,
+        list_download_failures,
+    )
+
+    failures = list_download_failures(session)
+    assert len(failures) == 1
+    assert failures[0]["reason"] == "download file was not published"
+    cleanup_downloads(session)

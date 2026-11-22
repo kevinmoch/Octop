@@ -21,6 +21,7 @@ from octop.api.deps import require_permission
 from octop.api.routers.browser.harness import control_owner_for, resolve_harness_session
 from octop.infra.control.browser.webskill.downloads import (
     ensure_downloads,
+    list_download_failures,
     list_downloads,
     read_download,
 )
@@ -409,7 +410,10 @@ async def list_session_downloads(
     try:
         session = browser_agent_registry.get(session_id, user.id)
         await ensure_downloads(session, resolver=resolve_harness_session)
-        return {"downloads": list_downloads(session)}
+        return {
+            "downloads": list_downloads(session),
+            "failures": list_download_failures(session),
+        }
     except BrowserAgentError as error:
         raise _http_error(error) from error
 
