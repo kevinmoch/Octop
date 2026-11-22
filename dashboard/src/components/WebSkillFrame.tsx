@@ -98,6 +98,10 @@ export default function WebSkillFrame({
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [frameLoaded, setFrameLoaded] = useState(false);
+  const [downloadFailure, setDownloadFailure] = useState<{
+    name: string;
+    reason: string;
+  } | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const attachInputRef = useRef<HTMLInputElement>(null);
   const attachResolver = useRef<((files: File[] | null) => void) | null>(null);
@@ -165,6 +169,23 @@ export default function WebSkillFrame({
     };
   }, [frameLoaded, requestAgentControl]);
 
+  const downloadFailureReason = useCallback(
+    (reason: string): string => {
+      const key =
+        reason === "download file was not published"
+          ? "webskill.downloadFailureNotPublished"
+          : reason === "download file disappeared"
+          ? "webskill.downloadFailureDisappeared"
+          : reason === "download exceeds the size limit"
+          ? "webskill.downloadFailureTooLarge"
+          : reason === "download file could not be stored"
+          ? "webskill.downloadFailureStoreFailed"
+          : "webskill.downloadFailureUnknown";
+      return t(key);
+    },
+    [t],
+  );
+
   useEffect(() => {
     const listener = (event: MessageEvent<unknown>) => {
       if (
@@ -183,6 +204,22 @@ export default function WebSkillFrame({
       if (message.type === "ready" && sessionId) {
         send({ type: "init", sessionId, userId, locale, theme: mode });
         setReady(true);
+        return;
+      }
+      if (message.type === "download-failure") {
+        const failures = message.failures;
+        const first = Array.isArray(failures) ? failures[0] : undefined;
+        if (
+          typeof first === "object" &&
+          first !== null &&
+          typeof (first as Record<string, unknown>).name === "string" &&
+          typeof (first as Record<string, unknown>).reason === "string"
+        ) {
+          setDownloadFailure({
+            name: (first as Record<string, string>).name,
+            reason: (first as Record<string, string>).reason,
+          });
+        }
         return;
       }
       if (!sessionId || !isRequest(data) || data.sessionId !== sessionId)
@@ -538,6 +575,25 @@ export default function WebSkillFrame({
             background: "var(--fn-bg-primary)",
           }}
         >
+          {downloadFailure ? (
+            <Alert
+              type="warning"
+              showIcon
+              closable
+              onClose={() => setDownloadFailure(null)}
+              style={{
+                position: "absolute",
+                top: 8,
+                left: 8,
+                right: 8,
+                zIndex: 2,
+              }}
+              message={t("webskill.downloadFailureTitle", {
+                name: downloadFailure.name,
+              })}
+              description={downloadFailureReason(downloadFailure.reason)}
+            />
+          ) : null}
           {(!sessionId || !ready) && (
             <div
               style={{

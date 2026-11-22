@@ -16,10 +16,18 @@ from octop.infra.control.browser.webskill.sessions import BrowserAgentSession
 
 
 class FakeDownloadClient:
-    def __init__(self, *, reject_allow_and_name: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        reject_allow_and_name: bool = False,
+        allow_and_name_error: Exception | None = None,
+        reject_allow: bool = False,
+    ) -> None:
         self.listeners: dict[str, list[object]] = {}
         self.calls: list[str] = []
         self.reject_allow_and_name = reject_allow_and_name
+        self.allow_and_name_error = allow_and_name_error
+        self.reject_allow = reject_allow
 
     def on(self, event: str, callback: object) -> None:
         self.listeners.setdefault(event, []).append(callback)
@@ -33,8 +41,13 @@ class FakeDownloadClient:
         self.calls.append(method)
         assert method == "Browser.setDownloadBehavior"
         assert isinstance(params, dict)
-        if self.reject_allow_and_name and params.get("behavior") == "allowAndName":
-            raise RuntimeError("allowAndName is not supported")
+        if params.get("behavior") == "allowAndName":
+            if self.allow_and_name_error is not None:
+                raise self.allow_and_name_error
+            if self.reject_allow_and_name:
+                raise RuntimeError("allowAndName is not supported")
+        if self.reject_allow and params.get("behavior") == "allow":
+            raise RuntimeError("allow fallback failed")
         return {}
 
     def emit(self, event: str, params: dict[str, object]) -> None:
@@ -371,3 +384,81 @@ def test_guid_mode_does_not_fall_back_to_suggested_name() -> None:
     assert len(failures) == 1
     assert failures[0]["reason"] == "download file was not published"
     cleanup_downloads(session)
+
+
+def test_allow_and_name_classifier_rejects_transient_cdp_errors() -> None:
+    from octop.infra.control.browser.webskill.downloads import (
+        _allow_and_name_unsupported,
+    )
+
+    for text in (
+        "Timeout waiting for response to Browser.setDownloadBehavior",
+        "CDP send failed for Browser.setDownloadBehavior: websocket closed",
+        "Not connected",
+    ):
+        assert _allow_and_name_unsupported(Exception(text)) is False, text
+    assert (
+        _allow_and_name_unsupported(
+            Exception("Invalid parameters: behavior=allowAndName is unsupported")
+        )
+        is True
+    )
+
+
+def test_transient_download_setup_failure_releases_owner_and_listeners() -> None:
+    client = FakeDownloadClient(
+        allow_and_name_error=RuntimeError(
+            "CDP send failed for Browser.setDownloadBehavior: websocket closed"
+        )
+    )
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        try:
+            await ensure_downloads(session, resolver=_resolver(browser))
+        except Exception as error:
+            assert "websocket closed" in str(error)
+        else:
+            raise AssertionError("transient CDP failure must not be swallowed")
+        assert session.downloads_initialized is False
+        assert session.download_dir is None
+        assert client.listeners["Browser.downloadWillBegin"] == []
+        assert client.listeners["Browser.downloadProgress"] == []
+        # The profile owner must be released for the next attempt.
+        second_client = FakeDownloadClient()
+        second_browser = FakeDownloadBrowser(second_client)
+        second = BrowserAgentSession(id="session-2", user_id=1, profile="user-1")
+        await ensure_downloads(second, resolver=_resolver(second_browser))
+        from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+        cleanup_downloads(second)
+
+    asyncio.run(scenario())
+
+
+def test_fallback_failure_does_not_leave_profile_owner() -> None:
+    client = FakeDownloadClient(
+        reject_allow_and_name=True,
+        reject_allow=True,
+    )
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        try:
+            await ensure_downloads(session, resolver=_resolver(browser))
+        except Exception as error:
+            assert "fallback failed" in str(error)
+        else:
+            raise AssertionError("both download behaviors failing must raise")
+        assert session.download_dir is None
+        assert client.listeners["Browser.downloadWillBegin"] == []
+        third_client = FakeDownloadClient()
+        third = BrowserAgentSession(id="session-3", user_id=1, profile="user-1")
+        await ensure_downloads(third, resolver=_resolver(FakeDownloadBrowser(third_client)))
+        from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+        cleanup_downloads(third)
+
+    asyncio.run(scenario())

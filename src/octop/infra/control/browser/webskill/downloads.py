@@ -62,16 +62,24 @@ def _completed_file(directory: Path, preferred: str, guid: str | None = None) ->
 
 
 def _allow_and_name_unsupported(error: Exception) -> bool:
+    """Only an explicit invalid/unsupported behavior is a compatibility error.
+
+    Do not match the method name ``Browser.setDownloadBehavior``: real CDP
+    timeouts and send failures contain that substring and must surface as
+    transient failures, not silently switch the profile to ``allow``.
+    """
     text = str(error).lower()
+    if "allowandname" not in text:
+        return False
     return any(
-        token in text
-        for token in (
-            "allowandname",
-            "behavior",
+        marker in text
+        for marker in (
             "not supported",
             "unsupported",
+            "invalid parameter",
             "invalid parameters",
             "unknown parameter",
+            "failed to parse",
         )
     )
 

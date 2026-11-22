@@ -45,7 +45,7 @@ import {
   readXlsxTemplate,
 } from "@webskill/sdk/browser";
 import type { HostInit } from "./bridge";
-import { OctopHostBridge } from "./bridge";
+import { HOST_CHANNEL, OctopHostBridge } from "./bridge";
 import { createHostDocumentSurface } from "./documentSurface";
 import { LocalNoAuthRegistry, createHostLlmClient } from "./model";
 import {
@@ -143,6 +143,31 @@ export async function createWebSkillHost(
     audit,
     maxTabs: () => 8,
   });
+  const notifiedDownloadFailures = new Set<string>();
+  const notifyDownloadFailures = (result: unknown): void => {
+    if (typeof result !== "object" || result === null) return;
+    const raw = (result as Record<string, unknown>).failures;
+    if (!Array.isArray(raw)) return;
+    const fresh: Array<{ name: string; reason: string }> = [];
+    for (const entry of raw) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const record = entry as Record<string, unknown>;
+      const name = typeof record.name === "string" ? record.name : "download";
+      const reason =
+        typeof record.reason === "string" ? record.reason : "unknown failure";
+      const key =
+        typeof record.guid === "string" ? record.guid : `${name}|${reason}`;
+      if (notifiedDownloadFailures.has(key)) continue;
+      notifiedDownloadFailures.add(key);
+      fresh.push({ name, reason });
+    }
+    if (fresh.length === 0) return;
+    window.parent.postMessage(
+      { channel: HOST_CHANNEL, type: "download-failure", failures: fresh },
+      window.location.origin,
+    );
+  };
+
   const downloadIds = async (): Promise<Set<string>> => {
     let result: unknown;
     try {
@@ -157,6 +182,7 @@ export async function createWebSkillHost(
     ) {
       return new Set();
     }
+    notifyDownloadFailures(result);
     return new Set(
       (result as { downloads: Array<Record<string, unknown>> }).downloads
         .map((entry) => entry.id)
@@ -231,7 +257,24 @@ export async function createWebSkillHost(
       ) {
         throw new Error("The host download list is invalid");
       }
-      return (result as { downloads: Array<Record<string, unknown>> }).downloads
+      notifyDownloadFailures(result);
+      const downloads = (
+        result as { downloads: Array<Record<string, unknown>> }
+      ).downloads;
+      const failures = (result as { failures?: Array<Record<string, unknown>> })
+        .failures;
+      if (
+        downloads.length === 0 &&
+        Array.isArray(failures) &&
+        failures.length > 0
+      ) {
+        const first = failures[0];
+        const name = typeof first?.name === "string" ? first.name : "download";
+        const reason =
+          typeof first?.reason === "string" ? first.reason : "unknown failure";
+        throw new Error(`The download could not be read: ${name}: ${reason}`);
+      }
+      return downloads
         .filter(
           (entry) =>
             typeof entry.id === "string" &&

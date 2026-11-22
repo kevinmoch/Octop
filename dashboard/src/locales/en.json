@@ -8020,6 +8020,12 @@
     "startRequired": "Start the browser to use the WebSkill assistant.",
     "takeControl": "Take control",
     "returnControl": "Return to assistant",
-    "handoffFailed": "Could not change browser control"
+    "handoffFailed": "Could not change browser control",
+    "downloadFailureTitle": "Download failed: {{name}}",
+    "downloadFailureNotPublished": "The file was not published or could not be bound to the download record.",
+    "downloadFailureDisappeared": "The downloaded file disappeared before it could be read.",
+    "downloadFailureTooLarge": "The downloaded file exceeds the size limit.",
+    "downloadFailureStoreFailed": "The downloaded file could not be stored.",
+    "downloadFailureUnknown": "The download did not complete."
   }
 }

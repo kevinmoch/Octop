@@ -8020,6 +8020,12 @@
     "startRequired": "启动浏览器后，WebSkill 助手即可使用。",
     "takeControl": "接管",
     "returnControl": "交还助手",
-    "handoffFailed": "切换浏览器控制权失败"
+    "handoffFailed": "切换浏览器控制权失败",
+    "downloadFailureTitle": "下载失败：{{name}}",
+    "downloadFailureNotPublished": "文件未能完成保存或无法与下载记录绑定。",
+    "downloadFailureDisappeared": "下载文件在读取前消失。",
+    "downloadFailureTooLarge": "下载文件超过大小限制。",
+    "downloadFailureStoreFailed": "下载文件无法保存。",
+    "downloadFailureUnknown": "下载未能完成。"
   }
 }

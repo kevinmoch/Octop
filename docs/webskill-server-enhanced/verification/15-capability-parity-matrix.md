@@ -860,7 +860,7 @@ pageActionSemanticTarget.test.ts
 测试：
 
 ```text
-test_downloads.py  11 passed
+test_downloads.py  14 passed
 ```
 
 注：GUID 模式下无法绑定时只能失败关闭并记录诊断，不能猜测。
@@ -919,3 +919,43 @@ POST /browser-agent/sessions/{id}/tabs/follow
 - 真实扩展 portable attach
 - 干净依赖安装和全量绿色
 - 全量测试中的既有 environment/provider 失败
+
+
+## 32. R3 局部整改（2026-11-22 第三轮复审）
+
+### 32.1 allowAndName 错误分类收紧
+
+旧分类器把方法名里的 `Behavior` 当作“不支持”的证据，真实 CDP 超时会误触发
+`allow` 回退。现在只接受：
+
+```text
+文本同时包含 allowAndName
+且包含 not supported / unsupported / invalid parameter(s) /
+unknown parameter / failed to parse
+```
+
+Timeout、`CDP send failed...`、`Not connected` 直接失败，并清理 listener、task、
+profile owner 和临时目录。新增真实错误文本回归和 fallback 二次失败清理测试。
+
+### 32.2 failures 进入实际界面
+
+- 宿主 `downloadIds()` 与 `downloadReader.list()` 都会读取并去重 `failures`
+- 仅失败、没有成功文件时，`downloadReader.list()` 抛出可操作错误，模型不再看到空数组
+- 成功与失败并存时，成功文件仍返回，失败通过宿主提示
+- 宿主通过 postMessage 发送 `download-failure`，WebSkillFrame 显示中英文警告横幅
+- 不向模型或 UI 暴露 GUID/服务器路径
+- watcher 不把 failure 计为 downloadCount；同一 GUID 只提示一次
+
+已在真实受控浏览器中从 WebSkill iframe 发送通知并观察到横幅：
+
+```text
+下载失败：report.pdf
+文件未能完成保存或无法与下载记录绑定。
+```
+
+### 32.3 仍待验证
+
+- 真实 Chrome 同名/并发下载
+- 1600 控件 promotion 指纹性能
+- follow 双标签状态矩阵和 iframe 旧 registry 行为
+- 干净依赖安装与全量绿色
