@@ -276,14 +276,16 @@ export const BrowserViewer = forwardRef<
             )
           }
         />
-        <Button
-          size="small"
-          type="primary"
-          onClick={handleGo}
-          disabled={!navUrlNormalized}
-        >
-          {t("browserViewer.go")}
-        </Button>
+        <Tooltip title={t("browserViewer.go")}>
+          <Button
+            size="small"
+            type="primary"
+            icon={<ArrowRight size={14} />}
+            onClick={handleGo}
+            disabled={!navUrlNormalized}
+            aria-label={t("browserViewer.go")}
+          />
+        </Tooltip>
         {addressBarExtra}
       </div>
 

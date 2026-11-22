@@ -31,8 +31,8 @@ import {
   Globe,
   Maximize2,
   Play,
+  Power,
   RefreshCw,
-  Square,
   Sparkles,
   Terminal,
   Trash2,
@@ -1218,7 +1218,7 @@ export default function RemoteBrowserPage({
           <Button
             block
             danger
-            icon={<Square size={14} />}
+            icon={<Power size={14} />}
             onClick={() => {
               closeControlsDrawer();
               shutdownBrowser();
@@ -1387,7 +1387,7 @@ export default function RemoteBrowserPage({
                         <Button
                           size="small"
                           danger
-                          icon={<Square size={14} />}
+                          icon={<Power size={14} />}
                           onClick={shutdownBrowser}
                           aria-label={t("remoteBrowser.stop", "关闭浏览器")}
                         />
