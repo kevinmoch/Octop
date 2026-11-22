@@ -835,16 +835,21 @@ downloadConsent.test.ts    2 passed
 
 ```text
 pageActionSemanticTarget.test.ts
-- native button rename → new name
-- enterprise wrapper title rename → new name
+- native button rename → old ref stale, fresh reader sees new name
+- enterprise wrapper title rename → old ref stale, fresh reader sees new name
+- hint 删除、roleHint 不匹配、promotion 消失 → old ref stale
+- promotion 仍有效仅无关 class 改变 → old ref stale，fresh reader 仍 button
 ```
 
 
 ## 30. 下载 GUID/文件/生命周期整改（2026-11-22 评审整改）
 
-- 优先使用 CDP `allowAndName`：Chrome 以 GUID 命名文件，实现 GUID → bytes 绑定；
-  不支持时回退到精确 suggested filename，绝不绑定“目录最新文件”
+- 优先使用 CDP `allowAndName`：Chrome 以 GUID 命名文件，实现 GUID → bytes 绑定
+- GUID 模式只接受 GUID 文件，不再回退 suggested filename
+- 只有明确“不支持 allowAndName”的错误才回退到 `allow` + 精确 suggested filename；
+  连接/临时 CDP 错误不改变 profile 行为
 - completed 事件后短暂轮询 GUID/精确文件名，避免 Chrome 尚未完成重命名时静默丢失
+- 绑定失败写入 `download_failures`，API 的 `/downloads` 返回 `failures` 供诊断
 - `downloadWillBegin` / `downloadProgress` 监听器记录在 session 上
 - `cleanup_downloads` 会 off 监听器、取消 tracking task、删除目录
 - session close 调用 cleanup，监听器不再跨会话泄漏
@@ -855,11 +860,10 @@ pageActionSemanticTarget.test.ts
 测试：
 
 ```text
-test_downloads.py  9 passed
+test_downloads.py  11 passed
 ```
 
-注：CDP 不提供 GUID → 实际路径的可靠映射；精确文件名缺失时只能失败关闭，
-不能猜测。
+注：GUID 模式下无法绑定时只能失败关闭并记录诊断，不能猜测。
 
 
 ## 31. P1 复审剩余项整改（2026-11-22 复审）
@@ -883,9 +887,11 @@ describe 时一致才复用缓存，否则旧 ref 明确 stale，由 pageAction 
 新增：
 
 ```text
-drops stale name when hint disappears
-falls back when role hint selector no longer matches
-falls back when ordinary promotion signal disappears
+invalidates a native button ref after a rename
+invalidates when the enterprise hint target changes/disappears
+invalidates a roleHint ref when the selector no longer matches
+invalidates an ordinary promoted ref when its signal disappears
+does not downgrade a promotion that is still valid after an unrelated class change
 ```
 
 ### 31.3 follow UI
@@ -896,13 +902,16 @@ RemoteBrowser 地址栏新增「跟随当前页」按钮，调用：
 POST /browser-agent/sessions/{id}/tabs/follow
 ```
 
-成功提示已跟随，失败显示后端错误；中英文文案齐全。
+成功提示已跟随，失败显示后端错误；中英文文案齐全。请求中按钮 loading/disabled，
+避免重复点击。已在真实受控浏览器中点击验证：
+`button[aria-label="跟随当前页"]` → 成功 toast「已跟随当前页面」。
 
 ### 31.4 下载 GUID
 
-`Browser.setDownloadBehavior` 使用 `allowAndName`；文件按 GUID 命名后读取。
-不支持该 behavior 的旧 Chrome 明确回退到精确 suggested filename，仍然失败关闭。
-真实 Chrome 重名/并发下载验收仍需补。
+`Browser.setDownloadBehavior` 使用 `allowAndName`；GUID 模式只按 GUID 文件读取，
+不再用 suggested filename 兜底。只有明确不支持该 behavior 的错误才回退到
+`allow` + 精确 suggested filename。无法绑定时返回 `failures` 诊断。
+同名双 GUID 单测通过；真实 Chrome 并发/同名下载验收仍需补。
 
 ### 31.5 仍未关闭
 
