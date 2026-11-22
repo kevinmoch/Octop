@@ -710,6 +710,8 @@ SDK 已新增协议、handler、3 条单测和 extension host wrapper；
 - `attach_model_target` 的瞬时错误不再当作“目标关闭”并切换
 - 新增显式 `POST /browser-agent/sessions/{id}/tabs/follow` 与
   `follow_active_workset_tab()`，只有显式调用才移动 modelTarget 并清理 refs
+- Dashboard 浏览器地址栏新增「跟随当前页」（en: Follow current page）按钮，
+  走同一 HTTP 入口；恢复旅程不再只能靠手写 API
 - base 缺失时 list 失败关闭，不再自动改 base
 
 新增/改写测试：
@@ -824,6 +826,9 @@ downloadConsent.test.ts    2 passed
 - 企业 wrapper title 变化 → 重新计算 `RoleHint.name`
 - `ref`/secret 仍按实时 DOM 判断
 - 确认卡、outcome target、trace 共用同一个 describe 结果
+- hint **被移除/清空**、roleHint 选择器不再匹配、普通 promotion 信号
+  （tabindex/title/class/cursor/click probe）消失时，同样回退到实时 raw 语义，
+  不再保留旧名称
 
 新增：
 
@@ -836,8 +841,9 @@ pageActionSemanticTarget.test.ts
 
 ## 30. 下载 GUID/文件/生命周期整改（2026-11-22 评审整改）
 
-- 不再把目录里“最新文件”绑定给某个 GUID；只有精确文件名匹配才记录，
-  否则失败关闭（避免并发/Chrome 重命名把另一份字节绑定错）
+- 优先使用 CDP `allowAndName`：Chrome 以 GUID 命名文件，实现 GUID → bytes 绑定；
+  不支持时回退到精确 suggested filename，绝不绑定“目录最新文件”
+- completed 事件后短暂轮询 GUID/精确文件名，避免 Chrome 尚未完成重命名时静默丢失
 - `downloadWillBegin` / `downloadProgress` 监听器记录在 session 上
 - `cleanup_downloads` 会 off 监听器、取消 tracking task、删除目录
 - session close 调用 cleanup，监听器不再跨会话泄漏
@@ -853,3 +859,52 @@ test_downloads.py  7 passed
 
 注：CDP 不提供 GUID → 实际路径的可靠映射；精确文件名缺失时只能失败关闭，
 不能猜测。
+
+
+## 31. P1 复审剩余项整改（2026-11-22 复审）
+
+对应复审文档：
+
+### 31.1 模型新 target 不再切走用户画面
+
+`execute_action` 在点击打开新 target 后不再调用 `browser.switch_tab`：
+
+- 只 `admit_model_target`，更新 modelTarget
+- 用户浏览器 active/viewTarget 保持原标签
+- workset 满时 modelTarget 与 viewTarget 都不变，outcome 给 reason
+- 测试改名为 `test_new_target_updates_model_without_switching_user_view`，
+  断言 `browser.active_target` 仍为原页面
+
+### 31.2 hint 移除/清空
+
+`targetOf` 现在记录发放时的 hint role/name 和 promotion 输入指纹；
+describe 时一致才复用缓存，否则使用实时 raw/当前 hint。新增：
+
+```text
+drops stale name when hint disappears
+falls back when role hint selector no longer matches
+falls back when ordinary promotion signal disappears
+```
+
+### 31.3 follow UI
+
+RemoteBrowser 地址栏新增「跟随当前页」按钮，调用：
+
+```http
+POST /browser-agent/sessions/{id}/tabs/follow
+```
+
+成功提示已跟随，失败显示后端错误；中英文文案齐全。
+
+### 31.4 下载 GUID
+
+`Browser.setDownloadBehavior` 使用 `allowAndName`；文件按 GUID 命名后读取。
+不支持该 behavior 的旧 Chrome 明确回退到精确 suggested filename，仍然失败关闭。
+真实 Chrome 重名/并发下载验收仍需补。
+
+### 31.5 仍未关闭
+
+- 真实 Chrome 重名/并发下载端到端
+- 真实扩展 portable attach
+- 干净依赖安装和全量绿色
+- 全量测试中的既有 environment/provider 失败

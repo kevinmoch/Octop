@@ -94,6 +94,11 @@ export const browserAgentApi = {
     request<{ tabs: BrowserAgentTab[] }>(
       `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs`,
     ),
+  followActive: (sessionId: string) =>
+    request<{ focused: string }>(
+      `/browser-agent/sessions/${encodeURIComponent(sessionId)}/tabs/follow`,
+      { method: "POST" },
+    ),
   focusTab: (sessionId: string, handle: string) =>
     request<{ focused: string }>(
       `/browser-agent/sessions/${encodeURIComponent(

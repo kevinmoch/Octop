@@ -40,7 +40,7 @@ def _new_id() -> str:
     return f"dl_{secrets.token_urlsafe(18)}"
 
 
-def _completed_file(directory: Path, preferred: str) -> Path | None:
+def _completed_file(directory: Path, preferred: str, guid: str | None = None) -> Path | None:
     try:
         files = [
             item
@@ -49,10 +49,14 @@ def _completed_file(directory: Path, preferred: str) -> Path | None:
         ]
     except OSError:
         return None
-    # Never fall back to "the newest file in the directory": concurrent or
-    # Chrome-renamed downloads would silently bind another file's bytes to this
-    # GUID. If the exact name is not present, fail closed and let the caller
-    # report no completed download.
+    # Prefer the GUID-named file produced by ``allowAndName``. This is the only
+    # CDP mode that gives a real GUID -> bytes binding even when two downloads
+    # share a suggested filename. If the browser did not honor it, fall back to
+    # the exact suggested filename; never fall back to "the newest file".
+    if guid is not None:
+        by_guid = next((item for item in files if item.name == guid), None)
+        if by_guid is not None:
+            return by_guid
     return next((item for item in files if item.name == preferred), None)
 
 
@@ -115,21 +119,35 @@ async def ensure_downloads(
             await client.send(
                 "Browser.setDownloadBehavior",
                 {
-                    "behavior": "allow",
+                    "behavior": "allowAndName",
                     "downloadPath": str(directory),
                     "eventsEnabled": True,
                 },
             )
+            session.download_guid_named = True
         except Exception:
-            _detach_listeners(session, client)
-            session.download_listeners = []
-            session.download_client = None
-            shutil.rmtree(directory, ignore_errors=True)
-            session.download_dir = None
-            async with _PROFILE_LOCK:
-                if _PROFILE_OWNER.get(session.profile) == session.id:
-                    _PROFILE_OWNER.pop(session.profile, None)
-            raise
+            # Older Chrome builds do not support allowAndName. Keep the exact
+            # suggested-name path as a fail-closed fallback.
+            try:
+                await client.send(
+                    "Browser.setDownloadBehavior",
+                    {
+                        "behavior": "allow",
+                        "downloadPath": str(directory),
+                        "eventsEnabled": True,
+                    },
+                )
+                session.download_guid_named = False
+            except Exception:
+                _detach_listeners(session, client)
+                session.download_listeners = []
+                session.download_client = None
+                shutil.rmtree(directory, ignore_errors=True)
+                session.download_dir = None
+                async with _PROFILE_LOCK:
+                    if _PROFILE_OWNER.get(session.profile) == session.id:
+                        _PROFILE_OWNER.pop(session.profile, None)
+                raise
         session.downloads_initialized = True
 
 
@@ -149,10 +167,21 @@ async def _finish_download(
     meta: dict[str, str],
     directory: Path,
 ) -> None:
-    await asyncio.sleep(0.05)
-    if not session.downloads_initialized or session.download_dir != str(directory):
-        return
-    source = _completed_file(directory, meta["name"])
+    source: Path | None = None
+    # The completed event can arrive before Chrome has published/renamed the
+    # final file. Poll briefly, but still only accept the GUID or exact
+    # suggested name - never "the newest file in the directory".
+    for _attempt in range(20):
+        if not session.downloads_initialized or session.download_dir != str(directory):
+            return
+        source = _completed_file(
+            directory,
+            meta["name"],
+            guid if session.download_guid_named else None,
+        )
+        if source is not None:
+            break
+        await asyncio.sleep(0.05)
     if source is None:
         return
     try:
@@ -224,6 +253,7 @@ def read_download(session: BrowserAgentSession, download_id: str) -> tuple[str, 
 
 def cleanup_downloads(session: BrowserAgentSession) -> None:
     session.downloads_initialized = False
+    session.download_guid_named = False
     session.downloads.clear()
     session.download_guids.clear()
     for task in list(session.download_tasks):

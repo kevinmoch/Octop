@@ -740,7 +740,7 @@ async def test_tab_switch_does_not_silently_retarget_model(
     assert session.model_target == "target-1"
 
 
-async def test_new_target_updates_model_and_activates_view(
+async def test_new_target_updates_model_without_switching_user_view(
     registry: BrowserAgentRegistry,
 ) -> None:
     browser = FrameBrowser()
@@ -764,7 +764,8 @@ async def test_new_target_updates_model_and_activates_view(
     assert session.model_target == "target-2"
     assert session.document is None
     assert not session.refs
-    assert browser.active_target == "target-2"
+    # AC-11: modelTarget follows the new page, viewTarget does not.
+    assert browser.active_target == "target-1"
     child = await read_page(
         session,
         {"type": "perceive", "scope": {"include": ["body"]}},

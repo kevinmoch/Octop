@@ -69,7 +69,7 @@ def test_completed_download_is_listed_and_read_by_opaque_id(tmp_path: Path) -> N
         assert "Browser.setDownloadBehavior" in client.calls
         assert session.download_dir is not None
         directory = Path(session.download_dir)
-        (directory / "report.txt").write_bytes(b"download body")
+        (directory / "guid-1").write_bytes(b"download body")
         client.emit(
             "Browser.downloadWillBegin",
             {"guid": "guid-1", "suggestedFilename": "report.txt"},

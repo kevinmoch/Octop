@@ -83,6 +83,7 @@ class BrowserAgentSession:
     download_guids: dict[str, dict[str, str]] = field(default_factory=dict)
     download_dir: str | None = None
     downloads_initialized: bool = False
+    download_guid_named: bool = False
     download_listeners: list[tuple[str, Any]] = field(default_factory=list)
     download_client: Any | None = None
     download_tasks: set[asyncio.Task[Any]] = field(default_factory=set)

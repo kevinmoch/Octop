@@ -5653,7 +5653,11 @@
       "replayComplete": "🔄 技能回放完成！所有步骤已成功执行。",
       "replayFailedSimple": "⚠️ 技能回放失败：{{error}}",
       "replayingSkill": "🔄 正在使用技能「{{text}}」进行回放...",
-      "recordingHint": "💡 录制还在进行中。如果操作已完成，输入\"结束\"即可停止录制并生成技能脚本。"
+      "recordingHint": "💡 录制还在进行中。如果操作已完成，输入\"结束\"即可停止录制并生成技能脚本。",
+      "followActive": "跟随当前页",
+      "followActiveTip": "把模型当前页切换到你看的这个标签页",
+      "followActiveDone": "已跟随当前页面",
+      "followActiveFailed": "跟随当前页面失败"
     }
   },
   "remoteDesktop": {

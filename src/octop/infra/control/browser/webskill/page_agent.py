@@ -3224,11 +3224,10 @@ async def execute_action(
                 else None
             )
             if new_target is not None:
-                # A user click that opens a tab is a foreground navigation in a
-                # normal browser. The model target follows the new page, and the
-                # browser's active tab must follow too; otherwise the viewer keeps
-                # rendering the old page and the UI loses Chrome's default action.
-                await browser.switch_tab(new_target)
+                # Model-side navigation must not move the user's visible tab
+                # (AC-11 / dual-pointer design). Commit the model pointer only
+                # after workset admission succeeds; otherwise both pointers stay
+                # unchanged and the model gets a structured reason.
                 if admit_model_target(session, new_target):
                     session.document = None
                     session.refs.clear()

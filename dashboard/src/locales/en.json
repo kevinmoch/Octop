@@ -5654,7 +5654,11 @@
       "replayFailedSimple": "⚠️ Skill replay failed: {{error}}",
       "replayingSkill": "🔄 Replaying with skill \"{{text}}\"...",
       "recordingHint": "💡 Recording is still in progress. If you have finished, type \"end\" to stop and generate the skill script."
-    }
+    },
+    "followActive": "Follow current page",
+    "followActiveTip": "Move the model to the tab you are viewing",
+    "followActiveDone": "Now following the current page",
+    "followActiveFailed": "Could not follow the current page"
   },
   "remoteDesktop": {
     "subtitle": "Control the Octop host operating system desktop",

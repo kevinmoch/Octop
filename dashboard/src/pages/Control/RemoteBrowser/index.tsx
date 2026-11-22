@@ -27,6 +27,7 @@ import {
   Bot,
   CheckCircle2,
   Copy,
+  Crosshair,
   Globe,
   Maximize2,
   Play,
@@ -56,6 +57,7 @@ import BrowserViewer, {
   type BrowserViewerHandle,
 } from "../../../components/BrowserViewer";
 import { browserApi } from "../../../api/modules/browser";
+import { browserAgentApi } from "../../../api/modules/browserAgent";
 import * as chatStore from "../../Chat/hooks/chatStore";
 import { request } from "../../../api/request";
 import { normalizeUrl } from "../../../utils/normalizeUrl";
@@ -767,6 +769,20 @@ export default function RemoteBrowserPage({
     });
   }, [closeSession, modal, t]);
 
+  const followActiveAgentTab = useCallback(async () => {
+    if (!agentSessionId) return;
+    try {
+      await browserAgentApi.followActive(agentSessionId);
+      antMessage.success(t("remoteBrowser.followActiveDone", "已跟随当前页面"));
+    } catch (error) {
+      showApiError(
+        error,
+        t("remoteBrowser.followActiveFailed", "跟随当前页面失败"),
+        t,
+      );
+    }
+  }, [agentSessionId, antMessage, t]);
+
   const refreshView = useCallback(async () => {
     const profileId = profileIdRef.current;
     if (!profileId) return;
@@ -1322,6 +1338,28 @@ export default function RemoteBrowserPage({
                   onUserTakeover={requestUserControl}
                   addressBarExtra={
                     <>
+                      {enhanced && agentSessionId ? (
+                        <Tooltip
+                          title={t(
+                            "remoteBrowser.followActiveTip",
+                            "把模型当前页切换到你看的这个标签页",
+                          )}
+                        >
+                          <Button
+                            size="small"
+                            icon={<Crosshair size={14} />}
+                            onClick={() => void followActiveAgentTab()}
+                            aria-label={t(
+                              "remoteBrowser.followActive",
+                              "跟随当前页",
+                            )}
+                          >
+                            {isMobile
+                              ? null
+                              : t("remoteBrowser.followActive", "跟随当前页")}
+                          </Button>
+                        </Tooltip>
+                      ) : null}
                       <Button
                         size="small"
                         type={isAiPanelOpen ? "primary" : "default"}
