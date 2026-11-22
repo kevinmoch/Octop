@@ -1353,25 +1353,18 @@ export default function RemoteBrowserPage({
                               "remoteBrowser.followActive",
                               "跟随当前页",
                             )}
-                          >
-                            {isMobile
-                              ? null
-                              : t("remoteBrowser.followActive", "跟随当前页")}
-                          </Button>
+                          />
                         </Tooltip>
                       ) : null}
-                      <Button
-                        size="small"
-                        type={isAiPanelOpen ? "primary" : "default"}
-                        icon={<Bot size={14} />}
-                        onClick={handleAiPanelToggle}
-                        aria-label={t("remoteBrowser.ai.title", "AI 助手")}
-                        title={t("remoteBrowser.ai.title", "AI 助手")}
-                      >
-                        {isMobile
-                          ? null
-                          : t("remoteBrowser.ai.title", "AI 助手")}
-                      </Button>
+                      <Tooltip title={t("remoteBrowser.ai.title", "AI 助手")}>
+                        <Button
+                          size="small"
+                          type={isAiPanelOpen ? "primary" : "default"}
+                          icon={<Bot size={14} />}
+                          onClick={handleAiPanelToggle}
+                          aria-label={t("remoteBrowser.ai.title", "AI 助手")}
+                        />
+                      </Tooltip>
                       {!enhanced && (
                         <Tooltip
                           title={t(
@@ -1387,11 +1380,7 @@ export default function RemoteBrowserPage({
                               "skillRecordGuide.buttonLabel",
                               "技能录制",
                             )}
-                          >
-                            {isMobile
-                              ? null
-                              : t("skillRecordGuide.buttonLabel", "技能录制")}
-                          </Button>
+                          />
                         </Tooltip>
                       )}
                       <Tooltip title={t("remoteBrowser.stop", "关闭浏览器")}>
@@ -1401,11 +1390,7 @@ export default function RemoteBrowserPage({
                           icon={<Square size={14} />}
                           onClick={shutdownBrowser}
                           aria-label={t("remoteBrowser.stop", "关闭浏览器")}
-                        >
-                          {isMobile
-                            ? null
-                            : t("remoteBrowser.stop", "关闭浏览器")}
-                        </Button>
+                        />
                       </Tooltip>
                     </>
                   }
