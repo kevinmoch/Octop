@@ -23,6 +23,11 @@ class FakeDownloadClient:
     def on(self, event: str, callback: object) -> None:
         self.listeners.setdefault(event, []).append(callback)
 
+    def off(self, event: str, callback: object) -> None:
+        listeners = self.listeners.get(event, [])
+        if callback in listeners:
+            listeners.remove(callback)
+
     async def send(self, method: str, params: dict[str, object] | None = None) -> dict[str, object]:
         self.calls.append(method)
         assert method == "Browser.setDownloadBehavior"
@@ -85,6 +90,9 @@ def test_completed_download_is_listed_and_read_by_opaque_id(tmp_path: Path) -> N
     assert content_type == "text/plain"
     assert data == b"download body"
     assert "download_dir" not in entries[0]
+    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+    cleanup_downloads(session)
 
 
 def test_download_rejects_unknown_id_and_cleans_up(tmp_path: Path) -> None:
@@ -181,3 +189,57 @@ def test_expired_download_is_purged(tmp_path: Path) -> None:
     )
     assert list_downloads(session) == []
     assert not path.exists()
+
+
+def test_ambiguous_download_name_is_not_bound_to_the_newest_file(tmp_path: Path) -> None:
+    client = FakeDownloadClient()
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(session, resolver=_resolver(browser))
+        directory = Path(session.download_dir or "")
+        (directory / "unrelated.txt").write_bytes(b"wrong bytes")
+        client.emit(
+            "Browser.downloadWillBegin",
+            {"guid": "guid-missing", "suggestedFilename": "wanted.txt"},
+        )
+        client.emit(
+            "Browser.downloadProgress",
+            {"guid": "guid-missing", "state": "completed"},
+        )
+        await asyncio.sleep(0.15)
+
+    asyncio.run(scenario())
+    assert list_downloads(session) == []
+    from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+    cleanup_downloads(session)
+
+
+def test_cleanup_detaches_listeners_and_ignores_late_events() -> None:
+    client = FakeDownloadClient()
+    browser = FakeDownloadBrowser(client)
+    session = _session()
+
+    async def scenario() -> None:
+        await ensure_downloads(session, resolver=_resolver(browser))
+        directory = Path(session.download_dir or "")
+        (directory / "late.txt").write_bytes(b"late")
+        from octop.infra.control.browser.webskill.downloads import cleanup_downloads
+
+        cleanup_downloads(session)
+        assert client.listeners["Browser.downloadWillBegin"] == []
+        assert client.listeners["Browser.downloadProgress"] == []
+        client.emit(
+            "Browser.downloadWillBegin",
+            {"guid": "late", "suggestedFilename": "late.txt"},
+        )
+        client.emit(
+            "Browser.downloadProgress",
+            {"guid": "late", "state": "completed"},
+        )
+        await asyncio.sleep(0.15)
+        assert list_downloads(session) == []
+
+    asyncio.run(scenario())

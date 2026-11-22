@@ -47,6 +47,7 @@ from octop.infra.control.browser.webskill.tabs import (
     admit_workset_tab,
     close_workset_tab,
     focus_workset_tab,
+    follow_active_workset_tab,
     list_workset_tabs,
     reset_workset,
 )
@@ -548,6 +549,33 @@ async def reset_tabs(
         reset_workset(session)
         browser_agent_registry.revoke_grants(session_id=session.id)
         return {"ok": True}
+    except BrowserAgentError as error:
+        raise _http_error(error) from error
+
+
+@router.post(
+    "/browser-agent/sessions/{session_id}/tabs/follow",
+    summary="Explicitly move the model target to the user's active page",
+)
+async def follow_tab(
+    session_id: str,
+    request: Request,
+    user: Any = Depends(require_permission("browser")),
+) -> dict[str, Any]:
+    try:
+        check_request_origin(request)
+        session = browser_agent_registry.get(session_id, user.id)
+        result = await follow_active_workset_tab(session, resolver=resolve_harness_session)
+        browser_agent_registry.revoke_grants(session_id=session.id)
+        await asyncio.to_thread(
+            _audit,
+            request,
+            user.id,
+            "webskill.tab.followed",
+            session.id,
+            {"handle": result.get("focused")},
+        )
+        return result
     except BrowserAgentError as error:
         raise _http_error(error) from error
 

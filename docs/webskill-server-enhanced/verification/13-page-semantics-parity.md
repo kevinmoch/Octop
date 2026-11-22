@@ -1,5 +1,9 @@
 # WebSkill 页面语义与 Octop P1 对照
 
+> **时间切片（2026-11-20）**：本文保留最初的语义差异分析；其中 flat tree、无分页、
+> actionScope 未独立等结论是当时的现状。HEAD 的当前状态与逐项证据以
+> `15-capability-parity-matrix.md` 为准，不要把本文旧结论当成最新实现。
+
 > 目的：把「页面读取/操作」的语义差异从逐个手工试错，收敛成可检查的契约。
 > 参考实现：`web-skill-sdk/packages/browser/src/dom/{perception,promotion,pageAction}.ts`、
 > `packages/agent/src/pageAction/toolSource.ts`、`examples/browser-extension/src/content/main.ts`。

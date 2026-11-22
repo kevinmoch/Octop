@@ -22,6 +22,8 @@ from .sessions import BrowserAgentError, BrowserAgentSession
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 DOWNLOAD_TTL_SECONDS = 60 * 60
+_PROFILE_LOCK = asyncio.Lock()
+_PROFILE_OWNER: dict[str, str] = {}
 
 
 @dataclass
@@ -47,10 +49,11 @@ def _completed_file(directory: Path, preferred: str) -> Path | None:
         ]
     except OSError:
         return None
-    exact = next((item for item in files if item.name == preferred), None)
-    if exact is not None:
-        return exact
-    return max(files, key=lambda item: item.stat().st_mtime, default=None)
+    # Never fall back to "the newest file in the directory": concurrent or
+    # Chrome-renamed downloads would silently bind another file's bytes to this
+    # GUID. If the exact name is not present, fail closed and let the caller
+    # report no completed download.
+    return next((item for item in files if item.name == preferred), None)
 
 
 async def ensure_downloads(
@@ -60,41 +63,84 @@ async def ensure_downloads(
 ) -> None:
     if session.downloads_initialized:
         return
-    browser = await resolve_browser(session, resolver)
-    client = browser._internal.client  # noqa: SLF001
-    directory = Path(tempfile.mkdtemp(prefix="octop-webskill-downloads-"))
-    session.download_dir = str(directory)
-    session.download_guids = {}
-
-    def will_begin(params: dict[str, Any]) -> None:
-        guid = params.get("guid")
-        if isinstance(guid, str):
-            session.download_guids[guid] = {
-                "name": str(params.get("suggestedFilename") or "download")[:300],
-                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-
-    def progress(params: dict[str, Any]) -> None:
-        guid = params.get("guid")
-        if not isinstance(guid, str) or params.get("state") != "completed":
+    async with session.downloads_lock:
+        if session.downloads_initialized:
             return
-        meta = session.download_guids.pop(guid, None)
-        if meta is None:
-            return
-        loop = asyncio.get_running_loop()
-        loop.create_task(_finish_download(session, guid, meta, directory))
+        browser = await resolve_browser(session, resolver)
+        client = browser._internal.client  # noqa: SLF001
+        async with _PROFILE_LOCK:
+            owner = _PROFILE_OWNER.get(session.profile)
+            if owner is not None and owner != session.id:
+                raise BrowserAgentError(
+                    "DOWNLOAD_SESSION_BUSY",
+                    "Another WebSkill session owns this browser profile's downloads",
+                )
+            _PROFILE_OWNER[session.profile] = session.id
+        directory = Path(tempfile.mkdtemp(prefix="octop-webskill-downloads-"))
+        session.download_dir = str(directory)
+        session.download_client = client
+        session.download_guids = {}
 
-    client.on("Browser.downloadWillBegin", will_begin)
-    client.on("Browser.downloadProgress", progress)
-    await client.send(
-        "Browser.setDownloadBehavior",
-        {
-            "behavior": "allow",
-            "downloadPath": str(directory),
-            "eventsEnabled": True,
-        },
-    )
-    session.downloads_initialized = True
+        def will_begin(params: dict[str, Any]) -> None:
+            if not session.downloads_initialized:
+                return
+            guid = params.get("guid")
+            if isinstance(guid, str):
+                session.download_guids[guid] = {
+                    "name": str(params.get("suggestedFilename") or "download")[:300],
+                    "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+
+        def progress(params: dict[str, Any]) -> None:
+            if not session.downloads_initialized:
+                return
+            guid = params.get("guid")
+            if not isinstance(guid, str) or params.get("state") != "completed":
+                return
+            meta = session.download_guids.pop(guid, None)
+            if meta is None:
+                return
+            loop = asyncio.get_running_loop()
+            task = loop.create_task(_finish_download(session, guid, meta, directory))
+            session.download_tasks.add(task)
+            task.add_done_callback(session.download_tasks.discard)
+
+        session.download_listeners = [
+            ("Browser.downloadWillBegin", will_begin),
+            ("Browser.downloadProgress", progress),
+        ]
+        for event, callback in session.download_listeners:
+            client.on(event, callback)
+        try:
+            await client.send(
+                "Browser.setDownloadBehavior",
+                {
+                    "behavior": "allow",
+                    "downloadPath": str(directory),
+                    "eventsEnabled": True,
+                },
+            )
+        except Exception:
+            _detach_listeners(session, client)
+            session.download_listeners = []
+            session.download_client = None
+            shutil.rmtree(directory, ignore_errors=True)
+            session.download_dir = None
+            async with _PROFILE_LOCK:
+                if _PROFILE_OWNER.get(session.profile) == session.id:
+                    _PROFILE_OWNER.pop(session.profile, None)
+            raise
+        session.downloads_initialized = True
+
+
+def _detach_listeners(session: BrowserAgentSession, client: Any) -> None:
+    off = getattr(client, "off", None)
+    if callable(off):
+        for event, callback in session.download_listeners:
+            try:
+                off(event, callback)
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                continue
 
 
 async def _finish_download(
@@ -104,6 +150,8 @@ async def _finish_download(
     directory: Path,
 ) -> None:
     await asyncio.sleep(0.05)
+    if not session.downloads_initialized or session.download_dir != str(directory):
+        return
     source = _completed_file(directory, meta["name"])
     if source is None:
         return
@@ -175,8 +223,18 @@ def read_download(session: BrowserAgentSession, download_id: str) -> tuple[str, 
 
 
 def cleanup_downloads(session: BrowserAgentSession) -> None:
+    session.downloads_initialized = False
     session.downloads.clear()
     session.download_guids.clear()
+    for task in list(session.download_tasks):
+        task.cancel()
+    session.download_tasks.clear()
+    if session.download_client is not None:
+        _detach_listeners(session, session.download_client)
+    session.download_listeners.clear()
+    session.download_client = None
     if session.download_dir:
         shutil.rmtree(session.download_dir, ignore_errors=True)
         session.download_dir = None
+    if _PROFILE_OWNER.get(session.profile) == session.id:
+        _PROFILE_OWNER.pop(session.profile, None)

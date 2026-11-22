@@ -350,19 +350,13 @@ Octop 本地已用修复后的 `@webskill/sdk` 构建产物重新构建
 - 新增测试 `test_hidden_nodes_are_removed_from_the_read_tree`，验证隐藏子树不进入
   `result.nodes`，可见按钮仍在。
 
-修正后矩阵：
+> **历史切片（2026-11-21 修正后当时）**：38 / 8 / 1 / 1。
+> 后续 §20～§27 又修复了企业控件、attach 协议、下载、noop、语义目标等，当前 HEAD 汇总见顶部。
+
+当前 Octop 定向测试（最新）：
 
 ```text
-✅ 38 项
-🟡 8 项
-❌ 1 项（跨宿主 attach）
-➖ 1 项
-```
-
-当前 Octop 定向测试：
-
-```text
-88 passed
+95+ passed
 ```
 
 SDK agent 测试：
@@ -698,37 +692,37 @@ SDK 已新增协议、handler、3 条单测和 extension host wrapper；
 真实 extension attach 端到端验收。矩阵第 41 行从 ❌ 改为 🟡。
 
 
-## 25. 外部关闭模型标签页恢复（2026-11-21）
+## 25. 模型 target 安全契约（2026-11-22 评审整改）
 
-用户复现：
+评审指出：此前为了修复“用户关闭标签页后无法读取”，`list_workset_tabs` 和
+`document_identity` 会自动跟随 active 页，违反了既有契约：
 
-1. 模型在巡检页自动填写成功
-2. 用户手动关闭该标签页，切到“日常检查”
-3. 读取当前页持续返回
-   `The model target was closed; select a target explicitly`
-4. 页面标签列表也不可用
+- 用户切页只改变 viewTarget，不自动改变 modelTarget
+- target 关闭后默认明确失败
+- 只有显式 focus/follow 才可以选择新页
+- list 必须是只读操作
 
-根因：
+已整改：
 
-- `session.model_target` 仍指向已关闭 target
-- `document_identity` 直接抛 `PAGE_TAB_EXPIRED`
-- `base_target_id` / `tab_handles` 也可能残留已关闭目标
-- tab list 没有把用户当前 active 页面接回 workset
+- 删除 `recover_target_from_tabs` 的自动选择逻辑
+- `list_workset_tabs` 不再改变 modelTarget/workset
+- `document_identity` 遇到关闭 target 直接 `PAGE_TAB_EXPIRED`
+- `attach_model_target` 的瞬时错误不再当作“目标关闭”并切换
+- 新增显式 `POST /browser-agent/sessions/{id}/tabs/follow` 与
+  `follow_active_workset_tab()`，只有显式调用才移动 modelTarget 并清理 refs
+- base 缺失时 list 失败关闭，不再自动改 base
 
-修复：
+新增/改写测试：
 
-- 新增 `recover_target_from_tabs`：
-  - 优先当前 active 页面
-  - 其次仍存活的 base
-  - 再次任意存活 workset
-  - 清理已关闭 target/handle、清空 document/refs
-- `attach_model_target`、`document_identity`、`list_workset_tabs` 都走恢复
-- base 被关闭时用 active 页面替换
-- 新增 3 条目标恢复单测
+```text
+test_list_does_not_follow_active_or_revive_closed_target
+test_list_fails_closed_when_base_is_gone
+test_explicit_follow_returns_a_handle_for_the_active_page
+test_follow_active_target_is_explicit_and_clears_refs
+```
 
-当前定向测试：95 passed。
-
-这修复的是**外部关闭标签页**；模型自己调用 close_page_tab 的路径原本就会更新指针。
+这意味着“关闭标签后直接读取当前页”不再自动成功；需要显式 follow。
+这是评审要求的安全默认，不再用隐式切换换便利。
 
 
 ## 26. 标签页顺序稳定化（2026-11-21）
@@ -797,3 +791,65 @@ dashboard/src/hooks/useBrowserStream.test.ts
 
 注意：如果 TCP 仍保持 OPEN 但消息静默丢失，浏览器无法立即判定断流；
 本次队列覆盖的是 WebSocket 已关闭或 reconnect 窗口内的情况。
+
+
+## 28. 授权记忆用户隔离（2026-11-22 评审整改）
+
+`pageActionConsent` / `downloadConsent` 的 key 从 v1 全局改为 v2 + userId：
+
+```text
+octop.webskill.page-action-consent.2.<userId>.<origin>.<action>
+octop.webskill.download-consent.2.<userId>.<action>
+```
+
+- 同一浏览器换账号不会继承旧账号的“不再询问”
+- list/forget/forgetScope/forgetAll 只扫描当前 userId 前缀
+- 旧 v1 全局 key 不迁移、不读取，自然失效
+- page-action id 包含 userId，但 parse 后仍按当前用户 key 删除
+
+测试：
+
+```text
+pageActionConsent.test.ts  3 passed
+downloadConsent.test.ts    2 passed
+```
+
+
+## 29. semantic action target 实时性（2026-11-22 评审整改）
+
+此前 reader 缓存了发放时的语义 role/name，动态改名后 action target 会显示旧名字。
+现在 `targetOf` 额外记录 raw role/name，并在 describe 时重算：
+
+- 当前 raw role/name 变化 → 使用当前值，不再复用旧缓存
+- 企业 wrapper title 变化 → 重新计算 `RoleHint.name`
+- `ref`/secret 仍按实时 DOM 判断
+- 确认卡、outcome target、trace 共用同一个 describe 结果
+
+新增：
+
+```text
+pageActionSemanticTarget.test.ts
+- native button rename → new name
+- enterprise wrapper title rename → new name
+```
+
+
+## 30. 下载 GUID/文件/生命周期整改（2026-11-22 评审整改）
+
+- 不再把目录里“最新文件”绑定给某个 GUID；只有精确文件名匹配才记录，
+  否则失败关闭（避免并发/Chrome 重命名把另一份字节绑定错）
+- `downloadWillBegin` / `downloadProgress` 监听器记录在 session 上
+- `cleanup_downloads` 会 off 监听器、取消 tracking task、删除目录
+- session close 调用 cleanup，监听器不再跨会话泄漏
+- 同一 profile 同时只允许一个 session 接管下载；第二个会明确
+  `DOWNLOAD_SESSION_BUSY`
+- task 完成回调从集合移除；closed session 的迟到事件不会造记录
+
+测试：
+
+```text
+test_downloads.py  7 passed
+```
+
+注：CDP 不提供 GUID → 实际路径的可靠映射；精确文件名缺失时只能失败关闭，
+不能猜测。

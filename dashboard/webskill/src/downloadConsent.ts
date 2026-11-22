@@ -4,8 +4,7 @@ import type {
   DownloadedFileEntry,
 } from "@webskill/sdk/agent";
 
-const KEY_PREFIX = "octop.webskill.download-consent.1";
-const STORAGE_PREFIX = `${KEY_PREFIX}.`;
+const KEY_PREFIX = "octop.webskill.download-consent.2";
 export interface DownloadConsentView {
   id: string;
   scope: string;
@@ -28,10 +27,12 @@ const LABELS: Record<DownloadedFileAction, { zh: string; en: string }> = {
  * Remembering covers the browser download directory, not one file. This is
  * the same granularity the extension host uses; do not key by file name.
  */
-export function createDownloadConsent(
-  locale: () => "zh" | "en",
-): DownloadConsentStore {
-  const keyOf = (action: DownloadedFileAction) => `${KEY_PREFIX}.${action}`;
+export function createDownloadConsent(options: {
+  userId: number;
+  locale: () => "zh" | "en";
+}): DownloadConsentStore {
+  const userPrefix = `${KEY_PREFIX}.${options.userId}`;
+  const keyOf = (action: DownloadedFileAction) => `${userPrefix}.${action}`;
   return {
     async recall(action: DownloadedFileAction) {
       return localStorage.getItem(keyOf(action)) !== null;
@@ -48,7 +49,7 @@ export function createDownloadConsent(
       );
     },
     describeScope(action: DownloadedFileAction) {
-      return locale() === "zh"
+      return options.locale() === "zh"
         ? `以后不再询问「${LABELS[action].zh}」`
         : `Don't ask again to ${LABELS[action].en}`;
     },
@@ -56,7 +57,7 @@ export function createDownloadConsent(
       const views = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (key === null || !key.startsWith(STORAGE_PREFIX)) continue;
+        if (key === null || !key.startsWith(`${userPrefix}.`)) continue;
         const raw = localStorage.getItem(key);
         if (raw === null) continue;
         try {
@@ -92,7 +93,7 @@ export function createDownloadConsent(
       const doomed: string[] = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (key !== null && key.startsWith(STORAGE_PREFIX)) doomed.push(key);
+        if (key !== null && key.startsWith(`${userPrefix}.`)) doomed.push(key);
       }
       for (const key of doomed) localStorage.removeItem(key);
     },

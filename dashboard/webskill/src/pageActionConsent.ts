@@ -4,7 +4,7 @@ import type {
   PageActionTarget,
 } from "@webskill/sdk/agent";
 
-const KEY_PREFIX = "octop.webskill.page-action-consent.1";
+const KEY_PREFIX = "octop.webskill.page-action-consent.2";
 
 interface StoredConsent {
   id: string;
@@ -46,14 +46,17 @@ function parseStored(raw: string | null): StoredConsent | undefined {
   return undefined;
 }
 
-function idOf(origin: string, action: string): string {
-  return `${origin}|${action}`;
+function idOf(userId: number, origin: string, action: string): string {
+  return `${userId}|${origin}|${action}`;
 }
 
 function parseId(id: string): { origin: string; action: string } | undefined {
-  const cut = id.lastIndexOf("|");
-  if (cut <= 0 || cut === id.length - 1) return undefined;
-  return { origin: id.slice(0, cut), action: id.slice(cut + 1) };
+  const parts = id.split("|");
+  if (parts.length < 3) return undefined;
+  const action = parts.at(-1);
+  const origin = parts.slice(1, -1).join("|");
+  if (action === undefined || action === "" || origin === "") return undefined;
+  return { origin, action };
 }
 const ZH_ACTIONS: Record<PageActionKind, string> = {
   click: "点击",
@@ -76,11 +79,13 @@ const ZH_ACTIONS: Record<PageActionKind, string> = {
  * Keep the same granularity; a target without a known origin is never stored.
  */
 export function createPageActionConsent(options: {
+  userId: number;
   origin: () => string | undefined;
   locale: () => "zh" | "en";
 }): PageActionConsentStore {
+  const userPrefix = `${KEY_PREFIX}.${options.userId}`;
   const keyOf = (origin: string, action: string) =>
-    `${KEY_PREFIX}.${encodeURIComponent(origin)}.${action}`;
+    `${userPrefix}.${encodeURIComponent(origin)}.${action}`;
   return {
     async recall(_target: PageActionTarget, action: PageActionKind) {
       const origin = options.origin();
@@ -93,7 +98,7 @@ export function createPageActionConsent(options: {
       localStorage.setItem(
         keyOf(origin, action),
         JSON.stringify({
-          id: idOf(origin, action),
+          id: idOf(options.userId, origin, action),
           scope: origin,
           action,
           grantedAt: new Date().toISOString(),
@@ -111,7 +116,7 @@ export function createPageActionConsent(options: {
       const views: PageActionConsentView[] = [];
       for (let index = 0; index < localStorage.length; index += 1) {
         const key = localStorage.key(index);
-        if (key === null || !key.startsWith(`${KEY_PREFIX}.`)) continue;
+        if (key === null || !key.startsWith(`${userPrefix}.`)) continue;
         const stored = parseStored(localStorage.getItem(key));
         if (stored !== undefined) views.push(stored);
       }
@@ -128,7 +133,7 @@ export function createPageActionConsent(options: {
         const key = localStorage.key(index);
         if (
           key !== null &&
-          key.startsWith(`${KEY_PREFIX}.${encodeURIComponent(scope)}.`)
+          key.startsWith(`${userPrefix}.${encodeURIComponent(scope)}.`)
         ) {
           doomed.push(key);
         }

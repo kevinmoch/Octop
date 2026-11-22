@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import secrets
-import shutil
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -84,6 +83,10 @@ class BrowserAgentSession:
     download_guids: dict[str, dict[str, str]] = field(default_factory=dict)
     download_dir: str | None = None
     downloads_initialized: bool = False
+    download_listeners: list[tuple[str, Any]] = field(default_factory=list)
+    download_client: Any | None = None
+    download_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
+    downloads_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     document: DocumentIdentity | None = None
     refs: dict[str, PageRef] = field(default_factory=dict)
     elevated_modals: set[str] = field(default_factory=set)
@@ -100,8 +103,8 @@ class BrowserAgentSession:
             "active": self.active,
             "capabilities": {
                 "frames": True,
-                "oopif": False,
-                "imageCapture": False,
+                "oopif": True,
+                "imageCapture": True,
                 "targetWorkset": True,
                 "actions": sorted(SUPPORTED_ACTIONS),
             },
@@ -272,9 +275,9 @@ class BrowserAgentRegistry:
     def close(self, session_id: str, user_id: int) -> None:
         session = self.get(session_id, user_id)
         session.active = False
-        if session.download_dir:
-            shutil.rmtree(session.download_dir, ignore_errors=True)
-            session.download_dir = None
+        from .downloads import cleanup_downloads  # runtime import avoids a cycle
+
+        cleanup_downloads(session)
         self._sessions.pop(session_id, None)
         self._tickets = {
             key: ticket for key, ticket in self._tickets.items() if ticket.session_id != session_id

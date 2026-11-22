@@ -120,8 +120,12 @@ export async function createWebSkillHost(
     audit,
   });
   const pageActionUi: { current?: PageActionUi } = {};
-  const downloadConsent = createDownloadConsent(() => init.locale);
+  const downloadConsent = createDownloadConsent({
+    userId: init.userId,
+    locale: () => init.locale,
+  });
   const pageActionConsent = createPageActionConsent({
+    userId: init.userId,
     origin: () => {
       if (currentPage?.url === undefined) return undefined;
       try {
@@ -133,7 +137,6 @@ export async function createWebSkillHost(
     locale: () => init.locale,
   });
   const tabPort = new OctopTabWorksetPort(bridge);
-  let pageActions: PageActionPolicy | undefined;
   const pageTabs = new TabWorksetPolicy({
     port: tabPort,
     enabled: () => pageActions?.enabled === true,
@@ -178,7 +181,7 @@ export async function createWebSkillHost(
     },
   };
 
-  pageActions = new PageActionPolicy({
+  const pageActions: PageActionPolicy = new PageActionPolicy({
     scope: { include: ["body"] },
     executor: createRemotePageActionExecutor({ transport, targets }),
     ui: {

@@ -6,6 +6,7 @@ describe("Octop page-action consent", () => {
 
   it("recalls a remembered origin+action and describes the real scope", async () => {
     const consent = createPageActionConsent({
+      userId: 1,
       origin: () => "https://ccs.huaweicloud.com",
       locale: () => "zh",
     });
@@ -17,8 +18,30 @@ describe("Octop page-action consent", () => {
     );
   });
 
+  it("isolates remembered actions by Octop user id", async () => {
+    const a = createPageActionConsent({
+      userId: 1,
+      origin: () => "https://ccs.huaweicloud.com",
+      locale: () => "en",
+    });
+    const b = createPageActionConsent({
+      userId: 2,
+      origin: () => "https://ccs.huaweicloud.com",
+      locale: () => "en",
+    });
+    await a.remember({ role: "link" }, "click");
+    expect(await a.recall({ role: "link" }, "click")).toBe(true);
+    expect(await b.recall({ role: "link" }, "click")).toBe(false);
+    expect(await b.list()).toEqual([]);
+    await b.remember({ role: "link" }, "click");
+    await a.forget("1|https://ccs.huaweicloud.com|click");
+    expect(await a.recall({ role: "link" }, "click")).toBe(false);
+    expect(await b.recall({ role: "link" }, "click")).toBe(true);
+  });
+
   it("does not remember without a known origin", async () => {
     const consent = createPageActionConsent({
+      userId: 1,
       origin: () => undefined,
       locale: () => "en",
     });

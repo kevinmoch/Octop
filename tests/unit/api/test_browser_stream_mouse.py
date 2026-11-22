@@ -75,11 +75,13 @@ async def test_drag_sequence_preserves_pressed_buttons_on_move() -> None:
     await stream_mod._handle_client_event(
         sess, {"type": "mouseup", "x": 30, "y": 40, "button": "left", "buttons": 0}
     )
-    calls = sess._internal.client.send.await_args_list
+    calls = [
+        call.args[1]
+        for call in sess._internal.client.send.await_args_list
+        if call.args and call.args[0] == "Input.dispatchMouseEvent"
+    ]
     assert len(calls) >= 3
-    pressed = calls[0].args[1]
-    moved = calls[1].args[1]
-    released = calls[2].args[1]
+    pressed, moved, released = calls[0], calls[1], calls[2]
     assert pressed["type"] == "mousePressed"
     assert pressed["buttons"] == 1
     assert moved["type"] == "mouseMoved"

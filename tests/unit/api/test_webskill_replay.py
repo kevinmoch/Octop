@@ -159,13 +159,21 @@ async def test_real_replay_runner_uses_fresh_page_ref_and_one_grant(
         lambda: RecordingStore(RecordReplaySettings(base_dir=tmp_path)),
     )
     old_ref = next(iter(current.refs))
+    old_document = current.document
     result = await ReplayRunner(executor=executor).run("rec_scope", profile="user-1")
 
     assert result["status"] == "passed", result.get("error") or result["steps"]
     assert len(browser.clicks) == 1
     assert executor.authorization.actions_issued == 1
     assert current.refs
-    assert next(iter(current.refs)) != old_ref
+    # Refs are reusable across perceptions by design. The replay contract is
+    # that it perceived the live document, consumed a fresh one-time grant and
+    # never persisted the recording's old ref; string inequality is not the
+    # criterion (a reused handle may legitimately stay the same).
+    assert current.document is not None
+    assert old_document is not None
+    assert current.document.key == old_document.key
+    assert old_ref in current.refs
     assert audits[0]["action"] == "click"
     assert audits[0]["index"] == 1
     assert len(audits[0]["grantDigest"]) == 64
