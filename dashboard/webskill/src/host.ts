@@ -86,6 +86,7 @@ export async function createWebSkillHost(
   for (const root of ["/skills", "/managed", "/chat"]) {
     if (!(await fs.exists(root))) await fs.mkdir(root);
   }
+  const runtimeConfigKey = `octop.webskill.runtime.${init.userId}`;
   const runtimeConfig = createWebSkillRuntimeConfigStore(
     init.userId,
     WEBSKILL_CONFIG,
@@ -399,11 +400,17 @@ export async function createWebSkillHost(
     governanceRoot: "/managed",
     chatRoot: "/chat",
   });
+  const connect = createHostConnectFacade(pageActionConsent, downloadConsent, {
+    configKey: runtimeConfigKey,
+    initialConfig,
+    userId: init.userId,
+  });
+  adapter.pageSkillSource = connect.toolSource;
   return {
     fs,
     runtimeConfig,
     noAuth,
-    connect: createHostConnectFacade(pageActionConsent, downloadConsent),
+    connect,
     llm: createHostLlmClient(runtimeConfig, noAuth),
     adapter,
     skillCandidates,
@@ -442,7 +449,10 @@ export async function createWebSkillHost(
     connectEngine: (engine: ChatEngine) => {
       pageActionUi.current = engine.bridge;
     },
-    dispose: () => transport.dispose(),
+    dispose: () => {
+      void connect.close();
+      transport.dispose();
+    },
   };
 }
 
