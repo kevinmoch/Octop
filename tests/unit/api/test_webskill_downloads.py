@@ -224,7 +224,7 @@ def test_ambiguous_download_name_is_not_bound_to_the_newest_file(tmp_path: Path)
             "Browser.downloadProgress",
             {"guid": "guid-missing", "state": "completed"},
         )
-        await asyncio.sleep(1.2)
+        await asyncio.wait_for(asyncio.gather(*session.download_tasks), timeout=5)
 
     asyncio.run(scenario())
     assert list_downloads(session) == []
@@ -371,7 +371,7 @@ def test_guid_mode_does_not_fall_back_to_suggested_name() -> None:
             "Browser.downloadProgress",
             {"guid": "missing-guid", "state": "completed"},
         )
-        await asyncio.sleep(1.2)
+        await asyncio.wait_for(asyncio.gather(*session.download_tasks), timeout=5)
 
     asyncio.run(scenario())
     assert list_downloads(session) == []

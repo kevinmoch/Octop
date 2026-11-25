@@ -25,7 +25,10 @@ import type {
 } from "../../hooks/useBrowserStream";
 import { useBrowserCanvasInteraction } from "../../hooks/useBrowserCanvasInteraction";
 import { useBrowserKeyboard } from "../../hooks/useBrowserKeyboard";
-import { paintBase64JpegToCanvas } from "../../utils/browserCanvas";
+import {
+  paintBase64JpegToCanvas,
+  type BrowserFrameMetadata,
+} from "../../utils/browserCanvas";
 import { normalizeUrl } from "../../utils/normalizeUrl";
 import { ChromeTabBar } from "../ChromeTabBar";
 import StreamConnectingIndicator from "../StreamConnectingIndicator";
@@ -33,7 +36,7 @@ import styles from "./index.module.less";
 
 /** Imperative handle so the parent can paint incoming frames onto the canvas. */
 export interface BrowserViewerHandle {
-  paintFrame: (base64Data: string) => void;
+  paintFrame: (base64Data: string, metadata?: BrowserFrameMetadata) => void;
 }
 
 interface BrowserViewerProps {
@@ -123,10 +126,13 @@ export const BrowserViewer = forwardRef<
     sendEvent,
   );
 
-  const paintFrame = useCallback((base64Data: string) => {
-    paintBase64JpegToCanvas(canvasRef.current, base64Data);
-    setFrameReady(true);
-  }, []);
+  const paintFrame = useCallback(
+    (base64Data: string, metadata?: BrowserFrameMetadata) => {
+      paintBase64JpegToCanvas(canvasRef.current, base64Data, metadata);
+      setFrameReady(true);
+    },
+    [],
+  );
 
   useImperativeHandle(ref, () => ({ paintFrame }), [paintFrame]);
 

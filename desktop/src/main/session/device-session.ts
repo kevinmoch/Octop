@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { IssuedSession } from "../../shared/ipc-contract";
 import { desktopLog } from "../log/desktop-log";
 import type { DeviceCredentialStore } from "./device-credential";
@@ -60,6 +61,28 @@ export class DeviceSessionClient {
     return true;
   }
 
+  async registerBootstrap(nonceFile: string): Promise<boolean> {
+    let nonce: string;
+    try {
+      nonce = (await readFile(nonceFile, "utf8")).trim();
+    } catch {
+      return false;
+    }
+    if (!nonce) return false;
+    const { secret } = await this.options.store.getOrCreate();
+    const res = await this.post(
+      "/api/auth/device/bootstrap",
+      { device_token: secret, label: this.options.label },
+      undefined,
+      { "X-Octop-Bootstrap-Nonce": nonce },
+    );
+    if (res.status !== 200) {
+      desktopLog().warn(`[desktop] bootstrap registration returned ${res.status}`);
+      return false;
+    }
+    return true;
+  }
+
   /** Mint a fresh JWT, or null when there is no usable credential. */
   async renew(): Promise<IssuedSession | null> {
     const secret = await this.options.store.read();
@@ -86,10 +109,18 @@ export class DeviceSessionClient {
     return true;
   }
 
-  private async post(path: string, body: unknown, accessToken?: string): Promise<JsonResponse> {
+  private async post(
+    path: string,
+    body: unknown,
+    accessToken?: string,
+    extraHeaders: Record<string, string> = {},
+  ): Promise<JsonResponse> {
     const base = this.options.baseUrl();
     if (!base) return { status: 0, data: null };
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...extraHeaders,
+    };
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
     try {
       const res = await this.fetchImpl(base + path, {

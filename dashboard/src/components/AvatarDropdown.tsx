@@ -62,8 +62,8 @@ import {
 import AccountSecurityDrawer from "./AccountSecurityDrawer";
 import styles from "./AvatarDropdown.module.less";
 
-const GITHUB_URL = "https://github.com/TencentCloud/Octop";
-const HELP_FEEDBACK_URL = "https://octop.cloud";
+const GITHUB_URL = "https://jijian.huawei.com";
+const HELP_FEEDBACK_URL = "https://jijian.huawei.com";
 const APP_OAUTH_KINDS = new Set(["feishu", "dingtalk", "wecom"]);
 
 function oauthProviderIcon(kind: string): ReactNode {
@@ -123,7 +123,7 @@ export default function AvatarDropdown({
 
   const handleLogout = useCallback(async () => {
     setMenuOpen(false);
-    if (isDesktopShell() && user?.username === "local") {
+    if (isDesktopShell()) {
       holdDesktopLocalAutoLogin();
     }
     await authApi.logout();

@@ -9,7 +9,7 @@ import { join } from "node:path";
  * Matches `appId` in `electron-builder.config.ts`. Windows groups the tray
  * icon and the taskbar button under this id.
  */
-export const WINDOWS_APP_USER_MODEL_ID = "com.tencent.octop";
+export const WINDOWS_APP_USER_MODEL_ID = "com.huawei.jijian.ccsbuddy";
 
 export function shouldInstallSystemTray(platform: string): boolean {
   return platform === "win32" || platform === "linux";

@@ -1,5 +1,26 @@
-import { describe, expect, it } from "vitest";
-import { getCanvasCoords } from "./browserCanvas";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getCanvasCoords, paintBase64JpegToCanvas } from "./browserCanvas";
+
+class FakeImage {
+  static instances: FakeImage[] = [];
+  width = 0;
+  height = 0;
+  src = "";
+  onload: (() => void) | null = null;
+
+  constructor() {
+    FakeImage.instances.push(this);
+  }
+}
+
+beforeEach(() => {
+  FakeImage.instances = [];
+  vi.stubGlobal("Image", FakeImage);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function fakeCanvas(
   width: number,
@@ -11,6 +32,21 @@ function fakeCanvas(
     height,
     getBoundingClientRect: () => rect,
   } as unknown as HTMLCanvasElement;
+}
+
+function fakePaintCanvas() {
+  const drawImage = vi.fn();
+  const context = {
+    drawImage,
+    imageSmoothingEnabled: false,
+    imageSmoothingQuality: "high",
+  };
+  const canvas = {
+    width: 300,
+    height: 150,
+    getContext: () => context,
+  } as unknown as HTMLCanvasElement;
+  return { canvas, drawImage };
 }
 
 describe("getCanvasCoords", () => {
@@ -52,5 +88,43 @@ describe("getCanvasCoords", () => {
       x: 100,
       y: 50,
     });
+  });
+});
+
+describe("paintBase64JpegToCanvas", () => {
+  it("does not let an older decode overwrite the latest frame", () => {
+    const { canvas, drawImage } = fakePaintCanvas();
+    paintBase64JpegToCanvas(canvas, "old", { frameId: 1, streamId: 1 });
+    paintBase64JpegToCanvas(canvas, "new", { frameId: 2, streamId: 1 });
+    const [oldImage, newImage] = FakeImage.instances;
+    oldImage!.width = 160;
+    oldImage!.height = 90;
+    newImage!.width = 160;
+    newImage!.height = 90;
+
+    newImage!.onload?.();
+    oldImage!.onload?.();
+
+    expect(drawImage).toHaveBeenCalledTimes(1);
+    expect(drawImage.mock.calls[0]?.[0]).toBe(newImage);
+  });
+
+  it("keeps the canvas size when only the screenshot pixel ratio changes", () => {
+    const { canvas, drawImage } = fakePaintCanvas();
+    paintBase64JpegToCanvas(canvas, "1x", { frameId: 1, streamId: 1 });
+    const first = FakeImage.instances[0]!;
+    first.width = 160;
+    first.height = 90;
+    first.onload?.();
+
+    paintBase64JpegToCanvas(canvas, "2x", { frameId: 2, streamId: 1 });
+    const second = FakeImage.instances[1]!;
+    second.width = 320;
+    second.height = 180;
+    second.onload?.();
+
+    expect(canvas.width).toBe(160);
+    expect(canvas.height).toBe(90);
+    expect(drawImage).toHaveBeenLastCalledWith(second, 0, 0, 160, 90);
   });
 });

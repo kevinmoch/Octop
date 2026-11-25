@@ -17,7 +17,7 @@ function flatten(nodes: any[]): any[] {
 }
 
 describe("WebSkill SDK semantic target parity", () => {
-  it("produces the same role/name identity Octop expects for native controls", () => {
+  it("produces the same role/name identity CCS Buddy expects for native controls", () => {
     document.body.innerHTML = `
       <button title="保存">保存</button>
       <input aria-label="搜索" />

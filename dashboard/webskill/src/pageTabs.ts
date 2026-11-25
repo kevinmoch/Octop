@@ -25,7 +25,7 @@ function asTab(value: unknown): WorksetTab | undefined {
 }
 
 /**
- * Remote TabWorksetPort. Handles are opaque and issued by the Octop host; this
+ * Remote TabWorksetPort. Handles are opaque and issued by the CCS Buddy host; this
  * module never sees a CDP target id. focus() intentionally does not call any
  * browser API — the host moves only its logical modelTarget.
  */
@@ -67,9 +67,20 @@ export class OctopTabWorksetPort implements TabWorksetPort {
         (item) => item.handle === this.pending,
       );
       if (tab !== undefined) {
-        const handle = this.pending;
         this.pending = undefined;
-        return handle;
+        const result = asRecord(
+          await this.bridge.call("tabs-admit", {
+            ...(tab.title !== undefined ? { title: tab.title } : {}),
+            ...(tab.url !== undefined ? { url: tab.url } : {}),
+          }),
+        );
+        if (!result || typeof result.handle !== "string" || !result.handle) {
+          throw new WebSkillError(
+            "TOOL_EXECUTION_FAILED",
+            "The host did not admit the page",
+          );
+        }
+        return result.handle;
       }
       this.pending = undefined;
     }

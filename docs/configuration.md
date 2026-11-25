@@ -106,6 +106,7 @@ on each start. Schema (`OctopConfig` in `octop/config.py`):
   "enable_dashboard": true,
   "enable_api_docs": false,
   "require_setup_password": true,
+  "bootstrap": {},
   "max_upload_mb": 100,
   "database": {
     "driver": "sqlite",
@@ -146,8 +147,8 @@ Notes:
 - `enable_api_docs=false` keeps `/api/docs` (Scalar) off in production
   while still serving `/api/openapi.json` to the dashboard.
 - `require_setup_password=true` adds the wizard password gate to the
-  first-run setup flow; set `false` for unattended bootstraps via
-  `OCTOP_ADMIN_USERNAME` / `OCTOP_ADMIN_PASSWORD`.
+  first-run setup flow. Setting it to `false` only removes that gate; use the
+  `bootstrap` section below for complete unattended initialization.
 - `max_upload_mb` is the process-wide ceiling for dashboard chat
   attachments, IM inbound files, and knowledge-base documents (default
   100). Existing `config.json` files that omit the key pick up the
@@ -311,6 +312,56 @@ For unattended installs, use `octop init --yes` with
 `OCTOP_ADMIN_USERNAME` / `OCTOP_ADMIN_PASSWORD` (and
 `OCTOP_REQUIRE_SETUP_PASSWORD=false` if the env-var path is used). This
 runs the same migrations + admin creation without the HTTP wizard.
+
+## Configuration bootstrap
+
+A fresh installation can create SQLite, the initial admin, a provider, custom
+MCP servers, and the default `main` agent from `config.json`:
+
+```json
+{
+  "database": { "driver": "sqlite" },
+  "bootstrap": {
+    "enabled": true,
+    "admin": { "username": "ccs", "display_name": "基建部", "locale": "zh" },
+    "provider": {
+      "name": "default",
+      "type": "openai-compatible",
+      "base_url": "https://your-model-endpoint/v1",
+      "models": [{ "id": "your-model", "name": "默认模型" }]
+    },
+    "mcpServers": {
+      "default": {
+        "transport": "streamable_http",
+        "url": "https://your-mcp-endpoint/mcp"
+      }
+    }
+  }
+}
+```
+
+Secrets are read from `<OCTOP_HOME>/bootstrap.secrets.json`, or from the file
+named by `OCTOP_BOOTSTRAP_SECRETS_FILE`. Its shape is:
+
+```json
+{
+  "admin_password": "initial-admin-password",
+  "provider_api_key": "model-api-key",
+  "mcp_headers": { "default": { "Authorization": "Bearer token" } }
+}
+```
+
+`OCTOP_BOOTSTRAP_ADMIN_PASSWORD` and `OCTOP_BOOTSTRAP_PROVIDER_API_KEY` can
+supply the first two values through the process environment. MCP headers belong
+in the secrets file, not `config.json`. The default secrets file is removed only
+after every step succeeds. Restrict its permissions and do not package it.
+
+Bootstrap runs only for an empty user database. It records resumable, non-secret
+state in `settings`; validation failures happen before user creation, while a
+later failure is retried without resetting the admin or recreating completed
+resources. Existing installations without that state are skipped. Desktop
+shells additionally receive a one-time, loopback-only nonce to bind the managed
+device credential. Model and MCP connectivity are not probed during startup.
 
 ## Secrets
 

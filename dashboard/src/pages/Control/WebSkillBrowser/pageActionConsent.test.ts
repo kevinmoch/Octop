@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createPageActionConsent } from "../../../../webskill/src/pageActionConsent";
 
-describe("Octop page-action consent", () => {
+describe("CCS Buddy page-action consent", () => {
   beforeEach(() => localStorage.clear());
 
   it("recalls a remembered origin+action and describes the real scope", async () => {
@@ -18,7 +18,7 @@ describe("Octop page-action consent", () => {
     );
   });
 
-  it("isolates remembered actions by Octop user id", async () => {
+  it("isolates remembered actions by CCS Buddy user id", async () => {
     const a = createPageActionConsent({
       userId: 1,
       origin: () => "https://ccs.huaweicloud.com",

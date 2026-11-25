@@ -16,7 +16,7 @@ import type {
 /**
  * Auth + setup module — adapted to octop's multi-user backend.
  *
- * Octop endpoints (spec §11.3):
+ * CCS Buddy endpoints (spec §11.3):
  *  - GET  /api/setup/status         → { setup_required }
  *  - POST /api/setup/initial-admin  → 201 { id, username, role }
  *  - POST /api/auth/login           → { access_token, token_type, expires_in, user }
@@ -30,6 +30,12 @@ import type {
  * by the octop settings editors in phase 14.6.
  */
 
+export interface SetupBootstrapStatus {
+  status?: string;
+  failed_step?: string;
+  error_code?: string;
+}
+
 export interface AuthStatus {
   /** True when no admin exists yet — UI must redirect to /setup. */
   setup_required: boolean;
@@ -37,7 +43,7 @@ export interface AuthStatus {
   local_account: boolean;
   /** Legacy alias of ``!setup_required`` kept for compat. */
   setup_done: boolean;
-  /** Octop always requires auth; kept true so legacy components don't unguard. */
+  /** CCS Buddy always requires auth; kept true so legacy components don't unguard. */
   enabled: boolean;
   /** Legacy field — octop always uses passwords. */
   has_password: boolean;
@@ -51,6 +57,7 @@ export interface AuthStatus {
   database_bound: boolean;
   /** Active control-plane driver when bound (`sqlite` | `postgresql`). */
   database_driver?: string | null;
+  bootstrap?: SetupBootstrapStatus | null;
 }
 
 export interface SsoIdentity {
@@ -283,6 +290,7 @@ interface RawSetupStatus {
   wizard_password_path?: string;
   database_bound?: boolean;
   database_driver?: string | null;
+  bootstrap?: SetupBootstrapStatus | null;
 }
 
 interface RawLoginResponse {
@@ -355,6 +363,7 @@ export const authApi = {
           wizard_password_path: raw.wizard_password_path,
           database_bound: raw.database_bound ?? false,
           database_driver: raw.database_driver ?? null,
+          bootstrap: raw.bootstrap ?? null,
         };
         return applySetupFlags(value);
       } finally {
@@ -445,7 +454,7 @@ export const authApi = {
     });
     const result = toLoginResult(raw);
     if (isMfaChallenge(result)) {
-      // SSO paths do not use Octop MFA; treat as protocol error if seen.
+      // SSO paths do not use CCS Buddy MFA; treat as protocol error if seen.
       throw new Error("Unexpected MFA challenge on SSO exchange");
     }
     return result;
@@ -644,16 +653,16 @@ export const authApi = {
   // settings UI is rewritten in phase 14.6. Stubs return rejected
   // promises with a clear message to make accidental use loud.
 
-  /** @deprecated Octop always requires auth — there is no first-time set step. */
+  /** @deprecated CCS Buddy always requires auth — there is no first-time set step. */
   setPassword: (): Promise<never> =>
     Promise.reject(
       new Error("setPassword is not supported in octop; use change-password"),
     ),
 
-  /** @deprecated Octop cannot disable auth. */
+  /** @deprecated CCS Buddy cannot disable auth. */
   disableAuth: (): Promise<never> =>
     Promise.reject(new Error("disableAuth is not supported in octop")),
 
-  /** @deprecated Octop's setup wizard is single-step; nothing to mark done. */
+  /** @deprecated CCS Buddy's setup wizard is single-step; nothing to mark done. */
   markSetupDone: (): Promise<{ ok: boolean }> => Promise.resolve({ ok: true }),
 };

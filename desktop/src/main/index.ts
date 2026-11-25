@@ -32,6 +32,7 @@ import { DeviceCredentialStore } from "./session/device-credential";
 import { DeviceSessionClient } from "./session/device-session";
 import { safeStorageCipher, warnIfKeychainUnavailable } from "./session/safe-storage-cipher";
 import { ClientSettingsStore, defaultClientSettingsPath } from "./storage/client-settings";
+import { seedBootstrapConfig } from "./supervisor/bootstrap-config";
 import { readLoginShellEnv, resolveOctopHome } from "./supervisor/shell-env";
 import { reserveRandomPort } from "./supervisor/random-port";
 import {
@@ -101,7 +102,7 @@ import {
   windowBackground,
 } from "./windows/chrome";
 
-const UPDATE_ENDPOINT = "https://octop.cloud/api/downloads";
+const UPDATE_ENDPOINT = "https://jijian.huawei.com/api/downloads";
 // Packaged renderer origin. Local dev replaces this with the Vite origin before
 // the relay starts, and the relay accepts upgrades only from that origin (§5.2).
 const WINDOW_ORIGIN = "octop://app";
@@ -382,7 +383,7 @@ async function runShellUpdate(
         return dest;
       },
       // §6.1 assets carry no digest; the URL is already pinned to https on
-      // download.octop.cloud by isValidAssetUrl() before it reaches this point.
+      // jijian.huawei.com by isValidAssetUrl() before it reaches this point.
       verify: async () => true,
       stopSidecar: async () => {
         // §6.3 step 1 — refuse new API admissions, then ask Python to exit.
@@ -709,8 +710,8 @@ function showAboutDialog(version: string): void {
   });
   void dialog.showMessageBox({
     type: "info",
-    title: locale.toLowerCase().startsWith("zh") ? "关于 Octop" : "About Octop",
-    message: "Octop",
+    title: locale.toLowerCase().startsWith("zh") ? "关于 CCS Buddy" : "About CCS Buddy",
+    message: "CCS Buddy",
     detail: formatAboutDetail({
       version,
       setup: windowsInstallScope(process.execPath),
@@ -837,7 +838,7 @@ async function installSystemTray(): Promise<void> {
   // The Linux panel wants a small PNG; a full app icon is dropped or drawn huge.
   trayIcon = process.platform === "linux" ? icon.resize({ width: 24, height: 24 }) : icon;
   const created = new Tray(trayIcon);
-  created.setToolTip("Octop");
+  created.setToolTip("CCS Buddy");
   const labels = trayMenuLabels(app.getLocale());
   const menu = Menu.buildFromTemplate([
     { label: labels.show, click: () => revealAppWindow() },
@@ -928,6 +929,18 @@ async function boot(): Promise<void> {
   const octopHome = resolveOctopHome(process.env, loginShellEnv);
   installDesktopLog(octopHome);
   desktopLog().info(`desktop ${appVersion} home=${octopHome}`);
+  const bootstrapConfigSource =
+    (process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG ?? "").trim() ||
+    join(resourcesRoot(), "bootstrap.json");
+  try {
+    await seedBootstrapConfig(octopHome, bootstrapConfigSource);
+  } catch (err) {
+    early.showError({
+      message: "自动初始化配置无效，尚未修改现有用户数据。",
+      detail: errorDetail(errorMessageOf(err)),
+    });
+    return;
+  }
   await installSystemTray();
 
   // Local dev escape hatch: point at an already-extracted runtime (e.g. the one
@@ -1044,6 +1057,12 @@ async function boot(): Promise<void> {
         ),
     });
     return;
+  }
+
+  try {
+    await deviceSession?.registerBootstrap(join(octopHome, "desktop-bootstrap-nonce"));
+  } catch (err) {
+    desktopLog().warn(`[desktop] bootstrap device registration failed: ${String(err)}`);
   }
 
   if (dashboardDev) {

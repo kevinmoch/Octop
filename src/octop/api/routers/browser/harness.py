@@ -37,26 +37,25 @@ class HandoffBody(BaseModel):
 
 
 async def _is_session_alive(sess: Any, *, timeout: float = 2.0) -> bool:
-    """Probe a cached session with a cheap CDP round-trip.
+    """Check the cached CDP connection without entering the browser write lease.
 
-    A previously-registered session's underlying CDP WebSocket can die out
-    from under us (browser crash, OOM kill, network blip) while the Python
-    object stays in ``_registry`` forever. Reusing a dead session makes every
-    subsequent action fail with confusing low-level errors like
-    ``no close frame received or sent``. This does a fast, side-effect-free
-    ``Runtime.evaluate`` to confirm the CDP connection is still usable.
+    A passive Runtime.evaluate still goes through the command gate. On a busy
+    browser that made a slow lease wait look like a dead session, causing an
+    unnecessary eviction and reconnect while other tabs were using the session.
     """
-    try:
-        client = sess._internal.client  # noqa: SLF001
-        send = getattr(client, "send_passive", client.send)
-        await asyncio.wait_for(
-            send("Runtime.evaluate", {"expression": "1", "returnByValue": True}),
-            timeout=timeout,
-        )
-        return True
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("cached harness session failed health check: %s", exc)
+    internal = sess._internal  # noqa: SLF001
+    if not getattr(internal, "_connected", False):
         return False
+    client = internal.client
+    ws = getattr(client, "_ws", None)
+    if ws is None:
+        return False
+    state = getattr(ws, "state", None)
+    state_name = str(getattr(state, "name", state) or "").upper()
+    if state_name and state_name != "OPEN":
+        return False
+    recv_task = getattr(client, "_recv_task", None)
+    return not (recv_task is not None and recv_task.done())
 
 
 async def resolve_harness_session(

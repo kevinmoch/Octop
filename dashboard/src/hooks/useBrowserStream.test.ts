@@ -113,4 +113,91 @@ describe("useBrowserStream tab switch queue", () => {
       true,
     );
   });
+
+  it("replays an unconfirmed switch that was sent before a reconnect", () => {
+    const { result } = renderHook(() => useBrowserStream());
+    act(() => {
+      result.current.connect("https://initial.test", 800, 600, {
+        onFrame: () => undefined,
+      });
+    });
+    const first = FakeWebSocket.instances[0]!;
+    const tabs = [
+      { id: "A", url: "https://a.test", title: "A", active: true },
+      { id: "B", url: "https://b.test", title: "B", active: false },
+    ];
+    act(() => first.open());
+    act(() => first.emit({ type: "tabs", tabs }));
+    act(() => result.current.switchTab("B"));
+    act(() => first.close());
+    act(() => {
+      result.current.connect("https://initial.test", 800, 600, {
+        onFrame: () => undefined,
+      });
+    });
+    const second = FakeWebSocket.instances[1]!;
+    act(() => second.open());
+    act(() => second.emit({ type: "tabs", tabs }));
+
+    expect(
+      second.sent.filter((message) => message.type === "tab_switch"),
+    ).toHaveLength(1);
+    expect(result.current.tabs.find((tab) => tab.id === "B")?.active).toBe(
+      true,
+    );
+  });
+
+  it("forwards frame ordering metadata with its connection identity", () => {
+    const { result } = renderHook(() => useBrowserStream());
+    const onFrame = vi.fn();
+    act(() => {
+      result.current.connect("https://initial.test", 800, 600, { onFrame });
+    });
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+    act(() => socket.emit({ type: "frame", data: "jpeg-data", frame_id: 7 }));
+
+    expect(onFrame).toHaveBeenCalledWith("jpeg-data", {
+      frameId: 7,
+      streamId: expect.any(Number),
+    });
+  });
+
+  it("keeps the requested tab selected while the backend switch is delayed", () => {
+    const { result } = renderHook(() => useBrowserStream());
+    act(() => {
+      result.current.connect("https://initial.test", 800, 600, {
+        onFrame: () => undefined,
+      });
+    });
+    const socket = FakeWebSocket.instances[0]!;
+    act(() => socket.open());
+    const tabs = [
+      { id: "A", url: "https://a.test", title: "A", active: true },
+      { id: "B", url: "https://b.test", title: "B", active: false },
+    ];
+    act(() => socket.emit({ type: "tabs", tabs }));
+    act(() => result.current.switchTab("B"));
+    expect(result.current.tabs.find((tab) => tab.id === "B")?.active).toBe(
+      true,
+    );
+
+    act(() => socket.emit({ type: "tabs", tabs }));
+    expect(result.current.tabs.find((tab) => tab.id === "B")?.active).toBe(
+      true,
+    );
+    expect(
+      socket.sent.filter((message) => message.type === "tab_switch"),
+    ).toHaveLength(1);
+
+    act(() =>
+      socket.emit({
+        type: "tabs",
+        tabs: tabs.map((tab) => ({ ...tab, active: tab.id === "B" })),
+      }),
+    );
+    expect(result.current.tabs.find((tab) => tab.id === "B")?.active).toBe(
+      true,
+    );
+  });
 });

@@ -18,7 +18,8 @@ Client → Server::
 Server → Client::
 
   {"type": "status", "status": "streaming"}
-  {"type": "frame", "data": "<base64 jpeg>"}
+  {"type": "frame", "data": "<base64 jpeg>", "frame_id": 1,
+   "captured_at": 1760000000.0}
   {"type": "tabs", "tabs": [{id, url, title, active}]}
   {"type": "session_update", "session_id": "...", "current_url": "...", ...}
   {"type": "error", "message": "..."}
@@ -32,7 +33,9 @@ Chrome — attaches to an existing harness session or pushes idle updates.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import io
 import json
 import logging
 import time
@@ -40,6 +43,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from packaging.version import Version
+from PIL import Image
 from starlette.websockets import WebSocketState
 
 from octop import __version__
@@ -47,7 +51,6 @@ from octop.api.deps import resolve_user_from_token
 from octop.api.routers.browser.harness import (
     control_owner_for,
     harness_list_tabs,
-    harness_page_url,
     resolve_harness_session,
 )
 from octop.api.routers.browser.webskill import check_websocket_origin
@@ -55,7 +58,10 @@ from octop.infra.control.browser.frame_hub import capture_subscription
 from octop.infra.control.browser.webskill.lease import profile_lease
 from octop.infra.control.browser.webskill.ownership import set_control_owner
 from octop.infra.control.browser.webskill.sessions import browser_agent_registry
-from octop.infra.control.browser.webskill.targets import wait_for_new_page_target
+from octop.infra.control.browser.webskill.targets import (
+    reset_device_metrics_if_windows,
+    wait_for_new_page_target,
+)
 from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -71,6 +77,7 @@ if Version(__version__) >= Version("1.1.0"):
 _FRAME_INTERVAL_S = 1 / 12
 _SESSION_INTERVAL_S = 1.0
 _MOUSE_TARGETS: dict[int, set[str]] = {}
+_CAPTURE_DIMENSIONS: dict[int, tuple[int, int]] = {}
 
 
 def _normalize_nav_url(raw: str) -> str:
@@ -88,6 +95,14 @@ def _normalize_nav_url(raw: str) -> str:
     return f"https://{t}"
 
 
+def _jpeg_dimensions(data: str) -> tuple[int, int] | None:
+    try:
+        with Image.open(io.BytesIO(base64.b64decode(data))) as image:
+            return image.size
+    except (OSError, ValueError):
+        return None
+
+
 async def _capture_jpeg(sess: Any) -> str | None:
     try:
         # Check if internal session is fully connected to prevent race conditions during tab switching
@@ -103,7 +118,19 @@ async def _capture_jpeg(sess: Any) -> str | None:
             timeout=1.5,
         )
         data = result.get("data")
-        return str(data) if data else None
+        if not data:
+            return None
+        frame = str(data)
+        dimensions = _jpeg_dimensions(frame)
+        if dimensions is not None and _CAPTURE_DIMENSIONS.get(id(sess)) != dimensions:
+            logger.debug(
+                "Browser capture dimensions changed for session %s: %s -> %s",
+                id(sess),
+                _CAPTURE_DIMENSIONS.get(id(sess)),
+                dimensions,
+            )
+            _CAPTURE_DIMENSIONS[id(sess)] = dimensions
+        return frame
     except Exception as exc:
         logger.debug("capture jpeg failed: %s", exc)
         return None
@@ -141,7 +168,11 @@ async def _send_session_snapshot(
         await send_json({"type": "tabs", "tabs": []})
         return
 
-    url = await harness_page_url(sess)
+    tabs = await harness_list_tabs(sess)
+    url = next(
+        (str(tab.get("url") or "") for tab in tabs if tab.get("active") is True),
+        "",
+    )
     await send_json(
         {
             "type": "session_update",
@@ -153,7 +184,6 @@ async def _send_session_snapshot(
             "current_url": url,
         },
     )
-    tabs = await harness_list_tabs(sess)
     await send_json({"type": "tabs", "tabs": tabs})
 
 
@@ -188,7 +218,14 @@ async def _stream_loop(
                 if subscription is not None:
                     frame = await subscription.next_frame()
                     if frame:
-                        await send_json({"type": "frame", "data": frame})
+                        await send_json(
+                            {
+                                "type": "frame",
+                                "data": frame.data,
+                                "frame_id": frame.frame_id,
+                                "captured_at": frame.captured_at,
+                            }
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # transient CDP/target switch races
@@ -345,6 +382,7 @@ async def _activate_new_mouse_target(sess: Any) -> None:
     if not target_id:
         return
     try:
+        await reset_device_metrics_if_windows(sess)
         await asyncio.wait_for(sess.switch_tab(target_id), timeout=2.0)
     except Exception:  # noqa: BLE001 - normal click remains usable
         logger.debug("new target activation failed", exc_info=True)
@@ -442,6 +480,7 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
     elif t == "tab_switch":
         tab_id = msg.get("tab_id")
         if tab_id is not None:
+            await reset_device_metrics_if_windows(sess)
             try:
                 result = await asyncio.wait_for(sess.switch_tab(str(tab_id)), timeout=8.0)
             except TimeoutError:
@@ -485,6 +524,7 @@ async def _handle_client_event(sess: Any, msg: dict[str, Any]) -> None:
         h = int(msg.get("height") or 0)
         if w > 0 and h > 0:
             with contextlib.suppress(Exception):
+                await reset_device_metrics_if_windows(sess)
                 await sess._internal.client.send(  # noqa: SLF001
                     "Emulation.setDeviceMetricsOverride",
                     {
@@ -615,6 +655,7 @@ async def run_browser_stream_session(
             vh = int(start_msg.get("height") or default_height)
             if vw > 0 and vh > 0:
                 with contextlib.suppress(Exception):
+                    await reset_device_metrics_if_windows(sess)
                     await sess._internal.client.send(  # noqa: SLF001
                         "Emulation.setDeviceMetricsOverride",
                         {

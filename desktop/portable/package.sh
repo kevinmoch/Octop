@@ -284,11 +284,12 @@ assemble_one() {
     else
       # Windows runners often have `python` but not `python3` / `zip`.
       py=""
-      if command -v python3 >/dev/null 2>&1; then
-        py=python3
-      elif command -v python >/dev/null 2>&1; then
-        py=python
-      fi
+      for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "" >/dev/null 2>&1; then
+          py="$candidate"
+          break
+        fi
+      done
       if [[ -z "$py" ]]; then
         echo "[package] need zip or python to create archive" >&2
         exit 1

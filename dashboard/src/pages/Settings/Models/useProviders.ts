@@ -68,7 +68,7 @@ export interface ProviderPreset {
   auth_method?: string;
   /** Embedding-only presets appear on the embedding Models tab. */
   purpose?: "chat" | "embedding";
-  /** Octop-owned integration id, such as ``magpie``. */
+  /** CCS Buddy-owned integration id, such as ``magpie``. */
   integration?: string;
   /** Filled only for the local Magpie preset. Remote addresses must not use it. */
   default_api_key?: string;

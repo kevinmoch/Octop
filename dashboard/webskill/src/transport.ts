@@ -9,6 +9,9 @@ import type {
 } from "@webskill/sdk/browser";
 import { OctopHostBridge, isRecord } from "./bridge";
 
+export const PAGE_AGENT_PERCEPTION_TIMEOUT_MS = 30_000;
+const PAGE_AGENT_TRANSPORT_TIMEOUT_MS = 35_000;
+
 const REPLY_CODES = new Set([
   "PERCEPTION_FAILED",
   "PERCEPTION_SUBTREE_UNSUPPORTED",
@@ -72,6 +75,7 @@ export class OctopPageAgentTransport implements PageAgentTransport {
     }
   >();
   private disposed = false;
+  private readonly frameByRef = new Map<string, string>();
 
   private readonly router: FrameRouter;
 
@@ -84,7 +88,11 @@ export class OctopPageAgentTransport implements PageAgentTransport {
     this.router = createFrameRouter<string>({
       dispatcher: {
         mainFrame: () => "self",
-        send: (address, request) => this.sendWithFrame(address, request),
+        send: async (address, request) => {
+          const delivery = await this.sendWithFrame(address, request);
+          this.rememberFrameRefs(address, delivery.reply);
+          return delivery;
+        },
         resolveNestedFrame: (nested, context) => {
           const path = nested.frame;
           if (!path || context.visited.includes(path)) return undefined;
@@ -94,15 +102,32 @@ export class OctopPageAgentTransport implements PageAgentTransport {
     });
   }
 
-  send(request: PageAgentRequest): Promise<PageAgentReply> {
-    if (request.type === "perceive")
-      return this.router.perceive({
+  async send(request: PageAgentRequest): Promise<PageAgentReply> {
+    if (request.type === "perceive") {
+      const scoped = {
         ...request,
         actionScope: this.actionScope,
-      } as typeof request);
+      } as typeof request;
+      const frame =
+        typeof request.ref === "string"
+          ? this.frameByRef.get(request.ref)
+          : undefined;
+      if (frame !== undefined) {
+        const delivery = await this.sendWithFrame(frame, scoped);
+        this.rememberFrameRefs(frame, delivery.reply);
+        return delivery.reply;
+      }
+      return this.router.perceive(scoped);
+    }
     if (request.type === "capture-image")
       return this.router.captureImage(request);
     return this.router.execute(request);
+  }
+
+  private rememberFrameRefs(address: string, reply: PageAgentReply): void {
+    if (reply.type !== "perceive-result") return;
+    for (const target of reply.targets)
+      this.frameByRef.set(target.ref, address);
   }
 
   private async sendWithFrame(
@@ -160,7 +185,7 @@ export class OctopPageAgentTransport implements PageAgentTransport {
       if (!isRecord(reply) || typeof reply.grant !== "string")
         throw new WebSkillError(
           "PAGE_ACTION_OUT_OF_SCOPE",
-          "The Octop host did not grant this confirmed action",
+          "The CCS Buddy host did not grant this confirmed action",
         );
       grant = reply.grant;
     }
@@ -176,7 +201,7 @@ export class OctopPageAgentTransport implements PageAgentTransport {
             "The PageAgent request timed out; it will not be replayed",
           ),
         );
-      }, 15_000);
+      }, PAGE_AGENT_TRANSPORT_TIMEOUT_MS);
       this.pending.set(requestId, { resolve, reject, timer });
       socket.send(
         JSON.stringify({
@@ -194,7 +219,7 @@ export class OctopPageAgentTransport implements PageAgentTransport {
     this.opening = (async () => {
       const issued = await this.bridge.call("ticket");
       if (!isRecord(issued) || typeof issued.ticket !== "string")
-        throw new Error("The Octop host did not issue a PageAgent ticket");
+        throw new Error("The CCS Buddy host did not issue a PageAgent ticket");
       const url = new URL("/api/browser-agent/ws", window.location.origin);
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
       url.searchParams.set("ticket", issued.ticket);
@@ -234,7 +259,7 @@ export class OctopPageAgentTransport implements PageAgentTransport {
       waiter.reject(
         new WebSkillError(
           "TOOL_EXECUTION_FAILED",
-          "The Octop PageAgent returned an invalid reply",
+          "The CCS Buddy PageAgent returned an invalid reply",
         ),
       );
       return;

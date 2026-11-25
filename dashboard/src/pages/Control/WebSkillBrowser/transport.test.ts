@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OctopHostBridge } from "../../../../webskill/src/bridge";
-import { OctopPageAgentTransport } from "../../../../webskill/src/transport";
+import {
+  OctopPageAgentTransport,
+  PAGE_AGENT_PERCEPTION_TIMEOUT_MS,
+} from "../../../../webskill/src/transport";
+import {
+  createRemotePerceptionReader,
+  createRemoteTargetRegistry,
+} from "../../../../webskill/src/sdkExports";
 
 class FakeWebSocket {
   static readonly OPEN = 1;
@@ -110,6 +117,34 @@ describe("OctopPageAgentTransport frame routing", () => {
     transport.dispose();
   });
 
+  it("routes a subtree read back to the frame that issued its ref", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    FakeWebSocket.instances = [];
+    const bridge = {
+      call: vi.fn(async () => ({ ticket: "test-ticket" })),
+    } as unknown as OctopHostBridge;
+    const transport = new OctopPageAgentTransport(bridge);
+    await transport.send({ type: "perceive", scope: { include: ["body"] } });
+
+    const reply = await transport.send({
+      type: "perceive",
+      scope: { include: ["body"] },
+      ref: "frame-ref",
+    });
+
+    expect(reply.type).toBe("perceive-result");
+    const requests = FakeWebSocket.instances[0]!.requests;
+    expect(requests).toHaveLength(3);
+    expect(requests[2]).toMatchObject({
+      ref: "frame-ref",
+      actionScope: { include: ["body"] },
+      scope: {
+        frames: [{ frame: ["iframe#same-frame"], include: ["body"] }],
+      },
+    });
+    transport.dispose();
+  });
+
   it("asks the host for files before an attach action", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     FakeWebSocket.instances = [];
@@ -183,5 +218,83 @@ describe("OctopPageAgentTransport frame routing", () => {
 
     expect(reply).toMatchObject({ type: "error", code: "WRITE_LOCKED" });
     transport.dispose();
+  });
+});
+
+function slowSocket(delayMs: number) {
+  return class extends FakeWebSocket {
+    send(raw: string) {
+      const request = JSON.parse(raw) as Record<string, unknown>;
+      setTimeout(() => {
+        this.onmessage?.({
+          data: JSON.stringify({
+            type: "perceive-result",
+            result: {
+              nodes: [{ role: "button", ref: "slow", name: "Slow action" }],
+              page: { url: "https://example.test/" },
+            },
+            targets: [{ role: "button", ref: "slow", name: "Slow action" }],
+            document: { key: "doc-slow", url: "https://example.test/" },
+            requestId: request.requestId,
+          }),
+        });
+      }, delayMs);
+    }
+  };
+}
+
+describe("OctopPageAgentTransport slow perception", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("allows a perception reply beyond the old ten second SDK limit", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("WebSocket", slowSocket(12_000));
+      const bridge = {
+        call: vi.fn(async () => ({ ticket: "test-ticket" })),
+      } as unknown as OctopHostBridge;
+      const transport = new OctopPageAgentTransport(bridge);
+      const reader = createRemotePerceptionReader({
+        transport,
+        targets: createRemoteTargetRegistry(),
+        timeoutMs: PAGE_AGENT_PERCEPTION_TIMEOUT_MS,
+      });
+
+      const reading = reader.read({ include: ["body"] });
+      await vi.advanceTimersByTimeAsync(12_000);
+
+      await expect(reading).resolves.toMatchObject({
+        nodes: [{ role: "button", ref: "slow", name: "Slow action" }],
+      });
+      transport.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the transport alive beyond the old fifteen second limit", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("WebSocket", slowSocket(31_000));
+      const bridge = {
+        call: vi.fn(async () => ({ ticket: "test-ticket" })),
+      } as unknown as OctopHostBridge;
+      const transport = new OctopPageAgentTransport(bridge);
+
+      const reading = transport.send({
+        type: "perceive",
+        scope: { include: ["body"] },
+      });
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      await expect(reading).resolves.toMatchObject({
+        type: "perceive-result",
+      });
+      transport.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,0 +1,31 @@
+{
+  "database": {
+    "driver": "sqlite"
+  },
+  "bootstrap": {
+    "enabled": false,
+    "admin": {
+      "username": "ccs",
+      "display_name": "基建部",
+      "locale": "zh"
+    },
+    "provider": {
+      "name": "default",
+      "type": "openai-compatible",
+      "base_url": "https://your-model-endpoint/v1",
+      "models": [
+        {
+          "id": "your-model",
+          "name": "默认模型",
+          "enabled": true
+        }
+      ]
+    },
+    "mcpServers": {
+      "default": {
+        "transport": "streamable_http",
+        "url": "https://your-mcp-endpoint/mcp"
+      }
+    }
+  }
+}

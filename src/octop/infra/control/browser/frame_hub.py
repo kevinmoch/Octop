@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
+from dataclasses import dataclass
 
 from .webskill.sessions import BrowserAgentError
 
@@ -14,13 +16,20 @@ logger = logging.getLogger(__name__)
 MAX_STREAM_SUBSCRIBERS_PER_PROFILE = 4
 
 
+@dataclass(frozen=True, slots=True)
+class CapturedFrame:
+    data: str
+    frame_id: int
+    captured_at: float
+
+
 class CaptureSubscription:
     def __init__(self, hub: ProfileFrameHub) -> None:
         self.hub = hub
         self.last_sequence = 0
         self.closed = False
 
-    async def next_frame(self) -> str | None:
+    async def next_frame(self) -> CapturedFrame | None:
         async with self.hub.condition:
             if self.closed:
                 return None
@@ -31,8 +40,11 @@ class CaptureSubscription:
                     await asyncio.wait_for(self.hub.condition.wait(), timeout=0.5)
             if self.closed or self.last_sequence == self.hub.sequence:
                 return None
-            self.last_sequence = self.hub.sequence
-            return self.hub.last_frame
+            frame = self.hub.last_frame
+            if frame is None:
+                return None
+            self.last_sequence = frame.frame_id
+            return frame
 
     async def close(self) -> None:
         if self.closed:
@@ -51,7 +63,7 @@ class ProfileFrameHub:
         self.capture = capture
         self.interval = interval
         self.condition = asyncio.Condition()
-        self.last_frame: str | None = None
+        self.last_frame: CapturedFrame | None = None
         self.sequence = 0
         self.subscriber_count = 0
         self.task: asyncio.Task[None] | None = None
@@ -84,8 +96,12 @@ class ProfileFrameHub:
                     if self.subscriber_count == 0:
                         return
                     if frame is not None:
-                        self.last_frame = frame
                         self.sequence += 1
+                        self.last_frame = CapturedFrame(
+                            data=frame,
+                            frame_id=self.sequence,
+                            captured_at=time.time(),
+                        )
                         self.condition.notify_all()
                 await asyncio.sleep(self.interval)
         finally:

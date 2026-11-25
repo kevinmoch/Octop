@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
 import type { BrowserViewerHandle } from "../components/BrowserViewer";
+import type { BrowserFrameMetadata } from "../utils/browserCanvas";
 
 /** Concrete (width, height) in CSS pixels. */
 export interface ViewportSize {
@@ -29,7 +30,7 @@ type ConnectStreamFn = (
   width: number,
   height: number,
   callbacks: {
-    onFrame: (base64Data: string) => void;
+    onFrame: (base64Data: string, metadata?: BrowserFrameMetadata) => void;
     onStatusChange?: (status: string) => void;
     onError?: (message: string) => void;
   },
@@ -55,7 +56,7 @@ interface UseBrowserViewControllerOptions {
   onError: (message: string) => void;
   onBeforeConnect?: (sessionId: string) => void;
   onAfterConnect?: (sessionId: string) => void;
-  /** When set, screencast is relayed to the peer Octop via Bridge. */
+  /** When set, screencast is relayed to the peer CCS Buddy via Bridge. */
   bridgeConnectionId?: string | null;
   /** New server-enhanced surface obtains a ticket with session recovery. */
   issueTicket?: () => Promise<{ ticket: string }>;
@@ -139,7 +140,8 @@ export function useBrowserViewController({
         size.width,
         size.height,
         {
-          onFrame: (base64Data) => viewerRef.current?.paintFrame(base64Data),
+          onFrame: (base64Data, metadata) =>
+            viewerRef.current?.paintFrame(base64Data, metadata),
           onError: err,
         },
         {

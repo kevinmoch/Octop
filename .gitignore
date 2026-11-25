@@ -19,6 +19,8 @@ Desktop.ini
 .env
 .env.*
 !.env.example
+bootstrap.secrets.json
+!desktop/src/build/bootstrap.secrets.example.json
 
 # Python
 __pycache__/

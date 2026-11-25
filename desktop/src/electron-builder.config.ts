@@ -16,17 +16,17 @@ const electronVersion = productVersion.replace(
     `${base}-${{ a: "alpha", b: "beta", rc: "rc" }[stage as "a" | "b" | "rc"]}.${number}`,
 );
 if (!/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(electronVersion)) {
-  throw new Error(`Unsupported Octop release version: ${productVersion}`);
+  throw new Error(`Unsupported CCS Buddy release version: ${productVersion}`);
 }
 const artifactName = process.env.OCTOP_PLATFORM
-  ? `Octop-desktop-${process.env.OCTOP_PLATFORM}-${productVersion}.\${ext}`
-  : `Octop-desktop-\${os}-\${arch}-\${version}.\${ext}`;
-const productName = "Octop";
+  ? `CCS-Buddy-desktop-${process.env.OCTOP_PLATFORM}-${productVersion}.\${ext}`
+  : `CCS-Buddy-desktop-\${os}-\${arch}-\${version}.\${ext}`;
+const productName = "CCS Buddy";
 
 export default {
   extraMetadata: { version: electronVersion },
   artifactName,
-  appId: "com.tencent.octop",
+  appId: "com.huawei.jijian.ccsbuddy",
   productName,
   // extraResources places the portable tree outside asar. The shell reads
   // Dashboard from portable/packages/octop/dashboard, so it is not copied again.
@@ -37,6 +37,7 @@ export default {
   extraResources: [
     { from: "resources/icon.ico", to: "icon.ico" },
     { from: "resources/icon.png", to: "icon.png" },
+    { from: "resources/bootstrap.json", to: "bootstrap.json" },
     { from: "resources/portable", to: "portable" },
     // deb postinst sources this after files are unpacked. postrm inlines a copy
     // because dpkg deletes the install tree first.
@@ -98,7 +99,7 @@ export default {
     executableName: "octop",
     icon: "resources/icon.png",
     category: "Utility",
-    maintainer: "Octop",
+    maintainer: "基建部",
   },
   deb: {
     // package.json name is octop-desktop. fpm package names live on the target,

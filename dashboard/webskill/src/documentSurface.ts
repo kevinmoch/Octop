@@ -76,8 +76,8 @@ export function createHostDocumentSurface(input: {
         capability: "confirm",
         message:
           locale === "zh"
-            ? `打开技能“${skillName}”生成的文档？来源：${dataSource}。文档在独立沙箱中显示，不能读取 Octop 或 WebSkill 的存储。${size}`
-            : `Open the document produced by "${skillName}"? Source: ${dataSource}. It opens in an isolated sandbox and cannot read Octop or WebSkill storage.${size}`,
+            ? `打开技能“${skillName}”生成的文档？来源：${dataSource}。文档在独立沙箱中显示，不能读取 CCS Buddy 或 WebSkill 的存储。${size}`
+            : `Open the document produced by "${skillName}"? Source: ${dataSource}. It opens in an isolated sandbox and cannot read CCS Buddy or WebSkill storage.${size}`,
         details: { source: dataSource },
       });
       return (

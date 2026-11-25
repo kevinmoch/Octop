@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 from pathlib import Path
@@ -17,6 +16,8 @@ from octop.infra.agents.providers.probe import make_probe_provider_row, probe_pr
 from octop.infra.desktop import desktop_shell_enabled
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.setup import password_file as _wizard
+from octop.infra.setup.bootstrap import bootstrap_setup_default_agent, public_bootstrap_status
+from octop.infra.setup.provider_draft import ProviderDraftBody, apply_provider_draft
 from octop.infra.setup.wizard_tokens import RateLimited
 from octop.infra.users.identity import Role
 from octop.infra.utils.locale import normalize_locale, resolve_request_locale
@@ -52,24 +53,6 @@ class SetupBody(BaseModel):
         default=None,
         description="UI locale for the initial admin (zh|en). Defaults to Accept-Language.",
     )
-
-
-class ProviderModelDraft(BaseModel):
-    id: str
-    name: str
-    enabled: bool = True
-    input: list[str] = Field(default_factory=list)
-    thinking: Any | None = None
-    reasoning: bool | None = None
-
-
-class ProviderDraftBody(BaseModel):
-    name: str
-    type: str
-    api_key: str = ""
-    base_url: str | None = None
-    models: list[ProviderModelDraft] = Field(default_factory=list)
-    extras: dict[str, Any] | None = None
 
 
 class FinishBody(BaseModel):
@@ -207,74 +190,6 @@ def _authorize_setup_mid_wizard(authorization: str | None, server: Any) -> str |
     raise OctopError(ErrorCode.SETUP_TOKEN_INVALID, "invalid or expired wizard token")
 
 
-async def _bootstrap_default_agent(
-    server: Any,
-    *,
-    user_id: int,
-    locale: str = "zh",
-    pin_main: bool = True,
-) -> None:
-    """Create the first default agent for a user.
-
-    Fresh setup pins ``main``. A desktop ``local`` account added later leaves
-    the id unset so an existing ``main`` stays with its owner. Workspace root
-    comes from that user's policy inside ``bootstrap_first_expert``.
-    """
-    from octop.infra.agents.experts.default_agent import (  # noqa: PLC0415
-        SETUP_DEFAULT_AGENT_ID,
-        bootstrap_first_expert,
-    )
-
-    if server.app_runtime is None:
-        raise OctopError(ErrorCode.INTERNAL_ERROR, "app_runtime not ready")
-    await bootstrap_first_expert(
-        server,
-        user_id=user_id,
-        locale=locale,
-        agent_id=SETUP_DEFAULT_AGENT_ID if pin_main else None,
-    )
-
-
-async def _apply_provider_draft(server: Any, draft: ProviderDraftBody) -> None:
-    """Persist provider config from the wizard and reload harness providers."""
-    api_key = (draft.api_key or "").strip()
-    base_url = (draft.base_url or "").strip()
-    if not api_key:
-        raise OctopError(ErrorCode.INTERNAL_ERROR, "api_key is required", status=400)
-    if not base_url:
-        raise OctopError(ErrorCode.INTERNAL_ERROR, "base_url is required", status=400)
-
-    def _model_entry(m: ProviderModelDraft) -> dict[str, Any]:
-        entry: dict[str, Any] = {
-            "id": m.id,
-            "name": m.name,
-            "enabled": m.enabled,
-            "input": m.input,
-            "thinking": m.thinking,
-        }
-        if m.reasoning:
-            entry["reasoning"] = True
-        return entry
-
-    models = [_model_entry(m) for m in draft.models if m.enabled]
-    if not models and draft.models:
-        models = [_model_entry(draft.models[0])]
-        models[0]["enabled"] = True
-    if not models:
-        raise OctopError(ErrorCode.INTERNAL_ERROR, "at least one model is required", status=400)
-    server.services.provider_repo.create(
-        name=draft.name,
-        kind=draft.type,
-        base_url=base_url,
-        api_key=api_key,
-        models_json=json.dumps(models),
-        extra_json=json.dumps(draft.extras) if draft.extras else None,
-    )
-    server.services.settings_repo.set_active_model(draft.name, models[0]["id"])
-    if server.app_runtime is not None:
-        await server.app_runtime.agent_registry.on_provider_changed()
-
-
 @router.get("/setup/presets", summary="List provider presets")
 async def setup_presets() -> list[dict[str, Any]]:
     """Built-in LLM provider templates for the setup wizard (no auth required)."""
@@ -319,6 +234,7 @@ async def status(server: Any = Depends(get_server)) -> dict[str, Any]:
         "wizard_password_path": wizard_path if password_required else None,
         "database_driver": database_driver,
         "database_bound": server.database_bound,
+        "bootstrap": public_bootstrap_status(server),
     }
 
 
@@ -521,7 +437,7 @@ async def finish(
     wizard_token = _authorize_setup_mid_wizard(authorization, server)
     if body.provider_draft is not None:
         try:
-            await _apply_provider_draft(server, body.provider_draft)
+            await apply_provider_draft(server, body.provider_draft)
         except OctopError:
             raise
         except Exception as exc:
@@ -539,7 +455,7 @@ async def finish(
     )
     if adding_local and local_user is not None:
         try:
-            await _bootstrap_default_agent(
+            await bootstrap_setup_default_agent(
                 server, user_id=local_user.id, locale=local_user.locale, pin_main=False
             )
         except Exception as exc:  # pragma: no cover
@@ -548,7 +464,7 @@ async def finish(
         admin = next((u for u in users if u.is_admin), users[0] if users else None)
         if admin is not None:
             try:
-                await _bootstrap_default_agent(server, user_id=admin.id, locale=admin.locale)
+                await bootstrap_setup_default_agent(server, user_id=admin.id, locale=admin.locale)
             except Exception as exc:  # pragma: no cover
                 logger.warning("could not auto-create default agent: %s", exc)
     if wizard_token is not None:

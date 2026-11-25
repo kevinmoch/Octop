@@ -198,6 +198,17 @@ def test_probe_dir_writable_skips_symlink_on_non_linux(
     assert target.is_dir()
 
 
+def test_resolve_browser_display_ignores_display_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octop.infra.control.browser import setup as browser_setup
+
+    monkeypatch.setattr(browser_setup.sys, "platform", "win32")
+    monkeypatch.setenv("DISPLAY", ":0")
+
+    assert resolve_browser_display() is None
+
+
 @posix_only
 def test_resolve_browser_display_uses_x_socket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -438,7 +438,9 @@ class OctopServer:
 
         self._started_at = int(time.time())
 
-        if should_defer_control_plane_db(config, self.paths):
+        if should_defer_control_plane_db(config, self.paths) and not config.bootstrap.get(
+            "enabled"
+        ):
             from octop.infra.history.retire_v2 import has_history_v2  # noqa: PLC0415
 
             if has_history_v2(self.paths):
@@ -458,6 +460,9 @@ class OctopServer:
         boot_from_services(self.services.settings_repo, self.services.secret_repo)
         self._ensure_jwt_secret()
         await self._boot_runtime(config)
+        from octop.infra.setup.bootstrap import run_config_bootstrap  # noqa: PLC0415
+
+        await run_config_bootstrap(self)
         self._started = True
         assert self.user_manager is not None
         self._emit_wizard_password(user_count=self.user_manager.count())
@@ -525,8 +530,10 @@ class OctopServer:
 
         from octop.infra.utils.browser_media import (  # noqa: PLC0415
             configure_browser_idle_timeout,
+            configure_browser_launch_mode,
         )
 
+        configure_browser_launch_mode()
         configure_browser_idle_timeout(config.browser_idle_timeout_minutes)
 
         registry = AgentManager(

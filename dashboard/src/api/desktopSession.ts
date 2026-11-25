@@ -58,9 +58,24 @@ export function isLocalDesktopUser(accessToken: string): boolean {
   return claimOf(accessToken, "uname") === LOCAL_DESKTOP_USERNAME;
 }
 
+export function isDesktopSessionRenewal(
+  currentToken: string | null,
+  renewedToken: string,
+): boolean {
+  if (!currentToken) return true;
+  const currentSubject = subjectOf(currentToken);
+  const currentUsername = claimOf(currentToken, "uname");
+  return (
+    currentSubject !== null &&
+    currentSubject === subjectOf(renewedToken) &&
+    currentUsername !== null &&
+    currentUsername === claimOf(renewedToken, "uname")
+  );
+}
+
 /**
- * Logout of `local` sets this for the current window so the login page stays
- * up and another account can sign in. A new app launch clears it.
+ * Logout of a managed desktop account sets this for the current window so the
+ * login page stays up. A new app launch clears it.
  */
 export function holdDesktopLocalAutoLogin(): void {
   sessionStorage.setItem(LOCAL_SIGNOUT_KEY, "1");

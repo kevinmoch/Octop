@@ -13,6 +13,7 @@ from octop.infra.control.browser.webskill.page_agent import (
     _assert_ref_in_action_scope,
     _click_dropdown_option,
     _elevated_modal_backends,
+    _field_controls,
     _file_inputs,
     _hidden_by_ancestor,
     _live_value,
@@ -325,6 +326,90 @@ def test_signature_recovery_can_follow_a_changed_path_when_unique() -> None:
     recovered = asyncio.run(_recover_ref(_DocumentClient(), entry))
     assert recovered is not None
     assert recovered.backend_node_id == 20
+
+
+def test_field_recovery_ignores_shortcuts_and_live_value_titles() -> None:
+    frame_document = {
+        "nodeName": "#document",
+        "nodeId": 1,
+        "children": [
+            {
+                "nodeName": "BODY",
+                "nodeId": 10,
+                "children": [
+                    {
+                        "nodeName": "DIV",
+                        "nodeId": 2,
+                        "attributes": ["class", "kd-cq-field", "data-field-item", "true"],
+                        "children": [
+                            {
+                                "nodeName": "DIV",
+                                "nodeId": 3,
+                                "attributes": ["title", "工程项目"],
+                            },
+                            {
+                                "nodeName": "INPUT",
+                                "nodeId": 4,
+                                "backendNodeId": 20,
+                                "attributes": ["type", "text", "title", "示例项目"],
+                            },
+                            {
+                                "nodeName": "SPAN",
+                                "nodeId": 5,
+                                "attributes": ["class", "kd-cq-trigger-icon", "title", "F7"],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    root = {
+        "nodeName": "#document",
+        "nodeId": 100,
+        "children": [
+            {
+                "nodeName": "IFRAME",
+                "nodeId": 200,
+                "backendNodeId": 200,
+                "contentDocument": frame_document,
+            }
+        ],
+    }
+    assert _field_controls(frame_document, set()) == [
+        {
+            "tag": "input",
+            "role": "textbox",
+            "node_id": 4,
+            "accessibleName": "工程项目",
+        }
+    ]
+
+    class FieldClient:
+        async def send(self, method: str, params: dict | None = None) -> dict:
+            if method == "DOM.getDocument":
+                return {"root": root}
+            if method == "DOM.getFrameOwner":
+                assert params == {"frameId": "frame-1"}
+                return {"backendNodeId": 200}
+            if method == "DOM.querySelectorAll":
+                assert params == {"nodeId": 1, "selector": "body"}
+                return {"nodeIds": [10]}
+            raise AssertionError(method)
+
+    entry = PageRef(
+        backend_node_id=999,
+        document_key="document-key",
+        frame="frame-1:loader-1",
+        signature=json.dumps(
+            {"path": [9, 9], "tag": "input", "role": "textbox", "name": "工程项目"}
+        ),
+        action_scope=json.dumps({"include": ["body"], "exclude": []}),
+    )
+    recovered = asyncio.run(_recover_ref(FieldClient(), entry))
+    assert recovered is not None
+    assert recovered.backend_node_id == 20
+    asyncio.run(_assert_ref_in_action_scope(FieldClient(), recovered))
 
 
 def test_live_value_reads_text_control_state() -> None:

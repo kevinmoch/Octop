@@ -168,6 +168,17 @@ shell holds a **device credential** instead:
 - `POST /api/auth/device/revoke` forgets the credential; the shell exposes it as
   `session.revoke` for a future "reset this device's login" action.
 
+A fresh install can also be initialized from a non-secret `bootstrap` section
+in `<OCTOP_HOME>/config.json`. The packaged `resources/bootstrap.json` is a
+disabled template; brand builds may enable it after supplying real provider and
+MCP settings. The main process seeds it only when no user config exists. Secrets
+come from `<OCTOP_HOME>/bootstrap.secrets.json` (see
+`src/build/bootstrap.secrets.example.json`) or the documented environment
+variables, never from the installer resources. Successful initialization binds
+the initial admin to the shell's device credential through a one-time nonce;
+later launches use the normal device renewal path. Initialization state is
+resumable and existing installations are never overwritten.
+
 So a desktop install keeps working across restarts and across JWT expiry without
 ever asking for a password. Sliding renewal still rotates the token during use.
 The one remaining dead end is deliberate: an admin who *deletes* the credential

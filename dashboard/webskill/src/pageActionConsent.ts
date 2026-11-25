@@ -72,9 +72,9 @@ const ZH_ACTIONS: Record<PageActionKind, string> = {
 };
 
 /**
- * Octop host consent memory for page actions.
+ * CCS Buddy host consent memory for page actions.
  *
- * The extension host already remembers by origin+action. Octop's integrated
+ * The extension host already remembers by origin+action. CCS Buddy's integrated
  * host had no PageActionConsent at all, so the SDK correctly hid the checkbox.
  * Keep the same granularity; a target without a known origin is never stored.
  */

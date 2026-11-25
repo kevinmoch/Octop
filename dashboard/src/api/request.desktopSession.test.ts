@@ -99,13 +99,28 @@ describe("desktop device session", () => {
     );
   });
 
-  it("does not renew a password account into the desktop session", async () => {
+  it("renews a managed non-local session for the same user", async () => {
+    const renewed = tokenFor("ccs");
+    const session = installBridge(renewed);
+    mod.setAuthToken(tokenFor("ccs"));
+    fetchMock
+      .mockResolvedValueOnce(tokenExpiredResponse())
+      .mockResolvedValueOnce(okResponse({ items: [] }));
+
+    await expect(mod.request("/agents")).resolves.toEqual({ items: [] });
+    expect(session.renew).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(mod.getAuthToken()).toBe(renewed);
+  });
+
+  it("does not switch a password account to a different desktop user", async () => {
     const session = installBridge(tokenFor("local"));
     mod.setAuthToken(tokenFor("admin"));
     fetchMock.mockResolvedValue(tokenExpiredResponse());
 
     await expect(mod.request("/agents")).rejects.toThrow();
-    expect(session.renew).not.toHaveBeenCalled();
+    expect(session.renew).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
     expect(replace).toHaveBeenCalledWith("/login");
   });
 

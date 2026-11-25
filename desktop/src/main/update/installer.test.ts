@@ -12,7 +12,7 @@ import {
 } from "./installer";
 
 function asset(name: string, ext: string): DownloadAsset {
-  return { name, ext, url: "https://download.octop.cloud/x" };
+  return { name, ext, url: "https://jijian.huawei.com/x" };
 }
 
 test("installerKindFor maps manifest extensions", () => {
@@ -43,7 +43,7 @@ test("downloadFilename never escapes the update directory", () => {
   // Shell-significant characters collapse into a single separator.
   assert.equal(downloadFilename(asset("Oct; rm -rf ~ .dmg", "dmg"), "v1.0.3"), "Oct-rm--rf-.dmg");
   // Empty name → version-based fallback that still carries the extension.
-  assert.equal(downloadFilename(asset("", "dmg"), "v1.0.3"), "Octop-v1.0.3.dmg");
+  assert.equal(downloadFilename(asset("", "dmg"), "v1.0.3"), "CCS-Buddy-v1.0.3.dmg");
 });
 
 test("planInstall keeps the shell-selected url and kind", () => {
@@ -54,7 +54,7 @@ test("planInstall keeps the shell-selected url and kind", () => {
   });
   assert.deepEqual(plan, {
     kind: "dmg",
-    url: "https://download.octop.cloud/x",
+    url: "https://jijian.huawei.com/x",
     filename: "Octop-1.0.3-arm64.dmg",
   });
 });

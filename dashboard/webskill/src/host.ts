@@ -1,4 +1,4 @@
-import { createLocalStorageRuntimeConfigStore } from "@webskill/chatbot";
+import { WEBSKILL_CONFIG } from "virtual:webskill-config";
 import type {
   ChatEngine,
   ChatbotHostAdapter,
@@ -47,6 +47,7 @@ import {
 } from "@webskill/sdk/browser";
 import type { HostInit } from "./bridge";
 import { HOST_CHANNEL, OctopHostBridge } from "./bridge";
+import { createWebSkillRuntimeConfigStore } from "./configDefaults";
 import { createHostDocumentSurface } from "./documentSurface";
 import { LocalNoAuthRegistry, createHostLlmClient } from "./model";
 import {
@@ -54,7 +55,10 @@ import {
   replayRecordedSteps,
   submitRecordedSkill,
 } from "./recordingSkills";
-import { OctopPageAgentTransport } from "./transport";
+import {
+  OctopPageAgentTransport,
+  PAGE_AGENT_PERCEPTION_TIMEOUT_MS,
+} from "./transport";
 import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
 import { createPageActionConsent } from "./pageActionConsent";
 import { createDownloadConsent } from "./downloadConsent";
@@ -82,9 +86,10 @@ export async function createWebSkillHost(
   for (const root of ["/skills", "/managed", "/chat"]) {
     if (!(await fs.exists(root))) await fs.mkdir(root);
   }
-  const runtimeConfig = createLocalStorageRuntimeConfigStore({
-    key: `octop.webskill.runtime.${init.userId}`,
-  });
+  const runtimeConfig = createWebSkillRuntimeConfigStore(
+    init.userId,
+    WEBSKILL_CONFIG,
+  );
   const initialConfig = await runtimeConfig.load();
   if (
     initialConfig.appearance.theme !== init.theme ||
@@ -113,6 +118,7 @@ export async function createWebSkillHost(
     reader: createRemotePerceptionReader({
       transport,
       targets,
+      timeoutMs: PAGE_AGENT_PERCEPTION_TIMEOUT_MS,
       onDocument: (document) => {
         currentPage = document;
       },

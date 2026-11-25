@@ -1,0 +1,42 @@
+{
+  "agentRuntime": {
+    "agentCapabilities": {
+      "skillGeneration": true,
+      "generativeUi": true,
+      "delegation": true
+    },
+    "multimodal": {
+      "imageAttachments": true,
+      "pageImageCapture": true
+    }
+  },
+  "sandbox": {
+    "downloadedFiles": true,
+    "uploadFiles": true,
+    "documentSurface": true
+  },
+  "quickPrompts": {
+    "limit": 8,
+    "items": [
+      {
+        "id": "qp-summarize",
+        "text": {
+          "zh": "总结当前页面",
+          "en": "Summarize this page"
+        },
+        "icon": "page"
+      },
+      {
+        "id": "qp-skills",
+        "text": {
+          "zh": "有哪些可用技能？",
+          "en": "What skills are available?"
+        },
+        "icon": "list"
+      }
+    ]
+  },
+  "privacy": {
+    "userProfile": false
+  }
+}

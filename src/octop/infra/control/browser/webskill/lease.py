@@ -14,6 +14,25 @@ from octop_browser.lease import profile_lease as shared_profile_lease
 
 from .sessions import BrowserAgentError
 
+_READ_ONLY_CDP_METHODS = frozenset(
+    {
+        "DOM.getDocument",
+        "DOM.describeNode",
+        "DOM.resolveNode",
+        "DOM.getAttributes",
+        "DOM.getOuterHTML",
+        "DOM.getBoxModel",
+        "DOM.getContentQuads",
+        "DOMSnapshot.captureSnapshot",
+        "Accessibility.getFullAXTree",
+        "Page.getFrameTree",
+        "Page.getResourceTree",
+        "Page.getNavigationHistory",
+        "Page.captureScreenshot",
+        "Target.getTargets",
+    }
+)
+
 
 def lease_path(profile: str) -> Path:
     return shared_lease_path(profile)
@@ -30,7 +49,10 @@ async def profile_lease(profile: str) -> AsyncIterator[None]:
 
 def profile_command_gate(profile: str) -> CommandGate:
     @asynccontextmanager
-    async def gate(_method: str, _params: dict[str, Any]) -> AsyncIterator[None]:
+    async def gate(method: str, _params: dict[str, Any]) -> AsyncIterator[None]:
+        if method in _READ_ONLY_CDP_METHODS:
+            yield
+            return
         async with profile_lease(profile):
             yield
 

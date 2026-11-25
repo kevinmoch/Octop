@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from octop.infra.control.browser.webskill import targets as targets_module
 from octop.infra.control.browser.webskill.sessions import BrowserAgentError, BrowserAgentSession
 from octop.infra.control.browser.webskill.tabs import (
     admit_workset_tab,
@@ -19,8 +20,19 @@ from octop.infra.control.browser.webskill.tabs import (
 )
 
 
+class FakeCDPClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def send(self, method: str, _params: dict[str, Any] | None = None) -> dict[str, Any]:
+        self.calls.append(method)
+        return {}
+
+
 class FakeTabBrowser:
     def __init__(self) -> None:
+        self.client = FakeCDPClient()
+        self._internal = SimpleNamespace(client=self.client)
         self.tabs = [
             {"tab_id": "target-1", "title": "Origin", "url": "https://a.test/", "active": True},
             {"tab_id": "target-2", "title": "Detail", "url": "https://b.test/", "active": False},
@@ -94,7 +106,10 @@ def test_list_focus_and_close_are_opaque_and_do_not_switch_user_view() -> None:
     assert browser.switch_calls == []
 
 
-def test_admit_returns_opaque_handle_and_reset_forgets_handles() -> None:
+def test_admit_returns_opaque_handle_and_reset_forgets_handles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(targets_module.os, "name", "nt")
     browser = FakeTabBrowser()
     current = session({"target-1", "target-2"})
     current.tab_handles = {"tab_origin_0000000000000000": "target-1"}
@@ -109,6 +124,8 @@ def test_admit_returns_opaque_handle_and_reset_forgets_handles() -> None:
     assert "target-2" not in handle
     assert current.tab_handles[handle] == "target-2"
     assert current.model_target == "target-2"
+    assert browser.switch_calls == ["target-2"]
+    assert browser.client.calls == ["Emulation.clearDeviceMetricsOverride"]
     reset_workset(current)
     assert current.tab_handles == {}
     assert browser.closed == []

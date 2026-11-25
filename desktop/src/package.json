@@ -1,10 +1,11 @@
 {
-  "name": "octop-desktop",
+  "name": "ccs-buddy-desktop",
   "version": "0.1.0",
   "private": true,
-  "author": "octop contributors",
+  "description": "基建个人智能助理",
+  "author": "基建部",
   "license": "MIT",
-  "homepage": "https://octop.cloud",
+  "homepage": "https://jijian.huawei.com",
   "main": "./out/main/index.js",
   "packageManager": "pnpm@12.15.0",
   "devEngines": {

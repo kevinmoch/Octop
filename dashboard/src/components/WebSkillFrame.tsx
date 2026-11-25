@@ -110,7 +110,9 @@ export default function WebSkillFrame({
   const frameUrl = new URL(
     `${import.meta.env.BASE_URL}webskill/`,
     window.location.origin,
-  ).href;
+  );
+  frameUrl.searchParams.set("instance", String(performance.timeOrigin));
+  if (sessionId) frameUrl.searchParams.set("session", sessionId);
   const secure =
     window.isSecureContext &&
     Boolean(globalThis.crypto?.subtle) &&
@@ -619,7 +621,7 @@ export default function WebSkillFrame({
               key={sessionId}
               ref={frameRef}
               title="WebSkill"
-              src={frameUrl}
+              src={frameUrl.href}
               onLoad={() => setFrameLoaded(true)}
               sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads"
               style={{

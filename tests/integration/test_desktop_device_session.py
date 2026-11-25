@@ -8,6 +8,7 @@ narrow: desktop shell only, loopback only, digest match only.
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,14 @@ async def env(patched_app_client: Any):
 
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _mark_config_bootstrap(server: Any) -> None:
+    user = server.user_manager.get("admin")
+    server.services.settings_repo.set(
+        "setup_bootstrap",
+        json.dumps({"status": "complete", "user_id": user.id}),
+    )
 
 
 async def test_register_requires_the_desktop_shell(
@@ -86,6 +95,57 @@ async def test_device_token_round_trip(env: Any, monkeypatch: pytest.MonkeyPatch
     me = await c.get("/api/auth/me", headers=bearer(body["access_token"]))
     assert me.status_code == 200
     assert me.json()["username"] == "admin"
+
+
+async def test_bootstrap_device_binds_once_and_renews(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, srv, _jwt = env
+    monkeypatch.setenv("OCTOP_DESKTOP_SHELL", "1")
+    _mark_config_bootstrap(srv)
+    from octop.infra.setup.desktop_bootstrap import issue_nonce, nonce_path
+
+    issue_nonce(srv)
+    nonce = nonce_path(srv).read_text(encoding="utf-8")
+    response = await c.post(
+        "/api/auth/device/bootstrap",
+        json={"device_token": DEVICE_TOKEN, "label": "windows-amd64"},
+        headers={"X-Octop-Bootstrap-Nonce": nonce},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "username": "admin"}
+    assert not nonce_path(srv).exists()
+    raw = srv.services.secret_repo.get("desktop_device")
+    assert DEVICE_TOKEN.encode() not in raw
+    assert _hash(DEVICE_TOKEN).encode() in raw
+
+    renewed = await c.post("/api/auth/device/token", json={"device_token": DEVICE_TOKEN})
+    assert renewed.status_code == 200
+    replay = await c.post(
+        "/api/auth/device/bootstrap",
+        json={"device_token": DEVICE_TOKEN},
+        headers={"X-Octop-Bootstrap-Nonce": nonce},
+    )
+    assert replay.status_code == 401
+
+
+async def test_bootstrap_device_rejects_a_bad_nonce_without_binding(
+    env: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, srv, _jwt = env
+    monkeypatch.setenv("OCTOP_DESKTOP_SHELL", "1")
+    _mark_config_bootstrap(srv)
+    from octop.infra.setup.desktop_bootstrap import issue_nonce, nonce_path
+
+    issue_nonce(srv)
+    response = await c.post(
+        "/api/auth/device/bootstrap",
+        json={"device_token": DEVICE_TOKEN},
+        headers={"X-Octop-Bootstrap-Nonce": "wrong"},
+    )
+    assert response.status_code == 401
+    assert nonce_path(srv).exists()
+    assert srv.services.secret_repo.get("desktop_device") is None
 
 
 async def test_device_token_needs_registration(env: Any, monkeypatch: pytest.MonkeyPatch) -> None:

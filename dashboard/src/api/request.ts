@@ -1,6 +1,6 @@
 import { getApiUrl } from "./config";
 import {
-  isLocalDesktopUser,
+  isDesktopSessionRenewal,
   registerDeviceSession,
   renewDesktopSession,
 } from "./desktopSession";
@@ -307,7 +307,7 @@ function buildAuthHeaders(path: string): Record<string, string> {
 
 let _redirectingToLogin = false;
 
-/** 401 codes that mean this Octop session is no longer valid. */
+/** 401 codes that mean this CCS Buddy session is no longer valid. */
 const SESSION_UNAUTHORIZED_CODES = new Set(["AUTH_FAILED", "TOKEN_EXPIRED"]);
 
 /**
@@ -407,11 +407,11 @@ async function retryWithDesktopSession(
   const code = await errorCodeOf(response);
   if (code && !SESSION_UNAUTHORIZED_CODES.has(code)) return null;
   const current = getAuthToken();
-  // A password account's expired token must land on the login page. Only the
-  // desktop local user is renewed in place.
-  if (current && !isLocalDesktopUser(current)) return null;
   const issued = await renewDesktopSession();
-  if (!issued?.access_token || !isLocalDesktopUser(issued.access_token)) {
+  if (
+    !issued?.access_token ||
+    !isDesktopSessionRenewal(current, issued.access_token)
+  ) {
     return null;
   }
   setAuthToken(issued.access_token, !isSessionOnlyAuth());

@@ -588,29 +588,39 @@ def _text_content(node: dict[str, Any]) -> str:
     return " ".join(part.strip() for part in parts if part.strip())
 
 
+_FIELD_MARKERS = frozenset({"kd-cq-field", "kd-cq-field-with-title"})
+
+
+def _is_field_wrapper(node: dict[str, Any]) -> bool:
+    attrs = _attributes(node)
+    classes = set(str(attrs.get("class", "")).split())
+    return attrs.get("data-field-item") == "true" or bool(classes & _FIELD_MARKERS)
+
+
+def _field_label(node: dict[str, Any]) -> str:
+    tag = str(node.get("nodeName") or "").lower()
+    attrs = _attributes(node)
+    classes = set(str(attrs.get("class", "")).split())
+    title = attrs.get("title", "").strip()
+    if title and tag in {"div", "span", "label"} and "kd-cq-trigger-icon" not in classes:
+        return title
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            found = _field_label(child)
+            if found:
+                return found
+    return ""
+
+
 def _field_controls(root: dict[str, Any], excluded: set[int]) -> list[dict[str, Any]]:
     """Infer labels for enterprise form fields whose label has no ``for``/aria link.
 
-    The control kit renders ``div[data-field-item]`` with a title span and a
+    The control kit renders ``div[data-field-item]`` with a field title and a
     nested input/custom combobox. The accessibility builder sees the control
     but not the sibling title, so the model receives an unnamed textbox. This
     bridge exposes the same field name the page displays.
     """
     controls: list[dict[str, Any]] = []
-    field_markers = {"kd-cq-field", "kd-cq-field-with-title"}
-
-    def find_label(node: dict[str, Any]) -> str:
-        tag = str(node.get("nodeName") or "").lower()
-        attrs = _attributes(node)
-        title = attrs.get("title", "").strip()
-        if title and tag in {"span", "label"}:
-            return title
-        for child in node.get("children", []):
-            if isinstance(child, dict):
-                found = find_label(child)
-                if found:
-                    return found
-        return ""
 
     def find_control(node: dict[str, Any]) -> dict[str, Any] | None:
         tag = str(node.get("nodeName") or "").lower()
@@ -640,12 +650,8 @@ def _field_controls(root: dict[str, Any], excluded: set[int]) -> list[dict[str, 
 
     def visit(node: dict[str, Any]) -> None:
         tag = str(node.get("nodeName") or "").lower()
-        attrs = _attributes(node)
-        classes = set(str(attrs.get("class", "")).split())
-        if tag not in {"script", "style", "template", "noscript"} and (
-            attrs.get("data-field-item") == "true" or classes & field_markers
-        ):
-            label = find_label(node)
+        if tag not in {"script", "style", "template", "noscript"} and _is_field_wrapper(node):
+            label = _field_label(node)
             control = find_control(node)
             if label and control is not None and control["node_id"] not in excluded:
                 controls.append(
@@ -1286,8 +1292,12 @@ async def read_page(
             include_selectors, exclude_selectors = selectors
             root_node_id = projected_root.get("nodeId")
             if isinstance(root_node_id, int):
-                found_include = await _scope_node_ids(client, root_node_id, include_selectors)
-                found_exclude = await _scope_node_ids(client, root_node_id, exclude_selectors)
+                found_include = await _scope_node_ids(
+                    selected_client, root_node_id, include_selectors
+                )
+                found_exclude = await _scope_node_ids(
+                    selected_client, root_node_id, exclude_selectors
+                )
                 if found_include is not None:
                     scope_include = found_include
                     scope_exclude = found_exclude or set()
@@ -1995,7 +2005,7 @@ async def issue_action_grant(
             await model_attachment.close()
 
 
-def _signature_element(node: dict[str, Any]) -> dict[str, Any]:
+def _signature_element(node: dict[str, Any], field_name: str = "") -> dict[str, Any]:
     tag = str(node.get("nodeName") or "").lower()
     attrs = _attributes(node)
     classes = str(attrs.get("class", ""))
@@ -2006,7 +2016,8 @@ def _signature_element(node: dict[str, Any]) -> dict[str, Any]:
         "tag": tag,
         "role": declared or tag,
         "type": str(attrs.get("type", "")).lower(),
-        "accessibleName": (
+        "accessibleName": field_name
+        or (
             attrs.get("aria-label")
             or attrs.get("alt")
             or attrs.get("title")
@@ -2018,11 +2029,13 @@ def _signature_element(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _signature_identity_matches(node: dict[str, Any], signature: dict[str, Any]) -> bool:
+def _signature_identity_matches(
+    node: dict[str, Any], signature: dict[str, Any], field_name: str = ""
+) -> bool:
     tag = str(node.get("nodeName") or "").lower()
     if tag != str(signature.get("tag") or "").lower():
         return False
-    element = _signature_element(node)
+    element = _signature_element(node, field_name)
     role = _role(element)
     expected_role = signature.get("role")
     if isinstance(expected_role, str) and role != expected_role:
@@ -2045,18 +2058,65 @@ def _signature_identity_matches(node: dict[str, Any], signature: dict[str, Any])
 def _find_signature_nodes(root: dict[str, Any], signature: dict[str, Any]) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
 
-    def visit(node: dict[str, Any]) -> None:
+    def visit(node: dict[str, Any], inherited_field_name: str = "") -> None:
+        field_name = (
+            _field_label(node) or inherited_field_name
+            if _is_field_wrapper(node)
+            else inherited_field_name
+        )
+        tag = str(node.get("nodeName") or "").lower()
+        control_name = field_name if tag in {"input", "textarea", "select"} else ""
         if isinstance(node.get("backendNodeId"), int) and _signature_identity_matches(
-            node, signature
+            node, signature, control_name
         ):
             matches.append(node)
         for key in ("children", "shadowRoots"):
             for child in node.get(key, []):
                 if isinstance(child, dict):
-                    visit(child)
+                    visit(child, field_name)
 
     visit(root)
     return matches
+
+
+async def _document_root_for_ref(client: Any, frame: str) -> dict[str, Any]:
+    raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+    root = raw.get("root", {})
+    if not isinstance(root, dict):
+        raise BrowserAgentError("PAGE_ACTION_STALE_REF", "The frame document is unavailable")
+    frame_key = frame.rsplit(">", 1)[-1]
+    if frame_key == "self" or frame_key.startswith(("oopif:", "target:")):
+        return root
+    frame_id, separator, loader_id = frame_key.partition(":")
+    if not separator or not frame_id or not loader_id:
+        raise BrowserAgentError("PAGE_ACTION_STALE_REF", "The frame reference is invalid")
+    owner = await client.send("DOM.getFrameOwner", {"frameId": frame_id})
+    owner_backend_id = owner.get("backendNodeId")
+    if not isinstance(owner_backend_id, int):
+        raise BrowserAgentError("PAGE_ACTION_STALE_REF", "The frame owner is unavailable")
+
+    def select(node: dict[str, Any]) -> dict[str, Any] | None:
+        if node.get("backendNodeId") == owner_backend_id:
+            content = node.get("contentDocument")
+            if isinstance(content, dict):
+                return content
+        for key in ("children", "shadowRoots", "contentDocument"):
+            children = node.get(key, [])
+            if isinstance(children, dict):
+                children = [children]
+            for child in children:
+                if isinstance(child, dict):
+                    found = select(child)
+                    if found is not None:
+                        return found
+        return None
+
+    selected = select(root)
+    if selected is None:
+        raise BrowserAgentError(
+            "PAGE_ACTION_STALE_REF", "The frame document is no longer available"
+        )
+    return selected
 
 
 async def _assert_ref_in_action_scope(client: Any, entry: PageRef) -> None:
@@ -2076,10 +2136,7 @@ async def _assert_ref_in_action_scope(client: Any, entry: PageRef) -> None:
         raise BrowserAgentError(
             "PAGE_ACTION_OUT_OF_SCOPE", "The action scope has no includable region"
         )
-    raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
-    root = raw.get("root", {})
-    if not isinstance(root, dict):
-        raise BrowserAgentError("PAGE_ACTION_OUT_OF_SCOPE", "The document is unavailable")
+    root = await _document_root_for_ref(client, entry.frame)
     parents = _node_parents(root)
     target_node_id: int | None = None
 
@@ -2126,10 +2183,9 @@ async def _recover_ref(
     if not isinstance(path, list) or not all(isinstance(index, int) for index in path):
         return None
     try:
-        raw = await client.send("DOM.getDocument", {"depth": -1, "pierce": True})
+        root = await _document_root_for_ref(client, entry.frame)
     except Exception:  # noqa: BLE001
         return None
-    root = raw.get("root", {})
     node = _node_at_path(root, path)
     if isinstance(node, dict):
         tag = str(node.get("nodeName") or "").lower()
@@ -2233,7 +2289,8 @@ async def _actual_target(
                     }
                     if (!name) {
                         const field = this.closest('[data-field-item="true"], .kd-cq-field');
-                        const title = field && (field.querySelector('span[title]') || field.querySelector('.kd-cq-field-title-wrap'));
+                        const title = field && [...field.querySelectorAll('div[title], span[title], label[title], .kd-cq-field-title-wrap')]
+                            .find((el) => !el.classList.contains('kd-cq-trigger-icon'));
                         if (title) name = String(title.getAttribute('title') || text(title)).replace(/\s*\*+\s*$/, '').trim();
                     }
                     if (!name) name = String(this.getAttribute('placeholder') || '').trim();
@@ -3224,10 +3281,9 @@ async def execute_action(
                 else None
             )
             if new_target is not None:
-                # Model-side navigation must not move the user's visible tab
-                # (AC-11 / dual-pointer design). Commit the model pointer only
-                # after workset admission succeeds; otherwise both pointers stay
-                # unchanged and the model gets a structured reason.
+                # Commit the model pointer only after workset admission succeeds;
+                # otherwise it stays unchanged and the model gets a structured reason.
+                # Workset admission activates a newly opened page like target=_blank.
                 if admit_model_target(session, new_target):
                     session.document = None
                     session.refs.clear()

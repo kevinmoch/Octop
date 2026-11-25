@@ -27,7 +27,7 @@ export function useWebSkillAgentSession(
         }
       }
       if (sessionRef.current) return sessionRef.current;
-      if (!userId) throw new Error("Octop user identity is not ready");
+      if (!userId) throw new Error("CCS Buddy user identity is not ready");
       if (!creatingRef.current) {
         const generation = generationRef.current;
         const creation = browserAgentApi

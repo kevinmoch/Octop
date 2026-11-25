@@ -13,14 +13,14 @@ const stable = {
   tag: "v1.0.2",
   releasesUrl: "https://github.com/x/releases",
   assets: {
-    mac_arm: { name: "Octop.dmg", ext: "dmg", url: "https://download.octop.cloud/Octop-1.0.2-arm64.dmg" },
+    mac_arm: { name: "Octop.dmg", ext: "dmg", url: "https://jijian.huawei.com/Octop-1.0.2-arm64.dmg" },
   },
 };
 const beta = {
   tag: "v1.0.3b1",
   releasesUrl: "https://github.com/x/releases",
   assets: {
-    mac_arm: { name: "Octop.dmg", ext: "dmg", url: "https://download.octop.cloud/Octop-1.0.3b1-arm64.dmg" },
+    mac_arm: { name: "Octop.dmg", ext: "dmg", url: "https://jijian.huawei.com/Octop-1.0.3b1-arm64.dmg" },
   },
 };
 
@@ -115,7 +115,7 @@ test("failed or incomplete downloads envelope is a check failure", () => {
 });
 
 test("non-download-host urls are rejected", () => {
-  assert.equal(isValidAssetUrl("https://download.octop.cloud/a.dmg"), true);
+  assert.equal(isValidAssetUrl("https://jijian.huawei.com/a.dmg"), true);
   assert.equal(isValidAssetUrl("http://download.octop.cloud/a.dmg"), false);
   assert.equal(isValidAssetUrl("https://evil.example/a.dmg"), false);
 });

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from .oopif import OopifSession, attach_page_target
 from .sessions import MAX_MODEL_TARGETS, BrowserAgentError, BrowserAgentSession
+
+
+async def reset_device_metrics_if_windows(browser: Any) -> None:
+    if os.name != "nt":
+        return
+    await browser._internal.client.send("Emulation.clearDeviceMetricsOverride")  # noqa: SLF001
 
 
 def _forget_target(session: BrowserAgentSession, target_id: str) -> None:

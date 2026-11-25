@@ -143,7 +143,9 @@ export class OctopHostBridge {
         this.initResolve(init);
       } else {
         this.initReject(
-          new Error("The Octop host sent an invalid initialization message"),
+          new Error(
+            "The CCS Buddy host sent an invalid initialization message",
+          ),
         );
       }
       return;
@@ -169,7 +171,7 @@ export class OctopHostBridge {
         new Error(
           typeof value.error === "string"
             ? value.error.slice(0, 300)
-            : "The Octop request failed",
+            : "The CCS Buddy request failed",
         ),
       );
   };
@@ -188,12 +190,13 @@ export class OctopHostBridge {
 
   async call(api: HostApi, payload?: unknown): Promise<unknown> {
     const init = await this.ready();
-    if (this.disposed) throw new Error("The Octop host connection is closed");
+    if (this.disposed)
+      throw new Error("The CCS Buddy host connection is closed");
     const id = crypto.randomUUID();
     const result = new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error("The Octop host request timed out"));
+        reject(new Error("The CCS Buddy host request timed out"));
       }, 10_000);
       this.pending.set(id, { resolve, reject, timer });
     });
@@ -214,7 +217,7 @@ export class OctopHostBridge {
     window.removeEventListener("message", this.onMessage);
     for (const waiter of this.pending.values()) {
       clearTimeout(waiter.timer);
-      waiter.reject(new Error("The Octop host connection is closed"));
+      waiter.reject(new Error("The CCS Buddy host connection is closed"));
     }
     this.pending.clear();
     this.appearanceListeners.clear();

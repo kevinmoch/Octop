@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import multiprocessing
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+from octop.infra.control.browser.webskill import lease as lease_module
 from octop.infra.control.browser.webskill.lease import (
     profile_command_gate,
     profile_lease,
@@ -43,8 +45,30 @@ async def test_command_gate_uses_the_real_lease(tmp_path: Path, monkeypatch) -> 
     from octop_browser.settings import settings
 
     monkeypatch.setattr(settings, "profiles_dir", str(tmp_path))
-    async with profile_command_gate("user-1")("DOM.getDocument", {}):
+    async with profile_command_gate("user-1")("Runtime.evaluate", {}):
         assert (tmp_path / ".leases").is_dir()
+
+
+async def test_screenshot_gate_bypasses_the_write_lease(monkeypatch) -> None:
+    acquisitions: list[str] = []
+
+    @asynccontextmanager
+    async def tracked_lease(profile: str):
+        acquisitions.append(profile)
+        yield
+
+    monkeypatch.setattr(lease_module, "profile_lease", tracked_lease)
+    gate = lease_module.profile_command_gate("user-1")
+    async with gate("DOM.getDocument", {}):
+        pass
+    async with gate("Page.captureScreenshot", {}):
+        pass
+    async with gate("Runtime.evaluate", {}):
+        pass
+    async with gate("Input.insertText", {}):
+        pass
+
+    assert acquisitions == ["user-1", "user-1"]
 
 
 async def test_lease_timeout_fails_closed(tmp_path: Path, monkeypatch) -> None:

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDownloadConsent } from "../../../../webskill/src/downloadConsent";
 
-describe("Octop download consent", () => {
+describe("CCS Buddy download consent", () => {
   beforeEach(() => localStorage.clear());
 
-  it("isolates remembered download actions by Octop user id", async () => {
+  it("isolates remembered download actions by CCS Buddy user id", async () => {
     const a = createDownloadConsent({ userId: 1, locale: () => "en" });
     const b = createDownloadConsent({ userId: 2, locale: () => "en" });
     await a.remember("read");

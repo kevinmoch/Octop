@@ -54,3 +54,28 @@ describe("remote tab workset port", () => {
     await expect(window.settle({ timeoutMs: 5 })).resolves.toBeUndefined();
   });
 });
+
+describe("observed tab activation", () => {
+  it("passes an observed handle through host admission", async () => {
+    const { bridge, calls } = bridgeWithTabs([
+      "tab_origin_0000000000000000",
+      "tab_detail_0000000000000000",
+    ]);
+    const port = new OctopTabWorksetPort(bridge);
+    port.rememberOpened("tab_detail_0000000000000000");
+
+    const handle = await port.admit({
+      title: "Detail",
+      url: "https://b.test/",
+    });
+
+    expect(handle).toBe("tab_admitted_000000000000");
+    expect(calls).toEqual([
+      { api: "tabs-list" },
+      {
+        api: "tabs-admit",
+        payload: { title: "Detail", url: "https://b.test/" },
+      },
+    ]);
+  });
+});

@@ -3,6 +3,20 @@ export interface CanvasPoint {
   y: number;
 }
 
+export interface BrowserFrameMetadata {
+  frameId?: number;
+  streamId?: number;
+}
+
+interface CanvasFrameState {
+  generation: number;
+  lastFrameId: number;
+  hasFrame: boolean;
+  streamId?: number;
+}
+
+const canvasFrameStates = new WeakMap<HTMLCanvasElement, CanvasFrameState>();
+
 /** Map a screen pointer position to canvas pixel coordinates. */
 export function getCanvasCoords(
   canvas: HTMLCanvasElement | null,
@@ -38,13 +52,37 @@ export function getCanvasCoords(
 export function paintBase64JpegToCanvas(
   canvas: HTMLCanvasElement | null,
   base64Data: string,
+  metadata: BrowserFrameMetadata = {},
 ): void {
   if (!canvas) return;
+  const previous = canvasFrameStates.get(canvas);
+  const streamChanged =
+    metadata.streamId !== undefined && metadata.streamId !== previous?.streamId;
+  if (
+    !streamChanged &&
+    metadata.frameId !== undefined &&
+    metadata.frameId <= (previous?.lastFrameId ?? 0)
+  ) {
+    return;
+  }
+  const state: CanvasFrameState = {
+    generation: (previous?.generation ?? 0) + 1,
+    lastFrameId:
+      metadata.frameId ?? (streamChanged ? 0 : previous?.lastFrameId ?? 0),
+    hasFrame: streamChanged ? false : previous?.hasFrame ?? false,
+    streamId: metadata.streamId ?? previous?.streamId,
+  };
+  canvasFrameStates.set(canvas, state);
+
   const img = new Image();
   img.onload = () => {
+    if (canvasFrameStates.get(canvas) !== state) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    if (canvas.width !== img.width || canvas.height !== img.height) {
+    const nextRatio = img.width / img.height;
+    const currentRatio = canvas.width / canvas.height;
+    const ratioChanged = Math.abs(1 - currentRatio / nextRatio) > 0.005;
+    if (!state.hasFrame || ratioChanged) {
       canvas.width = img.width;
       canvas.height = img.height;
     }
@@ -52,7 +90,8 @@ export function paintBase64JpegToCanvas(
     if ("imageSmoothingQuality" in ctx) {
       ctx.imageSmoothingQuality = "high";
     }
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    state.hasFrame = true;
   };
   img.src = `data:image/jpeg;base64,${base64Data}`;
 }
@@ -73,6 +112,12 @@ export async function paintBlobToCanvas(
 
 export function clearCanvas(canvas: HTMLCanvasElement | null): void {
   if (!canvas) return;
+  const previous = canvasFrameStates.get(canvas);
+  canvasFrameStates.set(canvas, {
+    generation: (previous?.generation ?? 0) + 1,
+    lastFrameId: 0,
+    hasFrame: false,
+  });
   const ctx = canvas.getContext("2d");
   if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 }

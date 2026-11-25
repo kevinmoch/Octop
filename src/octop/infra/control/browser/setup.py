@@ -98,8 +98,11 @@ def resolve_browser_display() -> str | None:
 
     Returns ``None`` when no live X11 socket exists. A stale ``$DISPLAY``
     (common on SSH / containers) must not force headed mode — Chromium then
-    exits immediately with ``Missing X server or $DISPLAY``.
+    exits immediately with ``Missing X server or $DISPLAY``. Windows uses
+    native Chrome windows rather than X11, so ``DISPLAY`` is ignored there.
     """
+    if sys.platform.startswith("win"):
+        return None
     if sys.platform != "linux":
         current = (os.environ.get("DISPLAY") or "").strip()
         return current or None

@@ -521,7 +521,7 @@ export default function Sidebar({
     <>
       <img
         src={isRailCollapsed ? publicUrl("logo_mark.svg") : wordmarkSrc}
-        alt="Octop"
+        alt="CCS Buddy"
         className={isRailCollapsed ? styles.brandMarkCollapsed : undefined}
         style={{
           height: isRailCollapsed ? 26 : isMobile ? 38 : 36,

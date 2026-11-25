@@ -175,7 +175,7 @@ function resolveEntry(
   if (!active)
     throw new WebSkillError(
       "LLM_UNAVAILABLE",
-      "Configure a WebSkill model in the Console. Octop models are not used as a fallback.",
+      "Configure a WebSkill model in the Console. CCS Buddy models are not used as a fallback.",
     );
   if (active.provider !== "chrome-builtin" && !(active.baseUrl ?? "").trim()) {
     throw new WebSkillError(

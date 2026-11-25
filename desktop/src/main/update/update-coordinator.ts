@@ -58,7 +58,7 @@ export interface SelectedRelease {
   releasesUrl: string;
 }
 
-const ALLOWED_DOWNLOAD_HOST = "download.octop.cloud";
+const ALLOWED_DOWNLOAD_HOST = "jijian.huawei.com";
 
 /** Only ``https`` assets from the fixed download host are accepted. */
 export function isValidAssetUrl(url: string): boolean {

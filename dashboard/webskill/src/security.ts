@@ -1,7 +1,7 @@
 export async function assertSecureRuntime(): Promise<void> {
   if (!window.isSecureContext) {
     throw new Error(
-      "WebSkill requires HTTPS or localhost. Open the Octop dashboard in a secure context; plain remote HTTP is not supported.",
+      "WebSkill requires HTTPS or localhost. Open the CCS Buddy dashboard in a secure context; plain remote HTTP is not supported.",
     );
   }
   if (

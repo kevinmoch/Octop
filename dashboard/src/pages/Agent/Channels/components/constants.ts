@@ -32,7 +32,7 @@ export type ChannelKey =
   | "octopbot";
 
 /**
- * Channel kinds backed by Octop ``ChannelKind`` / octop-gateway ``BUILTIN_CHANNELS``.
+ * Channel kinds backed by CCS Buddy ``ChannelKind`` / octop-gateway ``BUILTIN_CHANNELS``.
  * ``dashboard`` / ``agentchat`` are intentionally omitted until implemented.
  */
 export const CHANNEL_KEYS: ChannelKey[] = [

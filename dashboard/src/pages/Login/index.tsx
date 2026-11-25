@@ -172,11 +172,7 @@ export default function LoginPage() {
     if (desktopLocalAutoLoginHeld()) return;
     let cancelled = false;
     void renewDesktopSession().then((issued) => {
-      if (
-        cancelled ||
-        !issued?.access_token ||
-        !isLocalDesktopUser(issued.access_token)
-      ) {
+      if (cancelled || !issued?.access_token) {
         return;
       }
       setAuthToken(issued.access_token, true);
@@ -203,6 +199,9 @@ export default function LoginPage() {
       .getAuthStatus()
       .then((status) => {
         if (cancelled) return;
+        if (status.bootstrap?.status === "failed") {
+          message.error(t("login.bootstrapFailed"));
+        }
         if (status.setup_required) {
           clearAuthToken();
           navigate("/setup", { replace: true });
@@ -552,7 +551,7 @@ export default function LoginPage() {
           ? publicUrl("logo_horizontal_white.png")
           : publicUrl("logo_horizontal_dark.png")
       }
-      alt="Octop"
+      alt="CCS Buddy"
       style={{
         height: 48,
         width: "auto",

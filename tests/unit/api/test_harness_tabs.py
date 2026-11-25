@@ -33,19 +33,19 @@ def _fake_sess(*, active_id: str | None = "T1", port: int = 9222) -> SimpleNames
 
 @pytest.mark.asyncio
 async def test_status_probes_do_not_extend_browser_idle_timeout() -> None:
-    passive = AsyncMock(
-        side_effect=[
-            {},
-            {"result": {"value": "https://example.com"}},
-        ]
-    )
+    passive = AsyncMock(return_value={"result": {"value": "https://example.com"}})
     active = AsyncMock()
-    client = SimpleNamespace(send=active, send_passive=passive)
-    sess = SimpleNamespace(_internal=SimpleNamespace(client=client))
+    client = SimpleNamespace(
+        send=active,
+        send_passive=passive,
+        _ws=SimpleNamespace(state=SimpleNamespace(name="OPEN")),
+        _recv_task=SimpleNamespace(done=MagicMock(return_value=False)),
+    )
+    sess = SimpleNamespace(_internal=SimpleNamespace(client=client, _connected=True))
 
     assert await harness_mod._is_session_alive(sess)
     assert await harness_mod.harness_page_url(sess) == "https://example.com"
-    assert passive.await_count == 2
+    assert passive.await_count == 1
     active.assert_not_awaited()
 
 
@@ -110,6 +110,57 @@ async def test_shutdown_browser_forces_current_user_profile() -> None:
         profile="user-7",
         kill=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_session_health_check_does_not_acquire_browser_lease() -> None:
+    passive = AsyncMock(return_value={})
+    active = AsyncMock()
+    client = SimpleNamespace(
+        send=active,
+        send_passive=passive,
+        _ws=SimpleNamespace(state=SimpleNamespace(name="OPEN")),
+        _recv_task=SimpleNamespace(done=MagicMock(return_value=False)),
+    )
+    sess = SimpleNamespace(_internal=SimpleNamespace(client=client, _connected=True))
+
+    assert await harness_mod._is_session_alive(sess)
+    passive.assert_not_awaited()
+    active.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_closed_session_is_not_reusable() -> None:
+    client = SimpleNamespace(
+        _ws=SimpleNamespace(state=SimpleNamespace(name="CLOSED")),
+        _recv_task=SimpleNamespace(done=MagicMock(return_value=True)),
+    )
+    sess = SimpleNamespace(_internal=SimpleNamespace(client=client, _connected=True))
+
+    assert not await harness_mod._is_session_alive(sess)
+
+
+@pytest.mark.asyncio
+async def test_stream_snapshot_reuses_tab_url_without_another_cdp_read() -> None:
+    from octop.api.routers.browser import stream as stream_mod
+
+    probe = AsyncMock(return_value="https://stale.test")
+    tabs = [
+        {"id": "A", "url": "https://a.test", "title": "A", "active": False},
+        {"id": "B", "url": "https://b.test", "title": "B", "active": True},
+    ]
+    send_json = AsyncMock()
+    with (
+        patch.object(harness_mod, "harness_page_url", new=probe),
+        patch.object(stream_mod, "harness_list_tabs", new=AsyncMock(return_value=tabs)),
+        patch.object(stream_mod, "control_owner_for", new=lambda _profile: "agent"),
+    ):
+        await stream_mod._send_session_snapshot(send_json, "user-1", sess=object())
+
+    update = send_json.await_args_list[0].args[0]
+    assert update["current_url"] == "https://b.test"
+    assert send_json.await_args_list[1].args[0] == {"type": "tabs", "tabs": tabs}
+    probe.assert_not_awaited()
 
 
 def test_stable_tab_order_survives_reconnect_and_close() -> None:

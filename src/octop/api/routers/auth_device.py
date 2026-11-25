@@ -11,7 +11,7 @@ Three properties keep this from being a back door:
 * only the desktop shell can use it (``OCTOP_DESKTOP_SHELL=1``),
 * only over loopback, and
 * only with a token whose SHA-256 matches the one registered by an
-  already-authenticated request.
+  already-authenticated request or a one-time configuration-bootstrap nonce.
 
 The token itself never reaches the renderer: the shell generates it, stores it
 encrypted (or holds it in memory when the host has no keychain), and talks to
@@ -20,6 +20,7 @@ these endpoints from the main process.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -27,13 +28,15 @@ import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
 
 from octop.api.deps import current_user, get_server, sign_token
 from octop.infra.auth.tokens import PURPOSE_ACCESS
 from octop.infra.desktop import desktop_shell_enabled
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.setup.bootstrap import bootstrap_status
+from octop.infra.setup.desktop_bootstrap import clear_nonce, consume_nonce
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +164,44 @@ async def register_device(
     return {"ok": True, "username": user.username}
 
 
+@router.post("/device/bootstrap", summary="Bind the first managed desktop device")
+async def bootstrap_device(
+    body: RegisterBody,
+    request: Request,
+    server: Any = Depends(get_server),
+    x_octop_bootstrap_nonce: str | None = Header(default=None),
+) -> dict[str, Any]:
+    host = _require_desktop_loopback(request)
+    _raise_if_throttled(host)
+    state = bootstrap_status(server)
+    if not state or state.get("status") != "complete":
+        _record_failure(host)
+        raise OctopError(ErrorCode.FORBIDDEN, "configuration bootstrap is not complete", status=403)
+    user = server.user_manager.get_by_id(int(state.get("user_id") or 0))
+    if user is None:
+        _record_failure(host)
+        raise OctopError(ErrorCode.USER_DISABLED, "user not active")
+    if not await asyncio.to_thread(consume_nonce, server, x_octop_bootstrap_nonce or ""):
+        _record_failure(host)
+        raise OctopError(ErrorCode.AUTH_FAILED, "desktop bootstrap nonce mismatch")
+    _write_secret(
+        server,
+        {
+            "v": 1,
+            "user_id": user.id,
+            "hash": _digest(body.device_token),
+            "label": body.label or "",
+            "created_at": int(time.time()),
+        },
+    )
+    server.services.audit_repo.write(
+        actor=user.username,
+        action="auth.device_bootstrap_registered",
+        target=body.label or "desktop",
+    )
+    return {"ok": True, "username": user.username}
+
+
 @router.post("/device/token", summary="Exchange the device credential for an access token")
 async def device_token(
     body: DeviceTokenBody,
@@ -206,6 +247,7 @@ async def device_token(
         password_version=password_version,
     )
     _failures.pop(host, None)
+    await asyncio.to_thread(clear_nonce, server)
     logger.info("desktop device session renewed for %s", user.username)
     return {"access_token": token, "token_type": "Bearer", "expires_in": ttl}
 

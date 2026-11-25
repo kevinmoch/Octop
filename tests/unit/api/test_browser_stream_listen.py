@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -11,6 +12,7 @@ import pytest
 
 from octop.api.routers.browser import stream as stream_mod
 from octop.api.routers.browser.harness import resolve_harness_session
+from octop.infra.control.browser.frame_hub import CapturedFrame
 
 
 class _ListenProbe:
@@ -65,11 +67,6 @@ async def test_listen_state_loop_attaches_existing_session() -> None:
         ) as resolve,
         patch.object(
             stream_mod,
-            "harness_page_url",
-            new=AsyncMock(return_value="https://example.com"),
-        ),
-        patch.object(
-            stream_mod,
             "harness_list_tabs",
             new=AsyncMock(
                 return_value=[
@@ -93,6 +90,51 @@ async def test_listen_state_loop_attaches_existing_session() -> None:
     assert updates[0]["current_url"] == "https://example.com"
     # No JPEG frames on the listen-only path.
     assert not any(m.get("type") == "frame" for m in probe.sent)
+
+
+@pytest.mark.asyncio
+async def test_stream_loop_sends_frame_identity_and_capture_time() -> None:
+    sent: list[dict[str, Any]] = []
+    connected = True
+
+    async def send_json(payload: dict[str, Any]) -> None:
+        nonlocal connected
+        sent.append(payload)
+        if payload["type"] == "frame":
+            connected = False
+
+    subscription = SimpleNamespace(
+        next_frame=AsyncMock(
+            return_value=CapturedFrame(
+                data="jpeg-data",
+                frame_id=7,
+                captured_at=123.5,
+            )
+        )
+    )
+
+    @asynccontextmanager
+    async def capture(*_args: Any, **_kwargs: Any):
+        yield subscription
+
+    with (
+        patch.object(stream_mod, "capture_subscription", new=capture),
+        patch.object(stream_mod, "_send_session_snapshot", new=AsyncMock()),
+    ):
+        await stream_mod._stream_loop(
+            send_json,
+            lambda: connected,
+            object(),
+            "default",
+            listen_only=False,
+        )
+
+    assert sent[-1] == {
+        "type": "frame",
+        "data": "jpeg-data",
+        "frame_id": 7,
+        "captured_at": 123.5,
+    }
 
 
 @pytest.mark.asyncio

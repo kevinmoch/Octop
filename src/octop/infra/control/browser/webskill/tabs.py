@@ -1,8 +1,8 @@
 """Model-side tab workset over the existing WebSkill browser session.
 
-The model only sees opaque handles. Target IDs never leave the host, and
-focusing a tab never calls browser.switch_tab: it only moves the logical
-model_target pointer, so the user's visible page is unchanged.
+The model only sees opaque handles. Target IDs never leave the host. Explicit
+focus moves only the logical model_target pointer; pages opened by an action
+are activated like native ``target=_blank`` links after workset admission.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from octop_browser.session import BrowserSession
 
 from .page_agent import resolve_browser
 from .sessions import BrowserAgentError, BrowserAgentSession
-from .targets import follow_active_target
+from .targets import follow_active_target, reset_device_metrics_if_windows
 
 TAB_HANDLE_PREFIX = "tab_"
 MAX_HANDLE_LEN = 80
@@ -207,10 +207,17 @@ async def admit_workset_tab(
         # The SDK watcher may have listed the new target first; its opaque
         # handle already exists. Reuse it only when the watched metadata matches.
         matched_mapped = [target for target in targets if matches(target)]
-        if matched_mapped:
-            return handle_for_target(session, matched_mapped[0])
-        raise BrowserAgentError("PAGE_TAB_EXPIRED", "The opened page is no longer available")
-    target = candidates[0]
+        if not matched_mapped:
+            raise BrowserAgentError("PAGE_TAB_EXPIRED", "The opened page is no longer available")
+        target = matched_mapped[0]
+    else:
+        target = candidates[0]
+    await reset_device_metrics_if_windows(browser)
+    result = await browser.switch_tab(target)
+    if not result.success:
+        raise BrowserAgentError(
+            "TOOL_EXECUTION_FAILED", result.error or "Activating the opened page failed"
+        )
     session.model_target = target
     session.document = None
     session.refs.clear()

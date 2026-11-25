@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { getAuthToken } from "../api/request";
 import { resolveWsUrl } from "../utils/desktopWsUrl";
+import type { BrowserFrameMetadata } from "../utils/browserCanvas";
 import { normalizeUrl } from "../utils/normalizeUrl";
 import {
   closeBrowserTabOptimistic,
@@ -24,15 +25,17 @@ export interface BrowserTab {
 }
 
 interface BrowserStreamCallbacks {
-  onFrame: (base64Data: string) => void;
+  onFrame: (base64Data: string, metadata?: BrowserFrameMetadata) => void;
   onStatusChange?: (status: BrowserStreamState) => void;
   onError?: (message: string) => void;
 }
 
+const TAB_SWITCH_INTENT_TIMEOUT_MS = 12000;
+
 interface ConnectOptions {
   /** Harness profile for the current user. The WebSocket also binds from JWT. */
   sessionId?: string | null;
-  /** When set, screencast is relayed to the peer Octop via Bridge. */
+  /** When set, screencast is relayed to the peer CCS Buddy via Bridge. */
   bridgeConnectionId?: string | null;
   /** Obtain a one-shot ticket, renewing an expired WebSkill session if needed. */
   issueTicket?: () => Promise<{ ticket: string }>;
@@ -87,6 +90,8 @@ export function useBrowserStream() {
     tabId: number | string;
     url?: string;
     title?: string;
+    queued: boolean;
+    requestedAt: number;
   } | null>(null);
   const [status, setStatus] = useState<BrowserStreamState>("idle");
   const [currentUrl, setCurrentUrl] = useState("");
@@ -114,6 +119,8 @@ export function useBrowserStream() {
       reconnectRef.current = () => {
         connect(url, width, height, callbacks, options);
       };
+      const pending = pendingTabSwitchRef.current;
+      if (pending) pendingTabSwitchRef.current = { ...pending, queued: true };
       updateStatus("connecting");
 
       // Close any existing connection
@@ -159,38 +166,67 @@ export function useBrowserStream() {
             const msg = JSON.parse(ev.data as string) as {
               type: string;
               data?: string;
+              frame_id?: number;
               status?: string;
               message?: string;
               tabs?: BrowserTab[];
             };
 
             if (msg.type === "frame" && msg.data) {
-              callbacksRef.current?.onFrame(msg.data);
+              callbacksRef.current?.onFrame(msg.data, {
+                frameId: msg.frame_id,
+                streamId: generation,
+              });
             } else if (msg.type === "status" && msg.status) {
               updateStatus(msg.status as BrowserStreamState);
             } else if (msg.type === "tabs" && msg.tabs) {
-              setTabs((prevTabs) =>
-                mergeBrowserTabsStable(prevTabs, msg.tabs ?? []),
-              );
-              const activeTab = msg.tabs.find((t) => t.active);
-              if (activeTab) setCurrentUrl(activeTab.url);
-              // A tab switch requested while the stream was down is replayed
-              // after the new connection has received its first tab snapshot.
+              let nextTabs = msg.tabs;
               const pending = pendingTabSwitchRef.current;
-              if (pending !== null && ws.readyState === WebSocket.OPEN) {
-                pendingTabSwitchRef.current = null;
-                ws.send(
-                  JSON.stringify({
-                    type: "tab_switch",
-                    tab_id: pending.tabId,
-                    ...(pending.url ? { tab_url: pending.url } : {}),
-                    ...(pending.title ? { tab_title: pending.title } : {}),
-                  }),
-                );
-                setTabs((prevTabs) =>
-                  markBrowserTabActive(prevTabs, pending.tabId),
-                );
+              if (pending) {
+                const target =
+                  nextTabs.find(
+                    (tab) => String(tab.id) === String(pending.tabId),
+                  ) ??
+                  nextTabs.find(
+                    (tab) =>
+                      (pending.url && tab.url === pending.url) ||
+                      (pending.title && tab.title === pending.title),
+                  );
+                if (
+                  target?.active ||
+                  Date.now() - pending.requestedAt >=
+                    TAB_SWITCH_INTENT_TIMEOUT_MS
+                ) {
+                  pendingTabSwitchRef.current = null;
+                } else {
+                  if (target) {
+                    nextTabs = markBrowserTabActive(nextTabs, target.id);
+                  }
+                  if (pending.queued && ws.readyState === WebSocket.OPEN) {
+                    const targetId = target?.id ?? pending.tabId;
+                    const targetUrl = target?.url ?? pending.url;
+                    const targetTitle = target?.title ?? pending.title;
+                    pendingTabSwitchRef.current = {
+                      ...pending,
+                      tabId: targetId,
+                      ...(targetUrl ? { url: targetUrl } : {}),
+                      ...(targetTitle ? { title: targetTitle } : {}),
+                      queued: false,
+                    };
+                    ws.send(
+                      JSON.stringify({
+                        type: "tab_switch",
+                        tab_id: targetId,
+                        ...(targetUrl ? { tab_url: targetUrl } : {}),
+                        ...(targetTitle ? { tab_title: targetTitle } : {}),
+                      }),
+                    );
+                  }
+                }
               }
+              setTabs((prevTabs) => mergeBrowserTabsStable(prevTabs, nextTabs));
+              const activeTab = nextTabs.find((t) => t.active);
+              if (activeTab) setCurrentUrl(activeTab.url);
             } else if (msg.type === "error") {
               console.error("[BrowserStream] Server error:", msg.message);
               callbacksRef.current?.onError?.(msg.message ?? "Unknown error");
@@ -285,22 +321,21 @@ export function useBrowserStream() {
         ...(tab?.url ? { tab_url: tab.url } : {}),
         ...(tab?.title ? { tab_title: tab.title } : {}),
       };
-      if (sendEvent(event)) {
-        pendingTabSwitchRef.current = null;
-        setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
-        return;
-      }
+      const sent = sendEvent(event);
+      pendingTabSwitchRef.current = {
+        tabId,
+        ...(tab?.url ? { url: tab.url } : {}),
+        ...(tab?.title ? { title: tab.title } : {}),
+        queued: !sent,
+        requestedAt: Date.now(),
+      };
+      setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
+      if (sent) return;
 
       // The stream is down (network interruption or a reconnect window).
       // Keep the user's intended target and replay it once the first tab
       // snapshot arrives on the new socket. Do not open a second reconnect
       // while the existing one is still connecting.
-      pendingTabSwitchRef.current = {
-        tabId,
-        ...(tab?.url ? { url: tab.url } : {}),
-        ...(tab?.title ? { title: tab.title } : {}),
-      };
-      setTabs((prevTabs) => markBrowserTabActive(prevTabs, tabId));
       if (
         statusRef.current !== "connecting" &&
         !reconnectRequestedRef.current

@@ -129,6 +129,19 @@ def configure_browser_profiles_dir(profiles_dir: Path | None = None) -> Path:
     return resolved
 
 
+def configure_browser_launch_mode() -> None:
+    """Default browser tools to headless on Windows unless explicitly overridden."""
+    if os.name != "nt":
+        return
+    mode = os.environ.get("BROWSER_USE_MODE") or "headless"
+    os.environ["BROWSER_USE_MODE"] = mode
+    with contextlib.suppress(Exception):
+        from octop_browser.mode import normalize_mode
+        from octop_browser.settings import settings as hb_settings
+
+        hb_settings.browser_mode = normalize_mode(mode)
+
+
 def configure_browser_idle_timeout(timeout_minutes: int) -> None:
     """Apply Octop's browser idle policy to octop-browser."""
     timeout = max(int(timeout_minutes), 0)

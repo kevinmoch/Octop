@@ -136,6 +136,7 @@ class OctopConfig:
     enable_dashboard: bool = True
     enable_api_docs: bool = False
     require_setup_password: bool = True
+    bootstrap: dict[str, Any] = field(default_factory=dict)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     # False when config.json omits ``database`` (use PathLayout.db unless env overrides).
     database_in_file: bool = False
@@ -502,6 +503,12 @@ def validate_persisted_config(raw: dict[str, Any]) -> None:
     if idle is not None and idle < 0:
         raise ValueError("browser_idle_timeout_minutes must be >= 0")
 
+    if "bootstrap" in raw:
+        bootstrap = raw.get("bootstrap")
+        if not isinstance(bootstrap, dict):
+            raise ValueError("bootstrap must be an object")
+        _optional_bool(bootstrap, "enabled")
+
     if "database" in raw:
         section = _parse_database_section(raw.get("database"))
         driver = str(section.get("driver", "sqlite")).strip().lower()
@@ -726,6 +733,7 @@ def load_config(path: Path) -> OctopConfig:
         enable_dashboard=bool(merged["enable_dashboard"]),
         enable_api_docs=bool(merged["enable_api_docs"]),
         require_setup_password=bool(merged["require_setup_password"]),
+        bootstrap=dict(merged.get("bootstrap") or {}),
         database=parse_database_config(merged_db),
         database_in_file=database_in_file,
         tls=_parse_tls_section(raw.get("tls")),

@@ -18,6 +18,7 @@ interface Call {
   url: string;
   body: unknown;
   authorization: string | undefined;
+  bootstrapNonce: string | undefined;
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -48,6 +49,9 @@ async function makeFixture(options: {
       body: init?.body ? JSON.parse(String(init.body)) : null,
       authorization: (init?.headers as Record<string, string> | undefined)
         ?.Authorization,
+      bootstrapNonce: (init?.headers as Record<string, string> | undefined)?.[
+        "X-Octop-Bootstrap-Nonce"
+      ],
     };
     calls.push(call);
     if (!options.respond) throw new TypeError("fetch failed");
@@ -63,6 +67,7 @@ async function makeFixture(options: {
   });
 
   return {
+    home,
     store,
     client,
     calls,
@@ -109,6 +114,37 @@ test("register refuses an empty access token without calling the server", async 
   assert.equal(fx.calls.length, 0);
 
   await fx.cleanup();
+});
+
+test("bootstrap registration sends the one-time nonce only from the main process", async () => {
+  const fx = await makeFixture({ respond: () => jsonResponse(200, { ok: true }) });
+  const nonceFile = join(fx.home, "desktop-bootstrap-nonce");
+  await fs.writeFile(nonceFile, "one-time-nonce", "utf8");
+
+  assert.equal(await fx.client.registerBootstrap(nonceFile), true);
+  const call = callAt(fx.calls, 0);
+  assert.equal(call.url, "http://127.0.0.1:51234/api/auth/device/bootstrap");
+  assert.equal(call.bootstrapNonce, "one-time-nonce");
+  assert.equal(call.authorization, undefined);
+  assert.equal((call.body as { device_token: string }).device_token, await fx.store.read());
+  await fx.cleanup();
+});
+
+test("bootstrap registration ignores a missing nonce and preserves refusals", async () => {
+  const missing = await makeFixture({ respond: () => jsonResponse(200, {}) });
+  assert.equal(
+    await missing.client.registerBootstrap(join(missing.home, "missing")),
+    false,
+  );
+  assert.equal(missing.calls.length, 0);
+  await missing.cleanup();
+
+  const refused = await makeFixture({ respond: () => jsonResponse(401, {}) });
+  const nonceFile = join(refused.home, "desktop-bootstrap-nonce");
+  await fs.writeFile(nonceFile, "wrong-nonce", "utf8");
+  assert.equal(await refused.client.registerBootstrap(nonceFile), false);
+  assert.ok(await refused.store.read());
+  await refused.cleanup();
 });
 
 test("renew returns null when this install has no credential", async () => {

@@ -25,7 +25,7 @@ import {
 
 type CronJob = CronJobSpecOutput;
 
-/** Octop-aligned form values for create / edit drawer. */
+/** CCS Buddy-aligned form values for create / edit drawer. */
 export interface CronJobFormValues {
   id?: string;
   name: string;

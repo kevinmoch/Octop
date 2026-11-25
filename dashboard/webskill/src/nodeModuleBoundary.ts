@@ -12,7 +12,7 @@ const trustedPeers: Record<string, unknown> = {
 
 function unsupported(id: string): never {
   throw new Error(
-    `Module "${id}" is not available in the Octop WebSkill browser host`,
+    `Module "${id}" is not available in the CCS Buddy WebSkill browser host`,
   );
 }
 

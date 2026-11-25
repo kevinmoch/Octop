@@ -824,6 +824,13 @@ async def page_agent_ws(
                             write_gate=write_gate,
                         )
                     except BrowserAgentError as error:
+                        logger.info(
+                            "WebSkill execute action=%s duration_ms=%d ok=false code=%s reason=%s",
+                            request.get("action"),
+                            int((time.perf_counter() - started) * 1000),
+                            public_error_code(error.code),
+                            error.message,
+                        )
                         await _audit_ws(
                             websocket,
                             live,
@@ -835,6 +842,12 @@ async def page_agent_ws(
                             duration_ms=int((time.perf_counter() - started) * 1000),
                         )
                         raise
+                    logger.info(
+                        "WebSkill execute action=%s duration_ms=%d ok=%s",
+                        request.get("action"),
+                        int((time.perf_counter() - started) * 1000),
+                        reply["outcome"].get("ok"),
+                    )
                     await _audit_ws(
                         websocket,
                         live,
@@ -853,6 +866,13 @@ async def page_agent_ws(
                     {**reply, **({"requestId": request_id} if request_id is not None else {})}
                 )
             except BrowserAgentError as error:
+                if message.get("type") == "perceive":
+                    logger.info(
+                        "WebSkill perceive duration_ms=%d ok=false code=%s reason=%s",
+                        int((time.perf_counter() - started) * 1000),
+                        public_error_code(error.code),
+                        error.message,
+                    )
                 await send_error(error, request_id)
             except (json.JSONDecodeError, UnicodeError):
                 await send_error(
