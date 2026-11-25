@@ -15,6 +15,18 @@
     "uploadFiles": true,
     "documentSurface": true
   },
+  "mcp": {
+    "endpoints": [
+      {
+        "name": "welink-mcp-server",
+        "url": "http://127.0.0.1:8162/mcp",
+        "transport": "streamable-http",
+        "enabled": true,
+        "allowHttp": true,
+        "allowPrivateHosts": true
+      }
+    ]
+  },
   "quickPrompts": {
     "limit": 8,
     "items": [
