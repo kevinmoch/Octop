@@ -46,6 +46,20 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^buffer$/,
+        replacement: resolve(
+          import.meta.dirname,
+          "node_modules/buffer/index.js",
+        ),
+      },
+      {
+        find: /^string_decoder$/,
+        replacement: resolve(
+          import.meta.dirname,
+          "node_modules/string_decoder/lib/string_decoder.js",
+        ),
+      },
+      {
         find: /^node:module$/,
         replacement: resolve(import.meta.dirname, "src/nodeModuleBoundary.ts"),
       },
