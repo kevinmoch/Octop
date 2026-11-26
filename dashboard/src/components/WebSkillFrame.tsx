@@ -11,6 +11,7 @@ import {
 } from "../api/modules/browserAgent";
 import { browserApi } from "../api/modules/browser";
 import { useTheme } from "../context/ThemeContext";
+import { resolveWsUrl } from "../utils/desktopWsUrl";
 import { showApiError } from "../utils/showApiToast";
 
 const CHANNEL = "octop-webskill-p1";
@@ -231,9 +232,13 @@ export default function WebSkillFrame({
       void (async () => {
         try {
           if (data.api === "ticket") {
+            const issued = await browserAgentApi.issueTicket(sessionId);
             respond({
               ok: true,
-              result: await browserAgentApi.issueTicket(sessionId),
+              result: {
+                ...issued,
+                webSocketUrl: resolveWsUrl("/api/browser-agent/ws"),
+              },
             });
           } else if (data.api === "grant") {
             const payload = data.payload;

@@ -15,12 +15,14 @@ class FakeWebSocket {
   static instances: FakeWebSocket[] = [];
   readonly readyState = FakeWebSocket.OPEN;
   readonly requests: Record<string, unknown>[] = [];
+  readonly url: string;
   onopen?: () => void;
   onmessage?: (event: { data: string }) => void;
   onclose?: () => void;
   onerror?: () => void;
 
-  constructor(_url: string) {
+  constructor(url: string | URL) {
+    this.url = String(url);
     FakeWebSocket.instances.push(this);
     queueMicrotask(() => this.onopen?.());
   }
@@ -83,6 +85,25 @@ class FakeWebSocket {
 describe("OctopPageAgentTransport frame routing", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("uses the WebSocket endpoint supplied by the host", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    FakeWebSocket.instances = [];
+    const bridge = {
+      call: vi.fn(async () => ({
+        ticket: "test-ticket",
+        webSocketUrl: "ws://127.0.0.1:51234/relay-token/api/browser-agent/ws",
+      })),
+    } as unknown as OctopHostBridge;
+    const transport = new OctopPageAgentTransport(bridge);
+
+    await transport.send({ type: "perceive", scope: { include: ["body"] } });
+
+    expect(FakeWebSocket.instances[0]!.url).toBe(
+      "ws://127.0.0.1:51234/relay-token/api/browser-agent/ws?ticket=test-ticket",
+    );
+    transport.dispose();
   });
 
   it("drills into a discovered frame and aggregates through the SDK router", async () => {

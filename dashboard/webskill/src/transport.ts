@@ -220,8 +220,13 @@ export class OctopPageAgentTransport implements PageAgentTransport {
       const issued = await this.bridge.call("ticket");
       if (!isRecord(issued) || typeof issued.ticket !== "string")
         throw new Error("The CCS Buddy host did not issue a PageAgent ticket");
-      const url = new URL("/api/browser-agent/ws", window.location.origin);
-      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      const url =
+        typeof issued.webSocketUrl === "string"
+          ? new URL(issued.webSocketUrl)
+          : new URL("/api/browser-agent/ws", window.location.origin);
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+        url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      }
       url.searchParams.set("ticket", issued.ticket);
       const socket = new WebSocket(url);
       await new Promise<void>((resolve, reject) => {

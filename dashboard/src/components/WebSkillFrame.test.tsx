@@ -89,6 +89,59 @@ describe("WebSkillFrame session recovery", () => {
     vi.unstubAllGlobals();
   });
 
+  it("provides the PageAgent WebSocket endpoint with its ticket", async () => {
+    issueTicket.mockResolvedValue(ticket("page-agent-ticket"));
+    const { container } = render(
+      <WebSkillFrame
+        sessionId="session-1"
+        userId={1}
+        browserProfile="user-1"
+        browserActive
+        controlOwner="agent"
+        hidden={false}
+        placement="right"
+        placementLocked={false}
+        onPlacementChange={vi.fn()}
+        onSessionExpired={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const frame = container.querySelector("iframe");
+    const postMessage = vi.spyOn(frame!.contentWindow!, "postMessage");
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: window.location.origin,
+          source: frame!.contentWindow,
+          data: {
+            channel: "octop-webskill-p1",
+            type: "request",
+            id: "ticket-request",
+            api: "ticket",
+            sessionId: "session-1",
+          },
+        }),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() =>
+      expect(postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "response",
+          id: "ticket-request",
+          ok: true,
+          result: {
+            ...ticket("page-agent-ticket"),
+            webSocketUrl: `ws://${window.location.host}/api/browser-agent/ws`,
+          },
+        }),
+        window.location.origin,
+      ),
+    );
+  });
+
   it("does not replace the new session when an old iframe ticket fails late", async () => {
     let agent: ReturnType<typeof useWebSkillAgentSession> | undefined;
     const renewSpy = vi.fn(async (expectedSessionId: string) => {
