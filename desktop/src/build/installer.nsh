@@ -248,6 +248,16 @@ octop_rt_ok_zh:
 octop_rt_ok_en:
   DetailPrint "Python runtime is ready."
 octop_rt_ok_done:
+  ; Deployment secrets are opt-in build resources. Seed them only for a new
+  ; config, never overwrite existing user data, and remove the installed copy.
+  IfFileExists "$INSTDIR\resources\bootstrap.secrets.json" 0 octop_secrets_done
+  IfFileExists "$5\config.json" octop_secrets_remove 0
+  CreateDirectory "$5"
+  IfFileExists "$5\bootstrap.secrets.json" octop_secrets_remove 0
+  CopyFiles "$INSTDIR\resources\bootstrap.secrets.json" "$5\bootstrap.secrets.json"
+octop_secrets_remove:
+  Delete "$INSTDIR\resources\bootstrap.secrets.json"
+octop_secrets_done:
   Pop $5
   Pop $4
   Pop $3

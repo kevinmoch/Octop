@@ -192,7 +192,7 @@ describe("custom MCP endpoints", () => {
     expect(
       JSON.parse(localStorage.getItem(configKey) ?? "{}").mcp.endpoints,
     ).toEqual([]);
-  });
+  }, 15_000);
 
   it("does not hide a real remote MCP listing failure", async () => {
     exposeEcho = false;

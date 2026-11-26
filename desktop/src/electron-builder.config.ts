@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { macPrivacyExtendInfo, writeMacPrivacyLocalizations } from "./mac-privacy-plist";
+import { prepareBootstrapDeployment } from "./main/supervisor/bootstrap-deployment";
 
 // The Python release version is authoritative. electron-builder needs SemVer in
 // package metadata, while bundled runtime names keep the original PEP 440 value
@@ -22,6 +23,17 @@ const artifactName = process.env.OCTOP_PLATFORM
   ? `CCS-Buddy-desktop-${process.env.OCTOP_PLATFORM}-${productVersion}.\${ext}`
   : `CCS-Buddy-desktop-\${os}-\${arch}-\${version}.\${ext}`;
 const productName = "CCS Buddy";
+const deploymentConfig = process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG;
+const deployment = deploymentConfig
+  ? prepareBootstrapDeployment(
+      resolve(deploymentConfig),
+      resolve(dirname(deploymentConfig), "users.json"),
+      resolve(dirname(deploymentConfig), "models.json"),
+      resolve(__dirname, "release/bootstrap"),
+    )
+  : null;
+const bootstrapConfig = deployment?.configFile ?? "resources/bootstrap.json";
+const bootstrapSecrets = deployment?.secretsFile;
 
 export default {
   extraMetadata: { version: electronVersion },
@@ -37,7 +49,8 @@ export default {
   extraResources: [
     { from: "resources/icon.ico", to: "icon.ico" },
     { from: "resources/icon.png", to: "icon.png" },
-    { from: "resources/bootstrap.json", to: "bootstrap.json" },
+    { from: bootstrapConfig, to: "bootstrap.json" },
+    ...(bootstrapSecrets ? [{ from: bootstrapSecrets, to: "bootstrap.secrets.json" }] : []),
     { from: "resources/portable", to: "portable" },
     // deb postinst sources this after files are unpacked. postrm inlines a copy
     // because dpkg deletes the install tree first.

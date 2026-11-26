@@ -170,14 +170,19 @@ shell holds a **device credential** instead:
 
 A fresh install can also be initialized from a non-secret `bootstrap` section
 in `<OCTOP_HOME>/config.json`. The packaged `resources/bootstrap.json` is a
-disabled template; brand builds may enable it after supplying real provider and
-MCP settings. The main process seeds it only when no user config exists. Secrets
-come from `<OCTOP_HOME>/bootstrap.secrets.json` (see
+disabled template. A brand build can set `OCTOP_DESKTOP_BOOTSTRAP_CONFIG` to a
+public `config.json`; sibling `users.json` and `models.json` (both gitignored)
+supply the admin password and provider API key. The build merges these files
+into the normal bootstrap config and a separate secret resource. The main
+process seeds config only when no user config exists. On Windows, the installer
+seeds secrets only alongside that new config and deletes the installed secret
+resource; successful initialization also removes the home secret file. Secrets
+may alternatively come from `<OCTOP_HOME>/bootstrap.secrets.json` (see
 `src/build/bootstrap.secrets.example.json`) or the documented environment
-variables, never from the installer resources. Successful initialization binds
-the initial admin to the shell's device credential through a one-time nonce;
-later launches use the normal device renewal path. Initialization state is
-resumable and existing installations are never overwritten.
+variables. Successful initialization binds the initial admin to the shell's
+device credential through a one-time nonce; later launches use the normal device
+renewal path. Initialization state is resumable and existing installations are
+never overwritten.
 
 So a desktop install keeps working across restarts and across JWT expiry without
 ever asking for a password. Sliding renewal still rotates the token during use.

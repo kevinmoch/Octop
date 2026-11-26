@@ -20,7 +20,7 @@ const HOP_BY_HOP = new Set([
 /** Headers we always drop on the way to the backend (spoofable connection state). */
 const STRIP_REQUEST = new Set(["host", "origin", "cookie", "content-length"]);
 
-export function sanitizeForwardHeaders(headers: Headers): Record<string, string> {
+export function sanitizeForwardHeaders(headers: Headers, backendOrigin?: string): Record<string, string> {
   const out: Record<string, string> = {};
   headers.forEach((value, key) => {
     const lower = key.toLowerCase();
@@ -28,6 +28,10 @@ export function sanitizeForwardHeaders(headers: Headers): Record<string, string>
     if (STRIP_REQUEST.has(lower)) return;
     out[key] = value;
   });
+  if (backendOrigin) {
+    out.origin = backendOrigin;
+    out["sec-fetch-site"] = "same-origin";
+  }
   return out;
 }
 

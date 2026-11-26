@@ -1,4 +1,4 @@
-import { WEBSKILL_CONFIG } from "virtual:webskill-config";
+import { WEBSKILL_CONFIG, loadWebSkillSecrets } from "virtual:webskill-config";
 import type {
   ChatEngine,
   ChatbotHostAdapter,
@@ -90,6 +90,7 @@ export async function createWebSkillHost(
   const runtimeConfig = createWebSkillRuntimeConfigStore(
     init.userId,
     WEBSKILL_CONFIG,
+    loadWebSkillSecrets,
   );
   const initialConfig = await runtimeConfig.load();
   if (

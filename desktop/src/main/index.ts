@@ -255,7 +255,10 @@ function registerProtocol(staticRootDir: string): void {
     if (isApiPath(pathname)) {
       if (apiAdmissionClosed) return new Response("update in progress", { status: 503 });
       const target = toBackendUrl(backendPort, pathname, url.search);
-      const headers = sanitizeForwardHeaders(request.headers);
+      const headers = sanitizeForwardHeaders(
+        request.headers,
+        `http://127.0.0.1:${backendPort}`,
+      );
       headers["x-octop-proxy"] = "1";
       return net.fetch(target, {
         method: request.method,

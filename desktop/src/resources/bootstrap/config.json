@@ -1,0 +1,13 @@
+{
+  "database": {
+    "driver": "sqlite"
+  },
+  "bootstrap": {
+    "mcpServers": {
+      "welink-mcp-server": {
+        "transport": "streamable_http",
+        "url": "http://127.0.0.1:8162/mcp"
+      }
+    }
+  }
+}

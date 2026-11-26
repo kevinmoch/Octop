@@ -92,3 +92,15 @@ test("sanitizeForwardHeaders strips connection-level headers", () => {
   assert.equal("connection" in out, false);
   assert.equal(out["authorization"], "Bearer keep");
 });
+
+test("desktop proxy presents the backend as the request origin", () => {
+  const h = new Headers({
+    Authorization: "Bearer keep",
+    Origin: "octop://app",
+    "Sec-Fetch-Site": "cross-site",
+  });
+  const out = sanitizeForwardHeaders(h, "http://127.0.0.1:58417");
+  assert.equal(out.origin, "http://127.0.0.1:58417");
+  assert.equal(out["sec-fetch-site"], "same-origin");
+  assert.equal(out.authorization, "Bearer keep");
+});

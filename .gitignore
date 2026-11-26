@@ -21,6 +21,9 @@ Desktop.ini
 !.env.example
 bootstrap.secrets.json
 !desktop/src/build/bootstrap.secrets.example.json
+/dashboard/webskill/models.json
+/desktop/src/resources/bootstrap/users.json
+/desktop/src/resources/bootstrap/models.json
 
 # Python
 __pycache__/

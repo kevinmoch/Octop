@@ -64,4 +64,40 @@ describe("WebSkill config defaults", () => {
       "qp-skills",
     ]);
   });
+
+  it("restores a baked model key without persisting it", async () => {
+    const modelDefaults: ConfigDefaults = {
+      ...defaults(8, false),
+      llm: {
+        entries: [
+          {
+            id: "deepseek-1",
+            label: "DeepSeek",
+            provider: "openai-compatible",
+            baseUrl: "https://api.deepseek.com",
+            model: "deepseek-flash",
+          },
+        ],
+        defaultId: "deepseek-1",
+      },
+    };
+    const store = createWebSkillRuntimeConfigStore(
+      7,
+      modelDefaults,
+      async () => ({ "deepseek-1": "sk-test" }),
+    );
+
+    const loaded = await store.load();
+    expect(loaded.llm.defaultId).toBe("deepseek-1");
+    expect(loaded.llm.entries[0]).toMatchObject({
+      model: "deepseek-flash",
+      apiKey: "sk-test",
+    });
+
+    await store.save(loaded);
+    const raw = localStorage.getItem("octop.webskill.runtime.7") ?? "";
+    expect(raw).not.toContain("sk-test");
+    expect(raw).toContain("webskill:baked-api-key");
+    expect((await store.load()).llm.entries[0].apiKey).toBe("sk-test");
+  });
 });
