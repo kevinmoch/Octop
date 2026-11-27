@@ -1,5 +1,4 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DesktopChromeProvider } from "../hooks/useDesktopChrome";
@@ -8,45 +7,23 @@ import WindowsAppMenu from "./WindowsAppMenu";
 
 const state = vi.hoisted(() => ({
   fullscreen: false,
-  invoke: vi.fn(),
+  linux: false,
   model: vi.fn(async () => ({
-    titles: ["文件", "编辑", "视图", "帮助"],
+    titles: ["File", "Edit", "View", "Help"],
     menus: [
       [
         {
           kind: "command" as const,
-          id: "close",
-          label: "关闭",
-          accelerator: "Ctrl+W",
-        },
-        { kind: "separator" as const },
-        {
-          kind: "command" as const,
           id: "quit",
-          label: "退出",
+          label: "Quit",
           accelerator: null,
-        },
-      ],
-      [
-        {
-          kind: "command" as const,
-          id: "undo",
-          label: "撤销",
-          accelerator: "Ctrl+Z",
         },
       ],
       [],
-      [
-        {
-          kind: "command" as const,
-          id: "about",
-          label: "关于 CCS Buddy",
-          accelerator: null,
-        },
-      ],
+      [],
+      [],
     ],
   })),
-  hasMenu: true,
 }));
 
 vi.mock("../hooks/useWindowFullscreen", () => ({
@@ -54,17 +31,15 @@ vi.mock("../hooks/useWindowFullscreen", () => ({
 }));
 
 vi.mock("../utils/desktopBridge", () => ({
-  isLinuxDesktopShell: () => false,
-  getDesktopBridge: () =>
-    state.hasMenu
-      ? { windowsMenu: { model: state.model, invoke: state.invoke } }
-      : {},
+  isLinuxDesktopShell: () => state.linux,
+  getDesktopBridge: () => ({
+    windowsMenu: { model: state.model, invoke: vi.fn() },
+  }),
 }));
 
 afterEach(() => {
   state.fullscreen = false;
-  state.hasMenu = true;
-  state.invoke.mockClear();
+  state.linux = false;
   cleanup();
 });
 
@@ -76,32 +51,20 @@ function renderMenu(chrome: DesktopChromeStyle | null) {
   );
 }
 
-describe("Windows 标题栏菜单", () => {
-  it("在标题栏左侧画出四个菜单", async () => {
+describe("Windows caption row", () => {
+  it("keeps the drag strip but hides the menu titles on Windows", () => {
     renderMenu("windows");
+    expect(document.querySelector(".octop-win-menu")).toHaveClass(
+      "octop-desktop-drag",
+    );
+    expect(screen.queryAllByRole("menuitem")).toHaveLength(0);
+    expect(document.documentElement.dataset.octopCaptionRow).toBe("");
     expect(
-      await screen.findByRole("menuitem", { name: "文件" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "编辑" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "视图" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "帮助" })).toBeInTheDocument();
+      document.documentElement.style.getPropertyValue("--octop-caption-row"),
+    ).toBe("32px");
   });
 
-  it("点击后在页面里展开子菜单，并执行选中的命令", async () => {
-    const user = userEvent.setup();
-    renderMenu("windows");
-    await user.click(await screen.findByRole("menuitem", { name: "文件" }));
-    expect(screen.getByRole("menuitem", { name: /关闭/ })).toBeInTheDocument();
-    expect(screen.getByText("Ctrl+W")).toBeInTheDocument();
-    expect(screen.getByRole("separator")).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "退出" }));
-    expect(state.invoke).toHaveBeenCalledWith("quit");
-    expect(
-      screen.queryByRole("menuitem", { name: "退出" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("macOS 和浏览器不画这排菜单", () => {
+  it("still hides the row on macOS and in the browser", () => {
     const { container, rerender } = renderMenu("mac");
     expect(container.querySelector(".octop-win-menu")).toBeNull();
     rerender(
@@ -112,24 +75,20 @@ describe("Windows 标题栏菜单", () => {
     expect(container.querySelector(".octop-win-menu")).toBeNull();
   });
 
-  it("占一整行，并把页面顶下去", async () => {
+  it("keeps the Linux menu titles", async () => {
+    state.linux = true;
     renderMenu("windows");
-    await screen.findByRole("menuitem", { name: "文件" });
-    const bar = document.querySelector(".octop-win-menu");
-    expect(bar).toHaveClass("octop-desktop-drag");
-    expect(document.documentElement.dataset.octopCaptionRow).toBe("");
     expect(
-      document.documentElement.style.getPropertyValue("--octop-caption-row"),
-    ).toBe("32px");
+      await screen.findByRole("menuitem", { name: "File" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeInTheDocument();
   });
 
-  it("全屏仍画出菜单栏", async () => {
+  it("keeps the empty caption row in fullscreen", () => {
     state.fullscreen = true;
     renderMenu("windows");
-    expect(
-      await screen.findByRole("menuitem", { name: "文件" }),
-    ).toBeInTheDocument();
-    expect(document.documentElement.dataset.octopCaptionRow).toBe("");
+    expect(document.querySelector(".octop-win-menu")).not.toBeNull();
+    expect(screen.queryAllByRole("menuitem")).toHaveLength(0);
     expect(
       document.documentElement.style.getPropertyValue("--octop-caption-row"),
     ).toBe("32px");

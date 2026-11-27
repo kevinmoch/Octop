@@ -6,7 +6,14 @@
  *
  * Frames arrive over WebSocket (/browser-stream/ws) instead of screenshot polling.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Alert,
@@ -131,7 +138,7 @@ const LEGACY_SESSION_STORAGE_KEY = "octop:remote-browser:session-id";
 /** Whether the user left the remote-browser stream open last time. */
 const STREAM_ACTIVE_KEY = "octop:remote-browser:stream-active";
 const DEFAULT_REFRESH_INTERVAL = 500;
-const DEFAULT_START_URL = "https://cloud.tencent.com";
+const DEFAULT_START_URL = "https://jijian.huawei.com";
 const BROWSER_AI_PANEL_KEY = "octop:remote-browser:ai-panel-open";
 const BROWSER_AI_PLACEMENT_KEY = "octop:remote-browser:ai-placement";
 const WEBSKILL_AI_PANEL_KEY = "octop:webskill-browser:ai-panel-open";
@@ -295,12 +302,15 @@ interface RemoteBrowserPageProps {
   isVisible?: boolean;
   /** WebSkill server-enhanced host: restricted PageAgent + its own assistant. */
   enhanced?: boolean;
+  /** Desktop local-browser fallback; rendered last in the address bar. */
+  addressBarExtraEnd?: ReactNode;
 }
 
 export default function RemoteBrowserPage({
   embedded = false,
   isVisible = true,
   enhanced = false,
+  addressBarExtraEnd,
 }: RemoteBrowserPageProps) {
   const { t } = useTranslation();
   const { modal, message: antMessage } = App.useApp();
@@ -1316,6 +1326,9 @@ export default function RemoteBrowserPage({
           )}
         >
           <div className={styles.browserColumn} ref={containerRef}>
+            {!session && addressBarExtraEnd ? (
+              <div className={styles.idleModeSwitch}>{addressBarExtraEnd}</div>
+            ) : null}
             {session ? (
               <>
                 {bookmarks.length > 0 && (
@@ -1398,6 +1411,7 @@ export default function RemoteBrowserPage({
                           aria-label={t("remoteBrowser.stop", "关闭浏览器")}
                         />
                       </Tooltip>
+                      {addressBarExtraEnd}
                     </>
                   }
                   overlay={

@@ -8,6 +8,7 @@ import {
 } from "../utils/desktopChrome";
 import {
   getDesktopBridge,
+  isLinuxDesktopShell,
   type WindowsMenuModel,
 } from "../utils/desktopBridge";
 import { chromeSlot } from "../utils/overlayLayers";
@@ -35,6 +36,9 @@ export default function WindowsAppMenu() {
     left: number;
   } | null>(null);
   const showRow = desktopChrome === "windows";
+  // Windows keeps the drag strip for the native caption buttons, but the app
+  // no longer shows File / Edit / View / Help. Linux keeps its menu titles.
+  const hideTitles = showRow && !isLinuxDesktopShell();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -55,7 +59,7 @@ export default function WindowsAppMenu() {
   }, [showRow]);
 
   useEffect(() => {
-    if (!showRow) return;
+    if (!showRow || hideTitles) return;
     const menu = getDesktopBridge()?.windowsMenu;
     if (!menu) return;
     let cancelled = false;
@@ -65,7 +69,7 @@ export default function WindowsAppMenu() {
     return () => {
       cancelled = true;
     };
-  }, [showRow]);
+  }, [hideTitles, showRow]);
 
   useLayoutEffect(() => {
     if (open === null) {
@@ -157,32 +161,35 @@ export default function WindowsAppMenu() {
       className={`${DESKTOP_DRAG_REGION_CLASS} octop-win-menu`}
       role="menubar"
     >
-      {titles.map((label, index) => {
-        const expanded = open === index;
-        return (
-          <div key={label} className="octop-win-menu-slot">
-            <button
-              ref={(node) => {
-                titleRefs.current[index] = node;
-              }}
-              type="button"
-              role="menuitem"
-              aria-haspopup="menu"
-              aria-expanded={expanded}
-              className={
-                expanded ? "octop-win-menu-item is-open" : "octop-win-menu-item"
-              }
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => {
-                if (open !== null) setOpen(index);
-              }}
-              onClick={() => setOpen(expanded ? null : index)}
-            >
-              {label}
-            </button>
-          </div>
-        );
-      })}
+      {!hideTitles &&
+        titles.map((label, index) => {
+          const expanded = open === index;
+          return (
+            <div key={label} className="octop-win-menu-slot">
+              <button
+                ref={(node) => {
+                  titleRefs.current[index] = node;
+                }}
+                type="button"
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={expanded}
+                className={
+                  expanded
+                    ? "octop-win-menu-item is-open"
+                    : "octop-win-menu-item"
+                }
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => {
+                  if (open !== null) setOpen(index);
+                }}
+                onClick={() => setOpen(expanded ? null : index)}
+              >
+                {label}
+              </button>
+            </div>
+          );
+        })}
       {popup}
       <LinuxWindowControls />
     </div>,

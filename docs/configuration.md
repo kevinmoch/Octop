@@ -323,7 +323,7 @@ MCP servers, and the default `main` agent from `config.json`:
   "database": { "driver": "sqlite" },
   "bootstrap": {
     "enabled": true,
-    "admin": { "username": "ccs", "display_name": "基建部", "locale": "zh" },
+    "admin": { "username": "ccs", "display_name": "基小建", "locale": "zh" },
     "provider": {
       "name": "default",
       "type": "openai-compatible",

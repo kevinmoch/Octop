@@ -8,6 +8,7 @@ import type {
   PageAgentTransport,
 } from "@webskill/sdk/browser";
 import { OctopHostBridge, isRecord } from "./bridge";
+import { localBrowserHost } from "./localHost";
 
 export const PAGE_AGENT_PERCEPTION_TIMEOUT_MS = 30_000;
 const PAGE_AGENT_TRANSPORT_TIMEOUT_MS = 35_000;
@@ -84,6 +85,8 @@ export class OctopPageAgentTransport implements PageAgentTransport {
     private readonly actionScope: Record<string, unknown> = {
       include: ["body"],
     },
+    /** Local-browser mode: the tab this request should run in. */
+    private readonly resolveLocalTabId?: () => string | undefined,
   ) {
     this.router = createFrameRouter<string>({
       dispatcher: {
@@ -168,6 +171,24 @@ export class OctopPageAgentTransport implements PageAgentTransport {
         "TOOL_EXECUTION_FAILED",
         "The PageAgent transport is closed",
       );
+
+    // Desktop local-browser mode: route directly to the WebContentsView through
+    // the shell's browserHost bridge instead of the backend WebSocket.
+    const local = localBrowserHost();
+    if (local) {
+      const localTabId = this.resolveLocalTabId?.();
+      if (!localTabId) {
+        throw new WebSkillError(
+          "TOOL_EXECUTION_FAILED",
+          "No local browser tab is bound",
+        );
+      }
+      return (await local.frame.domRequest(
+        localTabId,
+        request,
+      )) as PageAgentReply;
+    }
+
     let grant: string | undefined;
     if (request.type === "execute" && request.request.action === "attach") {
       const selection = await this.bridge.call("attach-files", {});

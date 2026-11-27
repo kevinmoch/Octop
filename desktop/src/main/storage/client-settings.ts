@@ -13,12 +13,17 @@ const DEFAULTS: ClientSettings = {
   closeBehavior: "tray",
   themeBackground: "system",
   stableOnly: true,
+  browserMode: "local",
 };
 
 const SETTING_KEYS = new Set(Object.keys(DEFAULTS));
 
 export class ClientSettingsStore {
-  constructor(private readonly filePath: string) {}
+  private readonly filePath: string;
+
+  constructor(filePath: string) {
+    this.filePath = filePath;
+  }
 
   load(): ClientSettings {
     if (!existsSync(this.filePath)) return { ...DEFAULTS };
@@ -31,6 +36,8 @@ export class ClientSettingsStore {
         // Basic shape validation: only accept known scalar values.
         if (key === "stableOnly" || key === "launchAtLogin") {
           if (typeof value === "boolean") (out as Record<string, unknown>)[key] = value;
+        } else if (key === "browserMode") {
+          if (value === "local" || value === "remote") out.browserMode = value;
         } else if (typeof value === "string") {
           (out as Record<string, unknown>)[key] = value;
         }
@@ -54,6 +61,8 @@ export class ClientSettingsStore {
         sanitized[key] = ["system", "light", "dark"].includes(String(value))
           ? value
           : "system";
+      } else if (key === "browserMode") {
+        sanitized[key] = value === "remote" ? "remote" : "local";
       }
     }
     mkdirSync(dirname(this.filePath), { recursive: true });

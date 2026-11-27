@@ -4,6 +4,10 @@ export interface OctopTimezoneSettings {
   timezone: string;
 }
 
+export interface OctopDesktopBrowserSettings {
+  default_url: string;
+}
+
 export interface OctopUploadSettings {
   max_upload_mb: number;
   max_upload_bytes: number;
@@ -60,6 +64,10 @@ export interface WebauthnSettingsPut {
 
 export const octopSettingsApi = {
   timezone: () => request<OctopTimezoneSettings>("/settings/timezone"),
+  desktopBrowser: () =>
+    request<OctopDesktopBrowserSettings>("/settings/desktop-browser", {
+      cache: "no-store",
+    }),
   upload: () => request<OctopUploadSettings>("/settings/upload"),
   hitl: (agentId?: string | null) =>
     request<OctopHitlSettings>("/settings/hitl", {

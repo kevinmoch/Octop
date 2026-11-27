@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "基建个人智能助理",
-  "author": "基建部",
+  "author": "基小建",
   "license": "MIT",
   "homepage": "https://jijian.huawei.com",
   "main": "./out/main/index.js",
@@ -11,7 +11,7 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "12.15.0",
+      "version": ">=12 <13",
       "onFail": "error"
     }
   },
@@ -24,11 +24,15 @@
     "dev:start": "bash scripts/run-dev.sh --no-build",
     "dev:no-sandbox": "bash scripts/run-dev.sh --no-sandbox",
     "dev:runtime": "bash scripts/make-dev-runtime.sh",
+    "dev:win": "node scripts/run-dev.mjs",
+    "dev:win:runtime": "node scripts/make-dev-runtime.mjs",
     "typecheck": "tsc --noEmit",
-    "build": "electron-vite build",
+    "build": "node node_modules/electron-vite/bin/electron-vite.js build",
+    "build:dashboard": "npm --prefix ../../dashboard run build",
+    "verify:package": "node scripts/verify-package.mjs",
     "test": "node --experimental-strip-types --import ./scripts/register-extensionless-ts.mjs --test \"{main,preload,shared,renderer}/**/*.test.ts\" \"scripts/*.test.mjs\"",
-    "package": "pnpm run build && electron-builder --config electron-builder.config.ts",
-    "package:dir": "pnpm run build && electron-builder --config electron-builder.config.ts --dir"
+    "package": "npm --prefix ../../dashboard run build && node node_modules/electron-vite/bin/electron-vite.js build && node node_modules/electron-builder/cli.js --config electron-builder.config.ts && node scripts/verify-package.mjs",
+    "package:dir": "npm --prefix ../../dashboard run build && node node_modules/electron-vite/bin/electron-vite.js build && node node_modules/electron-builder/cli.js --config electron-builder.config.ts --dir && node scripts/verify-package.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.6.1",
@@ -40,6 +44,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "@webskill/sdk": "0.32.0",
     "electron": "^45.0.0",
     "electron-builder": "^26.18.0",
     "electron-vite": "^3.1.0",

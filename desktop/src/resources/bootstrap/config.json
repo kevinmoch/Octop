@@ -2,11 +2,12 @@
   "database": {
     "driver": "sqlite"
   },
+  "desktop_browser_url": "https://jijian.huawei.com/",
   "bootstrap": {
     "mcpServers": {
       "welink-mcp-server": {
         "transport": "streamable_http",
-        "url": "http://127.0.0.1:8162/mcp"
+        "url": "http://127.0.0.1:8062/mcp"
       }
     }
   }

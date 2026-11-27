@@ -5524,6 +5524,20 @@
       "autopilotDone": "All steps completed"
     }
   },
+  "localBrowser": {
+    "unavailable": "The local browser is only available in the desktop app.",
+    "newTab": "New tab",
+    "closeTab": "Close tab",
+    "back": "Back",
+    "forward": "Forward",
+    "reload": "Reload",
+    "go": "Go",
+    "addressPlaceholder": "Enter an address or search term",
+    "toggleAi": "Toggle the assistant panel",
+    "useRemote": "Remote browser",
+    "useRemoteHint": "Fall back to the server streaming browser",
+    "useLocal": "Local browser"
+  },
   "remoteBrowser": {
     "title": "Browser AI+",
     "description": "View and control the remote server's browser in real-time",
@@ -7664,6 +7678,10 @@
     "browser": {
       "title": "Browser AI+",
       "subtitle": "View and control a remote headless browser, and take over the expert's web session"
+    },
+    "localBrowser": {
+      "title": "Local Browser",
+      "subtitle": "Real local browser tabs the assistant can perceive and operate directly"
     },
     "desktop": {
       "title": "Remote Desktop",

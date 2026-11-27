@@ -23,7 +23,7 @@ from tests.support.harness import patch_harness
 def _bootstrap() -> dict[str, Any]:
     return {
         "enabled": True,
-        "admin": {"username": "ccs", "display_name": "基建部", "locale": "zh"},
+        "admin": {"username": "ccs", "display_name": "基小建", "locale": "zh"},
         "provider": {
             "name": "default",
             "type": "openai-compatible",

@@ -1,4 +1,5 @@
 import { webcrypto } from "node:crypto";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
@@ -22,6 +23,66 @@ function normalizeViteBase(raw: string | undefined): string {
   if (value === "/") return "/";
   const withLeading = value.startsWith("/") ? value : `/${value}`;
   return withLeading.endsWith("/") ? withLeading : `${withLeading}/`;
+}
+
+const MIME_TYPES: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".ico": "image/x-icon",
+  ".wasm": "application/wasm",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".map": "application/json; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+};
+
+/**
+ * Serve the isolated WebSkill host in `pnpm dev`.
+ *
+ * `npm --prefix webskill run build` writes it into the packaged Dashboard tree
+ * (`src/octop/dashboard/webskill`), which the Python server serves in
+ * production. The Vite dev server only knows `dashboard/`, so without this the
+ * AI panel iframe requests `/webskill/` and gets index.html back. Dev-only:
+ * a production build already ships those files next to the Dashboard.
+ */
+function devWebSkillHost(): Plugin {
+  const root = path.resolve(__dirname, "../src/octop/dashboard/webskill");
+  return {
+    name: "octop-dev-webskill-host",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/webskill", (request, response, next) => {
+        const pathname = decodeURIComponent((request.url ?? "/").split("?")[0]);
+        if (pathname.includes("..")) return next();
+        const candidate = path.join(root, pathname);
+        const file =
+          existsSync(candidate) && statSync(candidate).isFile()
+            ? candidate
+            : path.join(root, "index.html");
+        if (!existsSync(file)) {
+          response.statusCode = 503;
+          response.setHeader("content-type", "text/plain; charset=utf-8");
+          response.end(
+            "The WebSkill host is not built. Run `npm --prefix webskill run build`.",
+          );
+          return;
+        }
+        response.setHeader("cache-control", "no-store");
+        response.setHeader(
+          "content-type",
+          MIME_TYPES[path.extname(file).toLowerCase()] ??
+            "application/octet-stream",
+        );
+        createReadStream(file).pipe(response);
+      });
+    },
+  };
 }
 
 export default defineConfig(({ mode }) => {
@@ -150,6 +211,7 @@ export default defineConfig(({ mode }) => {
       MOBILE: false,
     },
     plugins: [
+      devWebSkillHost(),
       monacoSameOrigin(__dirname),
       suppressViteDisconnectReload(),
       react(),
@@ -301,6 +363,20 @@ export default defineConfig(({ mode }) => {
         usePolling: false,
       },
       proxy: {
+        // Browser-agent APIs pin the request Origin to the Octop backend origin
+        // (`check_request_origin`). Behind the Vite dev proxy the browser sends
+        // the Vite origin, so rewrite it for this prefix only — a global rewrite
+        // would change OAuth callback URLs. Must precede the `/api` entry.
+        "/api/browser-agent": {
+          target: `http://127.0.0.1:${apiPort}`,
+          changeOrigin: true,
+          xfwd: true,
+          ws: true,
+          headers: {
+            origin: `http://127.0.0.1:${apiPort}`,
+            "sec-fetch-site": "same-origin",
+          },
+        },
         "/api": {
           target: `http://127.0.0.1:${apiPort}`,
           changeOrigin: true,

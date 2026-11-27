@@ -75,6 +75,23 @@ function defaultGeo(dockW = 400): Geo {
   };
 }
 
+/**
+ * Keep a docked panel inside the window.
+ *
+ * `geo` comes from localStorage and may predate a window resize (or a
+ * different display): a 2990px dock width on a 1280px window leaves no room
+ * for the browser column at all.
+ */
+function clampDock(geo: Geo): Geo {
+  const maxW = Math.max(MIN_DOCK_W, window.innerWidth - MARGIN * 2);
+  const maxH = Math.max(MIN_DOCK_H, window.innerHeight - MARGIN * 2);
+  return {
+    ...geo,
+    dockW: Math.min(Math.max(MIN_DOCK_W, geo.dockW), maxW),
+    dockH: Math.min(Math.max(MIN_DOCK_H, geo.dockH), maxH),
+  };
+}
+
 function loadGeo(
   storageKey: string,
   legacy?: { widthKey?: string; heightKey?: string },
@@ -83,7 +100,8 @@ function loadGeo(
   const fallback = defaultGeo(dockW);
   try {
     const raw = localStorage.getItem(`${storageKey}:geo`);
-    if (raw) return { ...fallback, ...(JSON.parse(raw) as Partial<Geo>) };
+    if (raw)
+      return clampDock({ ...fallback, ...(JSON.parse(raw) as Partial<Geo>) });
     if (legacy?.widthKey) {
       const width = parseInt(localStorage.getItem(legacy.widthKey) || "", 10);
       if (Number.isFinite(width)) fallback.dockW = width;
@@ -95,7 +113,7 @@ function loadGeo(
   } catch {
     /* 坏数据直接用默认尺寸 */
   }
-  return fallback;
+  return clampDock(fallback);
 }
 
 function limits() {
@@ -296,9 +314,11 @@ export default function AssistantFrame({
         return;
       }
       if (placement === "right") {
+        // No ceiling on the docked width: the browser/terminal column may shrink
+        // to whatever the user drags, and the panel itself stays usable.
         const dockW = Math.min(
           Math.max(MIN_DOCK_W, resize.orig.dockW - dx),
-          Math.min(720, window.innerWidth - 160),
+          Math.max(MIN_DOCK_W, window.innerWidth - MARGIN * 2),
         );
         persist({ ...geoRef.current, dockW });
         return;
@@ -326,8 +346,17 @@ export default function AssistantFrame({
   }, [floating, persist, placement]);
 
   useEffect(() => {
-    if (!floating) return undefined;
     const onResize = () => {
+      if (!floating) {
+        const next = clampDock(geoRef.current);
+        if (
+          next.dockW !== geoRef.current.dockW ||
+          next.dockH !== geoRef.current.dockH
+        ) {
+          persist(next);
+        }
+        return;
+      }
       const cap = limits();
       const w = Math.min(geoRef.current.w, cap.w);
       const h = Math.min(geoRef.current.h, cap.h);
@@ -338,6 +367,7 @@ export default function AssistantFrame({
         ...clamp(geoRef.current.x, geoRef.current.y, w, h),
       });
     };
+    onResize();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [floating, persist]);

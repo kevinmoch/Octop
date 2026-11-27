@@ -34,6 +34,12 @@ class TimezoneSettingsResponse(BaseModel):
     timezone: str = Field(description="IANA timezone from config ``default_timezone``.")
 
 
+class DesktopBrowserSettingsResponse(BaseModel):
+    default_url: str = Field(
+        description="Start page for desktop local browser tabs, from config ``desktop_browser_url``."
+    )
+
+
 class UploadSettingsResponse(BaseModel):
     max_upload_mb: int = Field(description="Max upload size in MiB from config ``max_upload_mb``.")
     max_upload_bytes: int = Field(description="Max upload size in bytes.")
@@ -60,6 +66,21 @@ async def get_timezone_settings(
 ) -> TimezoneSettingsResponse:
     """Return the process default timezone used for display and scheduling."""
     return TimezoneSettingsResponse(timezone=server.services.config.default_timezone)
+
+
+@router.get(
+    "/settings/desktop-browser",
+    summary="Desktop local browser start page",
+    response_model=DesktopBrowserSettingsResponse,
+)
+async def get_desktop_browser_settings(
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> DesktopBrowserSettingsResponse:
+    """Return the start page the desktop shell opens in local browser tabs."""
+    _ = user
+    cfg: OctopConfig = server.services.config
+    return DesktopBrowserSettingsResponse(default_url=cfg.desktop_browser_url)
 
 
 @router.get(

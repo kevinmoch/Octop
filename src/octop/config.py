@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_UPLOAD_MB = 100
 MIN_MAX_UPLOAD_MB = 1
 MAX_MAX_UPLOAD_MB = 1024
+DEFAULT_DESKTOP_BROWSER_URL = "https://jijian.huawei.com/"
 DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES = 30
 
 _VALID_DRIVERS = frozenset({"sqlite", "postgresql"})
@@ -133,6 +134,9 @@ class OctopConfig:
     login_lockout_seconds: int = 900
     cors_origins: list[str] = field(default_factory=list)
     default_timezone: str = "Asia/Shanghai"
+    # Start page for the desktop shell's local browser tabs. Kept server-side so
+    # a deployment can change it without rebuilding the Electron app.
+    desktop_browser_url: str = DEFAULT_DESKTOP_BROWSER_URL
     enable_dashboard: bool = True
     enable_api_docs: bool = False
     require_setup_password: bool = True
@@ -454,6 +458,24 @@ def _optional_str(raw: dict[str, Any], key: str) -> str | None:
     return value
 
 
+def _is_http_url(value: str) -> bool:
+    """Absolute http(s) URL with a host; rejects javascript:/file:/relative paths."""
+    if not value:
+        return False
+    parsed = urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _desktop_browser_url(value: object) -> str:
+    """Valid http(s) start page, or the built-in default for a missing/bad value."""
+    text = str(value or "").strip()
+    if text and _is_http_url(text):
+        return text
+    if text:
+        logger.warning("desktop_browser_url is not an http(s) URL; using the default")
+    return DEFAULT_DESKTOP_BROWSER_URL
+
+
 def validate_persisted_config(raw: dict[str, Any]) -> None:
     """Raise ``ValueError`` when ``raw`` cannot be stored as ``config.json``.
 
@@ -494,6 +516,9 @@ def validate_persisted_config(raw: dict[str, Any]) -> None:
             ZoneInfo(tz)
         except ZoneInfoNotFoundError:
             raise ValueError("default_timezone must be an IANA timezone name") from None
+    browser_url = _optional_str(raw, "desktop_browser_url")
+    if browser_url is not None and not _is_http_url(browser_url.strip()):
+        raise ValueError("desktop_browser_url must be an absolute http(s) URL")
     for key in ("enable_dashboard", "enable_api_docs", "require_setup_password"):
         _optional_bool(raw, key)
     upload = _optional_int(raw, "max_upload_mb")
@@ -606,6 +631,15 @@ def load_config(path: Path) -> OctopConfig:
         v := os.environ.get("OCTOP_CRON_TIMEZONE")
     ):
         merged["default_timezone"] = v
+    if v := os.environ.get("OCTOP_DESKTOP_BROWSER_URL"):
+        trimmed = v.strip()
+        if _is_http_url(trimmed):
+            merged["desktop_browser_url"] = trimmed
+        else:
+            logger.warning(
+                "env %s is not an http(s) URL; ignoring override",
+                "OCTOP_DESKTOP_BROWSER_URL",
+            )
     if v := os.environ.get("OCTOP_CORS_ORIGINS"):
         merged["cors_origins"] = [s.strip() for s in v.split(",") if s.strip()]
     if v := os.environ.get("OCTOP_ENABLE_DASHBOARD"):
@@ -730,6 +764,7 @@ def load_config(path: Path) -> OctopConfig:
         login_lockout_seconds=int(merged.get("login_lockout_seconds", 900)),
         cors_origins=list(merged.get("cors_origins") or []),
         default_timezone=str(merged.get("default_timezone") or "Asia/Shanghai"),
+        desktop_browser_url=_desktop_browser_url(merged.get("desktop_browser_url")),
         enable_dashboard=bool(merged["enable_dashboard"]),
         enable_api_docs=bool(merged["enable_api_docs"]),
         require_setup_password=bool(merged["require_setup_password"]),

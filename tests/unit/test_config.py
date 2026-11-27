@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from octop.config import load_config, parse_database_config
+from octop.config import (
+    DEFAULT_DESKTOP_BROWSER_URL,
+    load_config,
+    parse_database_config,
+)
 
 
 def test_defaults_when_missing(tmp_path: Path):
@@ -430,3 +434,52 @@ def test_non_object_config_raises(tmp_path: Path):
     with pytest.raises(ValueError, match="JSON object"):
         load_config(cfg_path)
     assert cfg_path.read_text(encoding="utf-8") == "[1, 2]"
+
+
+def test_desktop_browser_url_defaults_to_builtin_default(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    cfg = load_config(cfg_path)
+    assert cfg.desktop_browser_url == DEFAULT_DESKTOP_BROWSER_URL
+    written = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert written["desktop_browser_url"] == DEFAULT_DESKTOP_BROWSER_URL
+
+
+def test_desktop_browser_url_from_file(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps({"desktop_browser_url": "https://intranet.example/start"}),
+        encoding="utf-8",
+    )
+    assert load_config(cfg_path).desktop_browser_url == "https://intranet.example/start"
+
+
+def test_desktop_browser_url_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OCTOP_DESKTOP_BROWSER_URL", "https://env.example/home")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps({"desktop_browser_url": "https://file.example/start"}),
+        encoding="utf-8",
+    )
+    assert load_config(cfg_path).desktop_browser_url == "https://env.example/home"
+
+
+def test_desktop_browser_url_rejects_non_http(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps({"desktop_browser_url": "javascript:alert(1)"}),
+        encoding="utf-8",
+    )
+    # A bad value in the file falls back instead of breaking startup.
+    assert load_config(cfg_path).desktop_browser_url == DEFAULT_DESKTOP_BROWSER_URL
+
+
+def test_desktop_browser_url_invalid_env_keeps_file_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("OCTOP_DESKTOP_BROWSER_URL", "not-a-url")
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(
+        json.dumps({"desktop_browser_url": "https://file.example/start"}),
+        encoding="utf-8",
+    )
+    assert load_config(cfg_path).desktop_browser_url == "https://file.example/start"

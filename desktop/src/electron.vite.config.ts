@@ -39,7 +39,7 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ["@webskill/sdk"] })],
     build: {
       rollupOptions: {
         input: {
@@ -47,6 +47,8 @@ export default defineConfig({
           // Separate, much smaller bridge for the shell's own pages (splash +
           // fatal error). They must not be handed the Dashboard's API.
           early: resolve(__dirname, "preload/early.ts"),
+          // Injected into every local browser tab (WebContentsView).
+          "browser-tab": resolve(__dirname, "preload/browser-tab.ts"),
         },
       },
     },

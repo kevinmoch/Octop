@@ -130,6 +130,41 @@ const bridge = {
       return ipcRenderer.invoke(IPC_CHANNELS.sessionRevoke, accessToken);
     },
   },
+  browserHost: {
+    tabs: {
+      list: () => ipcRenderer.invoke(IPC_CHANNELS.browserTabsList),
+      create: (options: { url: string; active?: boolean }) =>
+        ipcRenderer.invoke(IPC_CHANNELS.browserTabsCreate, options),
+      close: (tabId: string) => ipcRenderer.invoke(IPC_CHANNELS.browserTabsClose, tabId),
+      activate: (tabId: string) => ipcRenderer.invoke(IPC_CHANNELS.browserTabsActivate, tabId),
+      navigate: (tabId: string, url: string) =>
+        ipcRenderer.invoke(IPC_CHANNELS.browserTabsNavigate, { tabId, url }),
+      goBack: (tabId: string) => ipcRenderer.invoke(IPC_CHANNELS.browserTabsGoBack, tabId),
+      goForward: (tabId: string) => ipcRenderer.invoke(IPC_CHANNELS.browserTabsGoForward, tabId),
+      reload: (tabId: string) => ipcRenderer.invoke(IPC_CHANNELS.browserTabsReload, tabId),
+      setViewportBounds: (
+        tabId: string,
+        bounds: { x: number; y: number; width: number; height: number },
+      ) => ipcRenderer.send(IPC_CHANNELS.browserTabsSetBounds, { tabId, bounds }),
+      setVisible: (visible: boolean) =>
+        ipcRenderer.send(IPC_CHANNELS.browserTabsSetVisible, visible),
+      onChanged: (callback: () => void) => subscribe(IPC_CHANNELS.browserTabsChanged, callback),
+      onEvent: (callback: (event: unknown) => void) => subscribe(IPC_CHANNELS.browserTabsEvent, callback),
+    },
+    frame: {
+      domRequest: (tabId: string, request: unknown) =>
+        ipcRenderer.invoke(IPC_CHANNELS.browserFrameDom, { tabId, request }),
+      fetchInTab: (tabId: string, url: string, init?: unknown) =>
+        ipcRenderer.invoke(IPC_CHANNELS.browserFrameFetch, { tabId, url, init }),
+    },
+    downloads: {
+      list: () => ipcRenderer.invoke(IPC_CHANNELS.browserDownloadsList),
+      read: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.browserDownloadsRead, id),
+      openWindow: () => ipcRenderer.invoke(IPC_CHANNELS.browserDownloadsOpen),
+      settleWindow: (token: string, timeoutMs: number) =>
+        ipcRenderer.invoke(IPC_CHANNELS.browserDownloadsSettle, { token, timeoutMs }),
+    },
+  },
 } as const;
 
 export type OctopDesktopBridge = typeof bridge;

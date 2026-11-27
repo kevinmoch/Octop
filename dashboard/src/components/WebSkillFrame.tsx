@@ -81,6 +81,7 @@ export default function WebSkillFrame({
   onPlacementChange,
   onSessionExpired,
   onClose,
+  localTabId,
 }: {
   sessionId: string | null;
   userId: number;
@@ -93,12 +94,15 @@ export default function WebSkillFrame({
   onPlacementChange: (placement: AssistantPlacement) => void;
   onSessionExpired: (expectedSessionId: string) => Promise<void>;
   onClose: () => void;
+  /** Desktop local-browser tab id; forwarded to the WebSkill transport. */
+  localTabId?: string;
 }) {
   const { t, i18n } = useTranslation();
   const { mode } = useTheme();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [frameLoaded, setFrameLoaded] = useState(false);
+  const [frameSettled, setFrameSettled] = useState(false);
   const [downloadFailure, setDownloadFailure] = useState<{
     name: string;
     reason: string;
@@ -205,7 +209,14 @@ export default function WebSkillFrame({
         return;
       }
       if (message.type === "ready" && sessionId) {
-        send({ type: "init", sessionId, userId, locale, theme: mode });
+        send({
+          type: "init",
+          sessionId,
+          userId,
+          locale,
+          theme: mode,
+          localTabId,
+        });
         setReady(true);
         return;
       }
@@ -534,9 +545,11 @@ export default function WebSkillFrame({
   }, [
     browserProfile,
     locale,
+    localTabId,
     mode,
     onSessionExpired,
     pickAttachFiles,
+    requestAgentControl,
     send,
     sessionId,
     userId,
@@ -546,6 +559,53 @@ export default function WebSkillFrame({
     if (!ready) return;
     send({ type: "appearance", locale, theme: mode });
   }, [locale, mode, ready, send]);
+
+  // A new session means a new iframe document: re-arm the loading cover.
+  useEffect(() => {
+    setFrameLoaded(false);
+    setReady(false);
+    setFrameSettled(false);
+  }, [sessionId]);
+
+  // Keep the theme-colored cover for a beat after `ready`: the WebSkill app
+  // signals ready before the browser composites its first themed frame, so
+  // removing the cover immediately leaves a white panel (visible as a flash
+  // when switching local <-> remote).
+  useEffect(() => {
+    if (!frameLoaded || !ready) return undefined;
+    const timer = window.setTimeout(() => setFrameSettled(true), 250);
+    return () => window.clearTimeout(timer);
+  }, [frameLoaded, ready]);
+
+  // Paint the iframe document with the shell background while it is loading;
+  // until the WebSkill CSS applies, the default document background is white.
+  // Once settled, clear the inline color so the app's own theme wins.
+  useEffect(() => {
+    const doc = frameRef.current?.contentDocument;
+    if (!doc) return;
+    const background = mode === "dark" ? "#141414" : "#ffffff";
+    try {
+      doc.documentElement.style.backgroundColor = frameSettled
+        ? ""
+        : background;
+      if (doc.body) {
+        doc.body.style.backgroundColor = frameSettled ? "" : background;
+      }
+    } catch {
+      /* cross-origin: the iframe is same-origin by design, ignore races */
+    }
+  }, [frameLoaded, frameSettled, mode]);
+
+  // The iframe outlives tab switches; tell it which local tab is on screen so
+  // page-agent traffic follows the user instead of the first tab it saw.
+  useEffect(() => {
+    if (!ready) return;
+    send({ type: "local-tab", tabId: localTabId ?? null });
+  }, [ready, localTabId, send]);
+
+  // Cover while the iframe document is still white, and for a short settle
+  // window after `ready` (see the effect above).
+  const covering = !sessionId || !ready || !frameLoaded || !frameSettled;
 
   if (!secure) {
     return (
@@ -601,24 +661,26 @@ export default function WebSkillFrame({
               description={downloadFailureReason(downloadFailure.reason)}
             />
           ) : null}
-          {(!sessionId || !ready) && (
+          {covering && (
             <div
               style={{
                 position: "absolute",
                 inset: 0,
-                zIndex: 1,
+                zIndex: 3,
                 display: "grid",
                 placeItems: "center",
-                background: "var(--fn-bg-primary)",
+                background: "var(--fn-bg-primary, #141414)",
               }}
             >
-              <Spin
-                tip={
-                  sessionId
-                    ? t("webskill.loading")
-                    : t("webskill.startRequired")
-                }
-              />
+              {(!sessionId || !ready) && (
+                <Spin
+                  tip={
+                    sessionId
+                      ? t("webskill.loading")
+                      : t("webskill.startRequired")
+                  }
+                />
+              )}
             </div>
           )}
           {sessionId && browserActive && (

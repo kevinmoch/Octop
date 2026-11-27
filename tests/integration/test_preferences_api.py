@@ -17,7 +17,7 @@ async def test_preferences_bookmarks_roundtrip(env) -> None:
     assert body["remote_browser_bookmarks"] == []
 
     bookmarks = [
-        {"url": "https://cloud.tencent.com", "title": "Tencent Cloud"},
+        {"url": "https://jijian.huawei.com", "title": "Tencent Cloud"},
         {"url": "example.com", "title": "Example"},
     ]
     r = await client.patch(
@@ -28,7 +28,7 @@ async def test_preferences_bookmarks_roundtrip(env) -> None:
     assert r.status_code == 200
     saved = r.json()["remote_browser_bookmarks"]
     assert len(saved) == 2
-    assert saved[0]["url"] == "https://cloud.tencent.com"
+    assert saved[0]["url"] == "https://jijian.huawei.com"
     assert saved[1]["url"] == "https://example.com"
 
     r = await client.get("/api/preferences", headers=auth)

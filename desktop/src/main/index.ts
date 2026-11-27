@@ -8,89 +8,93 @@ import {
   net,
   protocol,
   screen,
+  session,
   shell,
   Tray,
+  WebContentsView,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
   type NativeImage,
-  type WebContents,
-} from "electron";
-import { execFileSync, spawn } from "node:child_process";
-import { constants as fsConstants, existsSync, promises as fs } from "node:fs";
-import { type as osType, release as osRelease } from "node:os";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+  type WebContents
+} from 'electron';
+import { execFileSync, spawn } from 'node:child_process';
+import { constants as fsConstants, existsSync, promises as fs } from 'node:fs';
+import { type as osType, release as osRelease } from 'node:os';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   IPC_CHANNELS,
   type ClientSettings,
   type IssuedSession,
   type PlatformInfo,
-  type UpdateCheckResult,
-} from "../shared/ipc-contract";
-import { resolveAppVersion } from "./app-version";
-import { desktopLog, installDesktopLog } from "./log/desktop-log";
-import { DeviceCredentialStore } from "./session/device-credential";
-import { DeviceSessionClient } from "./session/device-session";
-import { safeStorageCipher, warnIfKeychainUnavailable } from "./session/safe-storage-cipher";
-import { ClientSettingsStore, defaultClientSettingsPath } from "./storage/client-settings";
-import { seedBootstrapConfig } from "./supervisor/bootstrap-config";
-import { readLoginShellEnv, resolveOctopHome } from "./supervisor/shell-env";
-import { reserveRandomPort } from "./supervisor/random-port";
+  type UpdateCheckResult
+} from '../shared/ipc-contract';
+import { resolveAppVersion } from './app-version';
+import { desktopLog, installDesktopLog } from './log/desktop-log';
+import { DeviceCredentialStore } from './session/device-credential';
+import { DeviceSessionClient } from './session/device-session';
+import { safeStorageCipher, warnIfKeychainUnavailable } from './session/safe-storage-cipher';
+import { ClientSettingsStore, defaultClientSettingsPath } from './storage/client-settings';
+import { seedBootstrapConfig } from './supervisor/bootstrap-config';
+import { seedBundledExpert } from './supervisor/seed-bundled-expert';
+import { readLoginShellEnv, resolveOctopHome } from './supervisor/shell-env';
+import { reserveRandomPort } from './supervisor/random-port';
 import {
-  bundledDashboardDir,
   classifyRuntime,
   portableZipName,
   extractPortableZip,
   installedRuntimeDir,
+  resolveDashboardDir,
   type BundledPortable,
-  type LocalRuntime,
-} from "./supervisor/runtime-extractor";
-import { compareVersions } from "./supervisor/version";
-import { sha256File } from "./supervisor/sha256";
-import { buildSidecarEnv } from "./supervisor/process-tree";
-import { SidecarSupervisor } from "./supervisor/sidecar";
-import { contentTypeFor, isExternalLink, resolveDashboardFile, resolveStaticPath } from "./protocol/static-handler";
-import { isApiPath, sanitizeForwardHeaders, toBackendUrl } from "./protocol/stream-proxy";
-import { WsRelay } from "./protocol/ws-relay";
+  type LocalRuntime
+} from './supervisor/runtime-extractor';
+import { compareVersions } from './supervisor/version';
+import { sha256File } from './supervisor/sha256';
+import { buildSidecarEnv } from './supervisor/process-tree';
+import { SidecarSupervisor } from './supervisor/sidecar';
+import { contentTypeFor, isExternalLink, resolveDashboardFile, resolveStaticPath } from './protocol/static-handler';
+import { isApiPath, sanitizeForwardHeaders, toBackendUrl } from './protocol/stream-proxy';
+import { WsRelay } from './protocol/ws-relay';
+import { BrowserTabManager, scaleBoundsForZoom } from './browser/tabs';
+import { FrameBridge } from './browser/frame-bridge';
+import { DownloadTracker } from './browser/downloads';
+import { readPickedFiles } from './browser/picked-files';
 import {
   channelHeadTag,
   manifestFromDownloadsResponse,
   platformAssetKey,
   selectRelease,
   type DownloadManifest,
-  type SelectedRelease,
-} from "./update/update-coordinator";
-import { downloadToFile } from "./update/download";
-import { installUpdate, type InstallOutcome, type InstallerKind } from "./update/installer";
+  type SelectedRelease
+} from './update/update-coordinator';
+import { downloadToFile } from './update/download';
+import { installUpdate, type InstallOutcome, type InstallerKind } from './update/installer';
 import {
   dashboardDevOrigin,
   readDashboardDev,
   startDashboardDevServer,
-  stopDashboardDevServer,
-} from "./dev/dashboard-dev-server";
-import {
-  formatAboutDetail,
-  formatAboutOs,
-  resolveGitStamp,
-  windowsInstallScope,
-} from "./windows/about-info";
+  stopDashboardDevServer
+} from './dev/dashboard-dev-server';
+import { formatAboutDetail, formatAboutOs, resolveGitStamp, windowsInstallScope } from './windows/about-info';
 import {
   windowsApplicationMenu,
   windowsMenuCommandId,
   windowsMenuModel,
-  type WindowsMenuCommandId,
-} from "./windows/app-menu";
-import { createEarlyWindow } from "./windows/early-window";
-import { createMainWindow, installDashboardGuards } from "./windows/main-window";
-import type { EarlyWindow } from "./windows/early-window";
-import { isWindowOnScreen, presentWindows, shouldKeepWindowOnClose } from "./windows/present";
+  type WindowsMenuCommandId
+} from './windows/app-menu';
+import { createEarlyWindow } from './windows/early-window';
+import { createMainWindow, installDashboardGuards } from './windows/main-window';
+import type { EarlyWindow } from './windows/early-window';
+import { isWindowOnScreen, presentWindows, shouldKeepWindowOnClose } from './windows/present';
 import {
   shouldInstallSystemTray,
   trayExecutableFallback,
   trayIconCandidates,
   trayIconImagePath,
   trayMenuLabels,
-  WINDOWS_APP_USER_MODEL_ID,
-} from "./windows/tray";
+  WINDOWS_APP_USER_MODEL_ID
+} from './windows/tray';
 import {
   applyNativeTheme,
   applyWindowChromeTheme,
@@ -99,16 +103,19 @@ import {
   parseWindowChromeTheme,
   resolveWindowChromeTheme,
   usesCaptionOverlay,
-  windowBackground,
-} from "./windows/chrome";
+  windowBackground
+} from './windows/chrome';
 
-const UPDATE_ENDPOINT = "https://jijian.huawei.com/api/downloads";
+const UPDATE_ENDPOINT = 'https://jijian.huawei.com/api/downloads';
 // Packaged renderer origin. Local dev replaces this with the Vite origin before
 // the relay starts, and the relay accepts upgrades only from that origin (§5.2).
-const WINDOW_ORIGIN = "octop://app";
-const PRELOAD_PATH = join(__dirname, "../preload/index.js");
-const SPLASH_PATH = join(__dirname, "../renderer/splash.html");
-const ERROR_PATH = join(__dirname, "../renderer/error.html");
+const WINDOW_ORIGIN = 'octop://app';
+const PRELOAD_PATH = join(__dirname, '../preload/index.js');
+const BROWSER_TAB_PRELOAD_PATH = join(__dirname, '../preload/browser-tab.js');
+const SPLASH_PATH = join(__dirname, '../renderer/splash.html');
+const ERROR_PATH = join(__dirname, '../renderer/error.html');
+const DEFAULT_BROWSER_URL = 'https://jijian.huawei.com';
+const MAX_BROWSER_TABS = 8;
 
 interface PortableManifestFile {
   version: string;
@@ -121,14 +128,14 @@ let settingsStore: ClientSettingsStore;
 // the renderer once it holds a JWT; used whenever that JWT has expired.
 let deviceSession: DeviceSessionClient | null = null;
 // Resolved after `whenReady` — `app.getVersion()` must not run at module load.
-let appVersion = "";
+let appVersion = '';
 // §6.3 step 1: once an install is under way the proxy answers 503 so no new API
 // request is admitted while Python shuts down.
 let apiAdmissionClosed = false;
 let updateInFlight = false;
 let quitting = false;
 // Default matches ClientSettingsStore. Boot and the settings IPC keep it current.
-let closeBehavior: "quit" | "tray" = "tray";
+let closeBehavior: 'quit' | 'tray' = 'tray';
 // Windows notification area. Null until the icon is actually on screen.
 let tray: Tray | null = null;
 // Kept for the life of the tray. A resized bitmap is dropped from the
@@ -141,6 +148,13 @@ let dashboardOrigin: string | null = null;
 let backendPort = 0;
 // §5.2: WebSockets cannot ride the custom scheme, so the page dials this relay.
 let wsRelay: WsRelay | null = null;
+// Local browser tabs for the desktop shell. Created once the Dashboard window exists.
+let browserTabs: BrowserTabManager<WebContentsView> | null = null;
+let frameBridge: FrameBridge | null = null;
+// The window allowed to drive the local browser. Tab views must never reach it.
+let browserHostWindow: BrowserWindow | null = null;
+// Downloads started by local tabs (`will-download`), read by the WebSkill panel.
+let downloadTracker: DownloadTracker | null = null;
 // Everything needed to (re)spawn the sidecar for this launch.
 let backend: {
   interpreter: string;
@@ -150,62 +164,84 @@ let backend: {
   portableDir: string;
 } | null = null;
 
+/**
+ * Emergency rollback for the local browser: force `remote` (streaming viewer)
+ * without editing settings, e.g. when a release breaks the local tabs.
+ */
+const BROWSER_MODE_ENV = 'OCTOP_DESKTOP_BROWSER_MODE';
+
+function withBrowserModeOverride(settings: ClientSettings): ClientSettings {
+  const forced = (process.env[BROWSER_MODE_ENV] ?? '').trim().toLowerCase();
+  if (forced === 'local' || forced === 'remote') {
+    return { ...settings, browserMode: forced };
+  }
+  return settings;
+}
+
 // A custom scheme used as the renderer origin must be declared privileged
 // BEFORE the app is ready, otherwise `octop://app/` is not treated as a
 // standard/secure origin and fetch/XHR/CORS break.
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: "octop",
+    scheme: 'octop',
     privileges: {
       standard: true,
       secure: true,
       supportFetchAPI: true,
       stream: true,
-      corsEnabled: true,
-    },
-  },
+      corsEnabled: true
+    }
+  }
 ]);
 
 function resourcesRoot(): string {
-  return app.isPackaged ? process.resourcesPath : join(__dirname, "../../resources");
+  return app.isPackaged ? process.resourcesPath : join(__dirname, '../../resources');
 }
 
 function dashboardRoot(portableDir: string): string {
-  const override = (process.env.OCTOP_DASHBOARD_DIR ?? "").trim();
-  if (override) return override;
-  return bundledDashboardDir(portableDir);
+  return resolveDashboardDir({
+    override: process.env.OCTOP_DASHBOARD_DIR,
+    resourcesRoot: resourcesRoot(),
+    portableDir,
+    exists: existsSync
+  });
 }
 
 /** Map to the green-pack naming used by desktop/portable (`darwin-arm64`, …). */
 function portablePlatformTag(): string {
-  const arch = process.arch === "arm64" ? "arm64" : "amd64";
-  if (process.platform === "darwin") return `darwin-${arch}`;
-  if (process.platform === "win32") return `windows-${arch}`;
+  const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+  if (process.platform === 'darwin') return `darwin-${arch}`;
+  if (process.platform === 'win32') return `windows-${arch}`;
   return `linux-${arch}`;
 }
 
 function portableZipPath(): string {
   // CI places one zip at resources/portable.
-  return join(resourcesRoot(), "portable", portableZipName(portablePlatformTag(), appVersion));
+  return join(resourcesRoot(), 'portable', portableZipName(portablePlatformTag(), appVersion));
 }
 
 async function readBundledPortable(): Promise<BundledPortable> {
   const manifest = JSON.parse(
-    await fs.readFile(join(resourcesRoot(), "portable", "portable-version.json"), "utf8"),
+    await fs.readFile(join(resourcesRoot(), 'portable', 'portable-version.json'), 'utf8')
   ) as PortableManifestFile;
   return { version: manifest.version, sha256: manifest.sha256 };
 }
 
 async function readLocalRuntime(octopHome: string): Promise<LocalRuntime> {
-  const versionPath = join(octopHome, "portable", "version.json");
+  const versionPath = join(octopHome, 'portable', 'version.json');
   let version: string | null = null;
   try {
-    const raw = JSON.parse(await fs.readFile(versionPath, "utf8")) as { version?: unknown };
-    version = typeof raw.version === "string" ? raw.version : null;
+    const raw = JSON.parse(await fs.readFile(versionPath, 'utf8')) as { version?: unknown };
+    version = typeof raw.version === 'string' ? raw.version : null;
   } catch {
     version = null;
   }
-  const interpreterPath = join(octopHome, "portable", "runtime", process.platform === "win32" ? "python.exe" : "bin/python3");
+  const interpreterPath = join(
+    octopHome,
+    'portable',
+    'runtime',
+    process.platform === 'win32' ? 'python.exe' : 'bin/python3'
+  );
   let interpreterExists = false;
   try {
     // X_OK, not F_OK. A previous extract could leave `python3` as a mode-0666
@@ -230,56 +266,53 @@ async function resolveProductVersion(): Promise<string> {
   return resolveAppVersion({
     readBundled: async () => (await readBundledPortable()).version,
     readDevRuntime: async () => {
-      const dir = (process.env.OCTOP_PORTABLE_DIR ?? "").trim();
+      const dir = (process.env.OCTOP_PORTABLE_DIR ?? '').trim();
       if (!dir) return null;
-      const raw = JSON.parse(await fs.readFile(join(dir, "version.json"), "utf8")) as {
+      const raw = JSON.parse(await fs.readFile(join(dir, 'version.json'), 'utf8')) as {
         version?: unknown;
       };
-      return typeof raw.version === "string" ? raw.version : null;
+      return typeof raw.version === 'string' ? raw.version : null;
     },
-    readPackage: () => app.getVersion(),
+    readPackage: () => app.getVersion()
   });
 }
 
 async function writeLocalVersion(octopHome: string, version: string): Promise<void> {
-  const dir = join(octopHome, "portable");
+  const dir = join(octopHome, 'portable');
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(join(dir, "version.json"), JSON.stringify({ version, sha256: "" }, null, 2), "utf8");
+  await fs.writeFile(join(dir, 'version.json'), JSON.stringify({ version, sha256: '' }, null, 2), 'utf8');
 }
 
 function registerProtocol(staticRootDir: string): void {
-  protocol.handle("octop", async (request) => {
+  protocol.handle('octop', async (request) => {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
     if (isApiPath(pathname)) {
-      if (apiAdmissionClosed) return new Response("update in progress", { status: 503 });
+      if (apiAdmissionClosed) return new Response('update in progress', { status: 503 });
       const target = toBackendUrl(backendPort, pathname, url.search);
-      const headers = sanitizeForwardHeaders(
-        request.headers,
-        `http://127.0.0.1:${backendPort}`,
-      );
-      headers["x-octop-proxy"] = "1";
+      const headers = sanitizeForwardHeaders(request.headers, `http://127.0.0.1:${backendPort}`);
+      headers['x-octop-proxy'] = '1';
       return net.fetch(target, {
         method: request.method,
         headers,
-        body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+        body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
         // @ts-expect-error duplex is required for streaming request bodies in undici
-        duplex: "half",
+        duplex: 'half'
       });
     }
 
     // Escape stays forbidden. A client route with no file falls back to
     // index.html; otherwise View → Reload of /chat returns an empty page.
     if (!resolveStaticPath(staticRootDir, pathname)) {
-      return new Response("forbidden", { status: 403 });
+      return new Response('forbidden', { status: 403 });
     }
     const filePath = resolveDashboardFile(staticRootDir, pathname, existsSync);
-    if (!filePath) return new Response("not found", { status: 404 });
+    if (!filePath) return new Response('not found', { status: 404 });
     // Serve via file URL so large assets stream instead of buffering in memory.
     return net.fetch(pathToFileURL(filePath).toString()).then((res) => {
       const out = new Response(res.body, { status: res.status, headers: res.headers });
-      if (!out.headers.get("content-type")) out.headers.set("content-type", contentTypeFor(filePath));
+      if (!out.headers.get('content-type')) out.headers.set('content-type', contentTypeFor(filePath));
       return out;
     });
   });
@@ -287,22 +320,17 @@ function registerProtocol(staticRootDir: string): void {
 
 async function fetchUpdateManifest(): Promise<{ manifest: DownloadManifest; stableOnly: boolean }> {
   const settings = settingsStore.load();
-  const res = await net.fetch(UPDATE_ENDPOINT, { cache: "no-store" });
+  const res = await net.fetch(UPDATE_ENDPOINT, { cache: 'no-store' });
   if (!res.ok) throw new Error(`downloads endpoint returned ${res.status}`);
   return {
     manifest: manifestFromDownloadsResponse(await res.json()),
-    stableOnly: settings.stableOnly,
+    stableOnly: settings.stableOnly
   };
 }
 
 async function resolveSelectedRelease(): Promise<SelectedRelease | null> {
   const { manifest, stableOnly } = await fetchUpdateManifest();
-  return selectRelease(
-    manifest,
-    appVersion,
-    platformAssetKey(process.platform, process.arch),
-    stableOnly,
-  );
+  return selectRelease(manifest, appVersion, platformAssetKey(process.platform, process.arch), stableOnly);
 }
 
 function errorMessageOf(err: unknown): string {
@@ -311,30 +339,22 @@ function errorMessageOf(err: unknown): string {
 
 /** A JWT the shell will forward: non-empty, bounded, nothing else assumed. */
 function isUsableAccessToken(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 4096;
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096;
 }
 
-async function showShellMessage(
-  win: BrowserWindow | null,
-  message: string,
-  detail: string,
-): Promise<void> {
-  const options = { type: "info" as const, buttons: ["好"], message, detail, noLink: true };
+async function showShellMessage(win: BrowserWindow | null, message: string, detail: string): Promise<void> {
+  const options = { type: 'info' as const, buttons: ['好'], message, detail, noLink: true };
   if (win) await dialog.showMessageBox(win, options);
   else await dialog.showMessageBox(options);
 }
 
-async function showShellError(
-  win: BrowserWindow | null,
-  message: string,
-  detail: string,
-): Promise<void> {
+async function showShellError(win: BrowserWindow | null, message: string, detail: string): Promise<void> {
   const options = {
-    type: "error" as const,
-    buttons: ["好"],
+    type: 'error' as const,
+    buttons: ['好'],
     message,
     detail,
-    noLink: true,
+    noLink: true
   };
   if (win) await dialog.showMessageBox(win, options);
   else await dialog.showMessageBox(options);
@@ -342,15 +362,15 @@ async function showShellError(
 
 /** Temp staging area for installers — never inside OCTOP_HOME (user data). */
 function updateDownloadDir(): string {
-  return join(app.getPath("temp"), "octop-update");
+  return join(app.getPath('temp'), 'octop-update');
 }
 
 async function handOffToInstaller(kind: InstallerKind, path: string): Promise<void> {
-  if (kind === "appimage") await fs.chmod(path, 0o755);
-  if (process.platform === "win32" && (kind === "exe" || kind === "msi")) {
+  if (kind === 'appimage') await fs.chmod(path, 0o755);
+  if (process.platform === 'win32' && (kind === 'exe' || kind === 'msi')) {
     // NSIS/MSI must replace the running shell: start the installer detached and
     // let this process exit right after (§6.3 step 3).
-    spawn(path, [], { detached: true, stdio: "ignore" }).unref();
+    spawn(path, [], { detached: true, stdio: 'ignore' }).unref();
     return;
   }
   const failure = await shell.openPath(path);
@@ -364,10 +384,7 @@ async function restartBackend(win: BrowserWindow | null): Promise<void> {
   if (ready) win?.webContents.reload();
 }
 
-async function runShellUpdate(
-  win: BrowserWindow | null,
-  selected: SelectedRelease,
-): Promise<InstallOutcome> {
+async function runShellUpdate(win: BrowserWindow | null, selected: SelectedRelease): Promise<InstallOutcome> {
   updateInFlight = true;
   try {
     const dir = updateDownloadDir();
@@ -381,7 +398,7 @@ async function runShellUpdate(
         await downloadToFile(plan.url, dest, net.fetch, {
           onProgress: (received, total) => {
             if (total > 0) win?.setProgressBar(received / total);
-          },
+          }
         });
         return dest;
       },
@@ -397,7 +414,7 @@ async function runShellUpdate(
       handOff: handOffToInstaller,
       onHandOffFailure: async () => {
         await restartBackend(win);
-      },
+      }
     });
   } finally {
     win?.setProgressBar(-1);
@@ -406,11 +423,14 @@ async function runShellUpdate(
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.getPlatformInfo, (): PlatformInfo => ({
-    platform: process.platform as PlatformInfo["platform"],
-    arch: process.arch,
-    isDesktop: true,
-  }));
+  ipcMain.handle(
+    IPC_CHANNELS.getPlatformInfo,
+    (): PlatformInfo => ({
+      platform: process.platform as PlatformInfo['platform'],
+      arch: process.arch,
+      isDesktop: true
+    })
+  );
 
   ipcMain.handle(IPC_CHANNELS.windowsMenuModel, () => {
     if (!usesCaptionOverlay()) return null;
@@ -440,11 +460,11 @@ function registerIpcHandlers(): void {
     return linuxCaptionWindow(event.sender)?.isMaximized() ?? false;
   });
 
-  ipcMain.handle(IPC_CHANNELS.clientSettingsGet, (): ClientSettings => settingsStore.load());
+  ipcMain.handle(IPC_CHANNELS.clientSettingsGet, (): ClientSettings => withBrowserModeOverride(settingsStore.load()));
   ipcMain.handle(IPC_CHANNELS.clientSettingsSet, (_e, patch: Partial<ClientSettings>) => {
     const saved = settingsStore.save(patch);
     closeBehavior = saved.closeBehavior;
-    return saved;
+    return withBrowserModeOverride(saved);
   });
 
   // Synchronous on purpose: the renderer builds WebSocket URLs inside render
@@ -463,20 +483,20 @@ function registerIpcHandlers(): void {
       const listed = channelHeadTag(manifest, stableOnly);
       const selected = selectRelease(manifest, appVersion, platform, stableOnly);
       if (!selected) {
-        return { status: "up-to-date", currentVersion: appVersion, latestVersion: listed, error: null };
+        return { status: 'up-to-date', currentVersion: appVersion, latestVersion: listed, error: null };
       }
       return {
-        status: "update-available",
+        status: 'update-available',
         currentVersion: appVersion,
         latestVersion: selected.tag,
-        error: null,
+        error: null
       };
     } catch (err) {
       return {
-        status: "error",
+        status: 'error',
         currentVersion: appVersion,
         latestVersion: null,
-        error: errorMessageOf(err),
+        error: errorMessageOf(err)
       };
     }
   });
@@ -491,17 +511,17 @@ function registerIpcHandlers(): void {
     try {
       selected = await resolveSelectedRelease();
     } catch (err) {
-      await showShellError(win, "检查更新失败", errorMessageOf(err));
+      await showShellError(win, '检查更新失败', errorMessageOf(err));
       return;
     }
     if (!selected) {
-      await showShellMessage(win, "已是最新版本", `当前版本 ${appVersion}。`);
+      await showShellMessage(win, '已是最新版本', `当前版本 ${appVersion}。`);
       return;
     }
 
     const outcome = await runShellUpdate(win, selected);
     if (!outcome.ok) {
-      await showShellError(win, "升级失败", outcome.message);
+      await showShellError(win, '升级失败', outcome.message);
       return;
     }
     // §6.3 step 3: the installer owns the rest — hand it our exit.
@@ -535,12 +555,154 @@ function registerIpcHandlers(): void {
       settingsStore.save({ themeBackground: parsed.scheme });
     }
   });
+
+  registerBrowserIpcHandlers();
+}
+
+function registerBrowserIpcHandlers(): void {
+  const assertDashboard = (event: IpcMainInvokeEvent | IpcMainEvent): void => {
+    if (!browserHostWindow || browserHostWindow.isDestroyed() || event.sender.id !== browserHostWindow.webContents.id) {
+      throw new Error('The request did not come from the Dashboard window');
+    }
+  };
+  const requireTabs = (): BrowserTabManager<WebContentsView> => {
+    if (!browserTabs) throw new Error('The local browser is not ready');
+    return browserTabs;
+  };
+  const requireFrameBridge = (): FrameBridge => {
+    if (!frameBridge) throw new Error('The local browser is not ready');
+    return frameBridge;
+  };
+  const requireDownloads = (): DownloadTracker => {
+    if (!downloadTracker) throw new Error('Download tracking is not ready');
+    return downloadTracker;
+  };
+
+  ipcMain.handle(IPC_CHANNELS.browserTabsList, (event) => {
+    assertDashboard(event);
+    return requireTabs().list();
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsCreate, (event, options: { url?: unknown; active?: unknown }) => {
+    assertDashboard(event);
+    if (typeof options?.url !== 'string') throw new Error('A tab needs a URL');
+    return requireTabs().create({
+      url: options.url,
+      ...(options.active === false ? { active: false } : {})
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsClose, (event, tabId: unknown) => {
+    assertDashboard(event);
+    requireTabs().close(requireTabId(tabId));
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsActivate, (event, tabId: unknown) => {
+    assertDashboard(event);
+    requireTabs().activate(requireTabId(tabId));
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsNavigate, (event, msg: { tabId?: unknown; url?: unknown }) => {
+    assertDashboard(event);
+    if (typeof msg?.url !== 'string') throw new Error('A tab needs a URL');
+    requireTabs().navigate(requireTabId(msg.tabId), msg.url);
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsGoBack, (event, tabId: unknown) => {
+    assertDashboard(event);
+    requireTabs().goBack(requireTabId(tabId));
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsGoForward, (event, tabId: unknown) => {
+    assertDashboard(event);
+    requireTabs().goForward(requireTabId(tabId));
+  });
+  ipcMain.handle(IPC_CHANNELS.browserTabsReload, (event, tabId: unknown) => {
+    assertDashboard(event);
+    requireTabs().reload(requireTabId(tabId));
+  });
+  ipcMain.on(IPC_CHANNELS.browserTabsSetBounds, (event, msg: { tabId?: unknown; bounds?: Electron.Rectangle }) => {
+    if (!browserHostWindow || event.sender.id !== browserHostWindow.webContents.id) return;
+    if (!browserTabs || typeof msg?.tabId !== 'string' || !msg.bounds) return;
+    // The renderer reports CSS pixels; native views are positioned in DIP.
+    // At a non-100% page zoom those differ, so convert with the live factor.
+    browserTabs.setViewportBounds(
+      msg.tabId,
+      scaleBoundsForZoom(msg.bounds, browserHostWindow.webContents.getZoomFactor())
+    );
+  });
+  ipcMain.on(IPC_CHANNELS.browserTabsSetVisible, (event, visible: unknown) => {
+    if (!browserHostWindow || event.sender.id !== browserHostWindow.webContents.id) return;
+    browserTabs?.setHostVisible(visible === true);
+  });
+  ipcMain.handle(IPC_CHANNELS.browserFrameDom, (event, msg: { tabId?: unknown; request?: unknown }) => {
+    assertDashboard(event);
+    return requireFrameBridge().request(requireTabId(msg?.tabId), msg?.request);
+  });
+  ipcMain.handle(IPC_CHANNELS.browserFrameFetch, (event, msg: { tabId?: unknown; url?: unknown; init?: unknown }) => {
+    assertDashboard(event);
+    if (typeof msg?.url !== 'string') throw new Error('A fetch needs a URL');
+    return requireFrameBridge().fetchInTab(
+      requireTabId(msg.tabId),
+      msg.url,
+      msg.init as Parameters<FrameBridge['fetchInTab']>[2]
+    );
+  });
+  // Replies come from the tab preload, not the Dashboard: the bridge matches
+  // each one to the webContents that owns the pending request.
+  ipcMain.on(IPC_CHANNELS.browserFrameResponse, (event, message: unknown) => {
+    frameBridge?.handleResponse(event.sender.id, message);
+  });
+  // A page `attach` action asks the shell for files. Only a local tab may ask,
+  // and the dialog is parented to the Dashboard window.
+  ipcMain.handle(IPC_CHANNELS.browserFramePickFiles, async (event) => {
+    if (!browserTabs?.ownsWebContents(event.sender.id)) {
+      throw new Error('The request did not come from a browser tab');
+    }
+    if (!browserHostWindow || browserHostWindow.isDestroyed()) return [];
+    const picked = await dialog.showOpenDialog(browserHostWindow, {
+      title: 'Select files for the page',
+      properties: ['openFile', 'multiSelections']
+    });
+    if (picked.canceled || picked.filePaths.length === 0) return [];
+    return readPickedFiles(picked.filePaths);
+  });
+  ipcMain.handle(IPC_CHANNELS.browserDownloadsList, (event) => {
+    assertDashboard(event);
+    return requireDownloads().list();
+  });
+  ipcMain.handle(IPC_CHANNELS.browserDownloadsRead, (event, id: unknown) => {
+    assertDashboard(event);
+    return requireDownloads().read(requireDownloadId(id));
+  });
+  ipcMain.handle(IPC_CHANNELS.browserDownloadsOpen, (event) => {
+    assertDashboard(event);
+    return requireDownloads().openWindow();
+  });
+  ipcMain.handle(IPC_CHANNELS.browserDownloadsSettle, (event, msg: { token?: unknown; timeoutMs?: unknown }) => {
+    assertDashboard(event);
+    if (typeof msg?.token !== 'string') throw new Error('A download window token is required');
+    if (typeof msg.timeoutMs !== 'number' || !Number.isFinite(msg.timeoutMs)) {
+      throw new Error('A download window timeout is required');
+    }
+    return requireDownloads().settleWindow(msg.token, Math.min(Math.max(msg.timeoutMs, 0), 60_000));
+  });
+}
+
+/** Tab handles are opaque strings; bound the shape before touching the map. */
+function requireTabId(value: unknown): string {
+  if (typeof value !== 'string' || !/^tab-\d{1,8}$/.test(value)) {
+    throw new Error('Invalid tab handle');
+  }
+  return value;
+}
+
+/** Download ids are issued by `DownloadTracker`; reject anything else early. */
+function requireDownloadId(value: unknown): string {
+  if (typeof value !== 'string' || !/^dl_[A-Za-z0-9_]{1,64}$/.test(value)) {
+    throw new Error('Invalid download id');
+  }
+  return value;
 }
 
 /** Append the desktop log path so a packaged failure says where to look. */
 function errorDetail(detail?: string): string | undefined {
   const path = desktopLog().path;
-  const text = [detail, path ? `日志: ${path}` : ""].filter((line) => line).join("\n");
+  const text = [detail, path ? `日志: ${path}` : ''].filter((line) => line).join('\n');
   return text || undefined;
 }
 
@@ -552,17 +714,17 @@ async function startBackend(): Promise<boolean> {
     octopHome: backend.octopHome,
     portableDir: backend.portableDir,
     port,
-    bindHost: "127.0.0.1",
+    bindHost: '127.0.0.1'
   });
   backendPort = port;
   const sidecar = new SidecarSupervisor({
     executable: backend.interpreter,
-    args: [backend.launchScript, "run"],
+    args: [backend.launchScript, 'run'],
     env,
     cwd: backend.cwd,
     port,
     onExit: ({ code, signal, output }) => {
-      const summary = `sidecar exited code=${code ?? "null"} signal=${signal ?? "null"}`;
+      const summary = `sidecar exited code=${code ?? 'null'} signal=${signal ?? 'null'}`;
       // A clean exit, or a stop this shell already asked for, is not a crash.
       if (quitting || (code === 0 && signal === null)) {
         desktopLog().info(summary);
@@ -571,7 +733,7 @@ async function startBackend(): Promise<boolean> {
       desktopLog().error(summary);
       const tail = output.trim();
       if (tail) desktopLog().error(tail);
-    },
+    }
   });
   supervisor = sidecar;
   desktopLog().info(`starting sidecar on 127.0.0.1:${port}`);
@@ -595,13 +757,13 @@ function openExternal(url: string): void {
 
 /** Close-to-tray and the "backend ready" signal. Shared by the first window and a later one. */
 function watchDashboardLifetime(win: BrowserWindow): void {
-  win.on("close", (event) => {
+  win.on('close', (event) => {
     if (
       !shouldKeepWindowOnClose({
         platform: process.platform,
         closeBehavior,
         quitting,
-        trayReady: tray !== null,
+        trayReady: tray !== null
       })
     ) {
       return;
@@ -615,7 +777,7 @@ function watchDashboardLifetime(win: BrowserWindow): void {
     // same image back so the notification area still has a way to reopen.
     if (tray && trayIcon && !tray.isDestroyed()) tray.setImage(trayIcon);
   });
-  win.webContents.on("did-finish-load", () => {
+  win.webContents.on('did-finish-load', () => {
     if (win.isDestroyed()) return;
     win.webContents.send(IPC_CHANNELS.onBackendReady, { ok: true });
   });
@@ -623,7 +785,7 @@ function watchDashboardLifetime(win: BrowserWindow): void {
 
 /** Linux page-drawn caption buttons. Other platforms keep the native ones. */
 function linuxCaptionWindow(sender: WebContents): BrowserWindow | null {
-  if (process.platform !== "linux") return null;
+  if (process.platform !== 'linux') return null;
   const win = BrowserWindow.fromWebContents(sender);
   if (!win || win.isDestroyed()) return null;
   return win;
@@ -631,13 +793,13 @@ function linuxCaptionWindow(sender: WebContents): BrowserWindow | null {
 
 /** Tell the page when maximize flips, so the glyph can switch to restore. */
 function watchLinuxCaptionState(win: BrowserWindow): void {
-  if (process.platform !== "linux") return;
+  if (process.platform !== 'linux') return;
   const publish = () => {
     if (win.isDestroyed() || win.webContents.isDestroyed()) return;
     win.webContents.send(IPC_CHANNELS.windowMaximized, win.isMaximized());
   };
-  win.on("maximize", publish);
-  win.on("unmaximize", publish);
+  win.on('maximize', publish);
+  win.on('unmaximize', publish);
 }
 
 function openDashboardWindow(appOrigin: string): BrowserWindow {
@@ -649,11 +811,85 @@ function openDashboardWindow(appOrigin: string): BrowserWindow {
     backgroundColor: windowBackground(chromeTheme.mode),
     entryUrl: dashboardEntryUrl(chromeTheme.scheme ?? chromeTheme.mode, appOrigin),
     appOrigin,
-    onNavigate: openExternal,
+    onNavigate: openExternal
   });
   watchDashboardLifetime(win);
   watchLinuxCaptionState(win);
+  installLocalBrowser(win);
   return win;
+}
+
+function installLocalBrowser(win: BrowserWindow): void {
+  browserTabs?.dispose();
+  frameBridge?.dispose();
+  browserHostWindow = win;
+  // Chromium persists page zoom per origin and re-applies it when the page
+  // commits, so resetting before `loadURL` is not enough: do it once after the
+  // first main-frame load. Native view bounds assume 100% (see
+  // `scaleBoundsForZoom` for in-session zoom).
+  win.webContents.once('did-finish-load', () => {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    win.webContents.setZoomLevel(0);
+  });
+  const tabs = new BrowserTabManager<WebContentsView>(win, {
+    preloadPath: BROWSER_TAB_PRELOAD_PATH,
+    defaultUrl: DEFAULT_BROWSER_URL,
+    maxTabs: MAX_BROWSER_TABS,
+    createView: ({ preloadPath }) =>
+      new WebContentsView({
+        webPreferences: {
+          preload: preloadPath,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: false,
+          webSecurity: true
+        }
+      }),
+    // mailto:/tel:/app schemes belong to the OS, not to a tab.
+    onExternalUrl: (url) => {
+      void shell.openExternal(url).catch((error: unknown) => {
+        desktopLog().warn(`external URL failed: ${errorMessageOf(error)}`);
+      });
+    }
+  });
+  const bridge = new FrameBridge(tabs);
+  browserTabs = tabs;
+  frameBridge = bridge;
+  tabs.onChanged(() => {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    win.webContents.send(IPC_CHANNELS.browserTabsChanged);
+  });
+  tabs.onEvent((event) => {
+    if (win.isDestroyed() || win.webContents.isDestroyed()) return;
+    win.webContents.send(IPC_CHANNELS.browserTabsEvent, event);
+  });
+  // A reload or a crashed renderer skips the React unmount that would hide the
+  // views, leaving a stale page stacked over the Dashboard. Hide on any
+  // main-frame load; the browser page shows its tab again when it remounts.
+  win.webContents.on('did-start-navigation', (_event, _url, _isInPlace, isMainFrame) => {
+    if (isMainFrame) tabs.setHostVisible(false);
+  });
+  win.webContents.on('render-process-gone', () => tabs.setHostVisible(false));
+  win.once('closed', () => {
+    if (browserHostWindow !== win) return;
+    tabs.dispose();
+    bridge.dispose();
+    browserTabs = null;
+    frameBridge = null;
+    browserHostWindow = null;
+  });
+}
+
+/**
+ * Track downloads started by local browser tabs. The Dashboard itself runs on
+ * the default session too, so only tab webContents are observed.
+ */
+function installDownloadTracking(): void {
+  downloadTracker = new DownloadTracker({ directory: app.getPath('downloads') });
+  session.defaultSession.on('will-download', (_event, item, webContents) => {
+    if (!browserTabs?.ownsWebContents(webContents.id)) return;
+    downloadTracker?.track(item);
+  });
 }
 
 /** Keep the splash window and load the Dashboard into it. */
@@ -666,6 +902,7 @@ function continueInEarlyWindow(early: EarlyWindow, appOrigin: string): void {
   }
   installDashboardGuards(win, { appOrigin, onNavigate: openExternal });
   watchDashboardLifetime(win);
+  installLocalBrowser(win);
   const chromeTheme = resolveWindowChromeTheme(settingsStore.load().themeBackground);
   void win.loadURL(dashboardEntryUrl(chromeTheme.scheme ?? chromeTheme.mode, appOrigin));
 }
@@ -675,7 +912,7 @@ function continueInEarlyWindow(early: EarlyWindow, appOrigin: string): void {
  * active. Briefly pinning it forces the foreground, then releases it.
  */
 function raiseHiddenWindows(windows: readonly BrowserWindow[]): void {
-  if (process.platform !== "win32") return;
+  if (process.platform !== 'win32') return;
   for (const win of windows) {
     if (win.isDestroyed()) continue;
     win.setAlwaysOnTop(true);
@@ -709,23 +946,23 @@ function showAboutDialog(version: string): void {
   const locale = app.getLocale();
   const stamp = resolveGitStamp(readGitStamp, {
     commit: process.env.OCTOP_GIT_COMMIT,
-    date: process.env.OCTOP_GIT_DATE,
+    date: process.env.OCTOP_GIT_DATE
   });
   void dialog.showMessageBox({
-    type: "info",
-    title: locale.toLowerCase().startsWith("zh") ? "关于 CCS Buddy" : "About CCS Buddy",
-    message: "CCS Buddy",
+    type: 'info',
+    title: locale.toLowerCase().startsWith('zh') ? '关于 CCS Buddy' : 'About CCS Buddy',
+    message: 'CCS Buddy',
     detail: formatAboutDetail({
       version,
       setup: windowsInstallScope(process.execPath),
       commit: stamp.commit,
       date: stamp.date,
-      electron: process.versions.electron ?? "",
-      chromium: process.versions.chrome ?? "",
-      node: process.versions.node ?? "",
-      v8: process.versions.v8 ?? "",
-      os: formatAboutOs(osType(), process.arch, osRelease()),
-    }),
+      electron: process.versions.electron ?? '',
+      chromium: process.versions.chrome ?? '',
+      node: process.versions.node ?? '',
+      v8: process.versions.v8 ?? '',
+      os: formatAboutOs(osType(), process.arch, osRelease())
+    })
   });
 }
 
@@ -733,55 +970,55 @@ function showAboutDialog(version: string): void {
 function runWindowsMenuCommand(win: BrowserWindow, command: WindowsMenuCommandId): void {
   const contents = win.webContents;
   switch (command) {
-    case "close":
+    case 'close':
       win.close();
       return;
-    case "quit":
+    case 'quit':
       app.quit();
       return;
-    case "undo":
+    case 'undo':
       contents.undo();
       return;
-    case "redo":
+    case 'redo':
       contents.redo();
       return;
-    case "cut":
+    case 'cut':
       contents.cut();
       return;
-    case "copy":
+    case 'copy':
       contents.copy();
       return;
-    case "paste":
+    case 'paste':
       contents.paste();
       return;
-    case "delete":
+    case 'delete':
       contents.delete();
       return;
-    case "selectAll":
+    case 'selectAll':
       contents.selectAll();
       return;
-    case "reload":
+    case 'reload':
       contents.reload();
       return;
-    case "forceReload":
+    case 'forceReload':
       contents.reloadIgnoringCache();
       return;
-    case "toggleDevTools":
+    case 'toggleDevTools':
       contents.toggleDevTools();
       return;
-    case "resetZoom":
+    case 'resetZoom':
       contents.setZoomLevel(0);
       return;
-    case "zoomIn":
+    case 'zoomIn':
       contents.setZoomLevel(contents.getZoomLevel() + 1);
       return;
-    case "zoomOut":
+    case 'zoomOut':
       contents.setZoomLevel(contents.getZoomLevel() - 1);
       return;
-    case "togglefullscreen":
+    case 'togglefullscreen':
       win.setFullScreen(!win.isFullScreen());
       return;
-    case "about":
+    case 'about':
       showAboutDialog(appVersion);
       return;
   }
@@ -791,7 +1028,7 @@ function runWindowsMenuCommand(win: BrowserWindow, command: WindowsMenuCommandId
 function installWindowsAppMenu(version: string): void {
   if (!usesCaptionOverlay()) return;
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate(windowsApplicationMenu(app.getLocale(), () => showAboutDialog(version))),
+    Menu.buildFromTemplate(windowsApplicationMenu(app.getLocale(), () => showAboutDialog(version)))
   );
 }
 
@@ -799,11 +1036,11 @@ function readGitStamp(args: readonly string[]): string | null {
   const root = repoRootWithGit(app.getAppPath());
   if (!root) return null;
   try {
-    const out = execFileSync("git", [...args], {
+    const out = execFileSync('git', [...args], {
       cwd: root,
-      encoding: "utf8",
+      encoding: 'utf8',
       timeout: 2000,
-      windowsHide: true,
+      windowsHide: true
     }).trim();
     return out || null;
   } catch {
@@ -814,7 +1051,7 @@ function readGitStamp(args: readonly string[]): string | null {
 function repoRootWithGit(start: string): string | null {
   let dir = start;
   for (let i = 0; i < 8; i += 1) {
-    if (existsSync(join(dir, ".git"))) return dir;
+    if (existsSync(join(dir, '.git'))) return dir;
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -829,34 +1066,34 @@ async function installSystemTray(): Promise<void> {
     platform: process.platform,
     isPackaged: app.isPackaged,
     resourcesDir: resourcesRoot(),
-    execPath: process.execPath,
+    execPath: process.execPath
   });
   const icon = await loadTrayIcon(candidates);
   if (!icon) {
-    desktopLog().warn(`tray icon missing: ${candidates.join(", ")}`);
+    desktopLog().warn(`tray icon missing: ${candidates.join(', ')}`);
     return;
   }
   // Pass the Windows ico through unchanged. Resizing it to one 32px bitmap is
   // what Windows removes from the notification area when the window is hidden.
   // The Linux panel wants a small PNG; a full app icon is dropped or drawn huge.
-  trayIcon = process.platform === "linux" ? icon.resize({ width: 24, height: 24 }) : icon;
+  trayIcon = process.platform === 'linux' ? icon.resize({ width: 24, height: 24 }) : icon;
   const created = new Tray(trayIcon);
-  created.setToolTip("CCS Buddy");
+  created.setToolTip('CCS Buddy');
   const labels = trayMenuLabels(app.getLocale());
   const menu = Menu.buildFromTemplate([
     { label: labels.show, click: () => revealAppWindow() },
-    { type: "separator" },
-    { label: labels.quit, click: () => app.quit() },
+    { type: 'separator' },
+    { label: labels.quit, click: () => app.quit() }
   ]);
   // Left click opens the window. The menu stays on right click so a left
   // click is not swallowed by the context menu on Windows. Linux panels open
   // the menu from the icon, so the same menu has to be the context menu.
-  created.on("click", () => revealAppWindow());
-  created.on("double-click", () => revealAppWindow());
-  if (process.platform === "linux") created.setContextMenu(menu);
-  else created.on("right-click", () => created.popUpContextMenu(menu));
+  created.on('click', () => revealAppWindow());
+  created.on('double-click', () => revealAppWindow());
+  if (process.platform === 'linux') created.setContextMenu(menu);
+  else created.on('right-click', () => created.popUpContextMenu(menu));
   tray = created;
-  desktopLog().info("tray icon ready");
+  desktopLog().info('tray icon ready');
 }
 
 /**
@@ -873,12 +1110,10 @@ async function loadTrayIcon(candidates: readonly string[]): Promise<NativeImage 
   const executable = trayExecutableFallback(candidates);
   if (!executable) return null;
   try {
-    const icon = await app.getFileIcon(executable, { size: "small" });
+    const icon = await app.getFileIcon(executable, { size: 'small' });
     return icon.isEmpty() ? null : icon;
   } catch (err) {
-    desktopLog().warn(
-      `tray icon from executable failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    desktopLog().warn(`tray icon from executable failed: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -896,21 +1131,21 @@ async function boot(): Promise<void> {
     return;
   }
 
-  if (process.platform === "win32") {
+  if (process.platform === 'win32') {
     app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
   }
 
   appVersion = await resolveProductVersion();
   installWindowsAppMenu(appVersion);
 
-  settingsStore = new ClientSettingsStore(defaultClientSettingsPath(app.getPath("userData")));
+  settingsStore = new ClientSettingsStore(defaultClientSettingsPath(app.getPath('userData')));
   const settings = settingsStore.load();
   closeBehavior = settings.closeBehavior;
   // Apply the source before resolving, so a stored "system" reads the OS
   // preference rather than whatever an earlier explicit source left behind.
   applyNativeTheme({
-    mode: settings.themeBackground === "dark" ? "dark" : "light",
-    scheme: settings.themeBackground,
+    mode: settings.themeBackground === 'dark' ? 'dark' : 'light',
+    scheme: settings.themeBackground
   });
   const chromeTheme = resolveWindowChromeTheme(settings.themeBackground);
 
@@ -921,36 +1156,35 @@ async function boot(): Promise<void> {
     // Same preload as the Dashboard: this window loads that page next, and a
     // BrowserWindow cannot swap its preload.
     preload: PRELOAD_PATH,
-    theme: chromeTheme,
+    theme: chromeTheme
   });
   watchLinuxCaptionState(early.browserWindow);
 
   // Resolve OCTOP_HOME, reading the login shell on macOS/Linux (GUI apps don't
   // inherit it). The extraction dir and the child env must agree on one root.
-  const loginShellEnv =
-    process.platform === "win32" ? {} : await readLoginShellEnv(process.env.SHELL);
+  const loginShellEnv = process.platform === 'win32' ? {} : await readLoginShellEnv(process.env.SHELL);
   const octopHome = resolveOctopHome(process.env, loginShellEnv);
   installDesktopLog(octopHome);
   desktopLog().info(`desktop ${appVersion} home=${octopHome}`);
   const bootstrapConfigSource =
-    (process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG ?? "").trim() ||
-    join(resourcesRoot(), "bootstrap.json");
+    (process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG ?? '').trim() || join(resourcesRoot(), 'bootstrap.json');
   try {
     await seedBootstrapConfig(octopHome, bootstrapConfigSource);
   } catch (err) {
     early.showError({
-      message: "自动初始化配置无效，尚未修改现有用户数据。",
-      detail: errorDetail(errorMessageOf(err)),
+      message: '自动初始化配置无效，尚未修改现有用户数据。',
+      detail: errorDetail(errorMessageOf(err))
     });
     return;
   }
+  seedBundledExpert(octopHome, join(resourcesRoot(), 'expert-general-assistant'));
   await installSystemTray();
 
   // Local dev escape hatch: point at an already-extracted runtime (e.g. the one
   // `pnpm dev:runtime` writes to .dev-runtime) and skip bundling/extraction.
   // Packaged Windows (NSIS → resources/sidecar) and macOS (expanded before
   // signing → resources/portable) already contain the tree; do not unzip again.
-  const devPortableDir = (process.env.OCTOP_PORTABLE_DIR ?? "").trim();
+  const devPortableDir = (process.env.OCTOP_PORTABLE_DIR ?? '').trim();
   let portableDir = devPortableDir;
   if (!portableDir) {
     const installed = installedRuntimeDir(resourcesRoot(), process.platform, existsSync);
@@ -963,31 +1197,31 @@ async function boot(): Promise<void> {
   // A package that still ships only the zip (not the Win/mac/Linux installers):
   // version guard (§2.3) then atomic extract into OCTOP_HOME. Must run BEFORE spawning Python.
   if (!portableDir) {
-    portableDir = join(octopHome, "portable");
+    portableDir = join(octopHome, 'portable');
     try {
       const bundled = await readBundledPortable();
       const local = await readLocalRuntime(octopHome);
       const decision = classifyRuntime(bundled, local, compareVersions);
 
       desktopLog().info(
-        `runtime ${decision.action} (${decision.reason}) bundled=${bundled.version} local=${local.version ?? "none"}`,
+        `runtime ${decision.action} (${decision.reason}) bundled=${bundled.version} local=${local.version ?? 'none'}`
       );
-      if (decision.action === "stop") {
+      if (decision.action === 'stop') {
         early.showError({
           message: `检测到本机运行时版本为 ${decision.localVersion}，当前安装的是 ${bundled.version}。这是手动覆盖安装的旧版，已停止启动，并保留了现有运行时。`,
-          detail: errorDetail(`运行时目录: ${portableDir}`),
+          detail: errorDetail(`运行时目录: ${portableDir}`)
         });
         return;
       }
 
-      if (decision.action === "extract" || decision.action === "replace") {
+      if (decision.action === 'extract' || decision.action === 'replace') {
         const zip = portableZipPath();
         const digest = await sha256File(zip);
         if (digest !== bundled.sha256) {
           desktopLog().error(`portable zip sha256 mismatch file=${zip}`);
           early.showError({
-            message: "随包运行时校验失败（SHA-256 不匹配），为避免执行被篡改的文件，已停止启动。",
-            detail: errorDetail(`文件: ${zip}\n期望: ${bundled.sha256}\n实际: ${digest}`),
+            message: '随包运行时校验失败（SHA-256 不匹配），为避免执行被篡改的文件，已停止启动。',
+            detail: errorDetail(`文件: ${zip}\n期望: ${bundled.sha256}\n实际: ${digest}`)
           });
           return;
         }
@@ -998,20 +1232,20 @@ async function boot(): Promise<void> {
       const detail = err instanceof Error ? err.message : String(err);
       desktopLog().error(`portable runtime preparation failed: ${detail}`);
       early.showError({
-        message: "准备便携运行时（解压或校验）时出错，已停止启动。",
-        detail: errorDetail(detail),
+        message: '准备便携运行时（解压或校验）时出错，已停止启动。',
+        detail: errorDetail(detail)
       });
       return;
     }
   }
 
-  const interpreter = join(portableDir, "runtime", process.platform === "win32" ? "python.exe" : "bin/python3");
+  const interpreter = join(portableDir, 'runtime', process.platform === 'win32' ? 'python.exe' : 'bin/python3');
   backend = {
     interpreter,
-    launchScript: join(portableDir, "launch.py"),
+    launchScript: join(portableDir, 'launch.py'),
     cwd: portableDir,
     octopHome,
-    portableDir,
+    portableDir
   };
 
   // §7 accounts: the device credential lives in the data root, next to the
@@ -1029,11 +1263,12 @@ async function boot(): Promise<void> {
   deviceSession = new DeviceSessionClient({
     store: credentialStore,
     baseUrl: () => (apiAdmissionClosed || !backendPort ? null : `http://127.0.0.1:${backendPort}`),
-    label: `${process.platform}-${process.arch}`,
+    label: `${process.platform}-${process.arch}`
   });
 
   registerProtocol(dashboardRoot(portableDir));
   registerIpcHandlers();
+  installDownloadTracking();
 
   // §5.2: the page learns only this relay's ephemeral port, never the sidecar's.
   // A bind failure must not abort the launch — the Dashboard then finds no
@@ -1042,7 +1277,7 @@ async function boot(): Promise<void> {
   const windowOrigin = dashboardDev ? dashboardDevOrigin(dashboardDev.port) : WINDOW_ORIGIN;
   wsRelay = new WsRelay({
     backendPort: () => (apiAdmissionClosed || !backendPort ? 0 : backendPort),
-    allowedOrigin: windowOrigin,
+    allowedOrigin: windowOrigin
   });
   try {
     await wsRelay.start();
@@ -1054,16 +1289,14 @@ async function boot(): Promise<void> {
   const ready = await startBackend();
   if (!ready) {
     early.showError({
-      message: "Python 后端未能就绪（健康检查超时或进程提前退出）。请查看日志后重试。",
-        detail: errorDetail(
-          backend ? `启动器: ${backend.launchScript}\n端口: 127.0.0.1:${backendPort}` : undefined,
-        ),
+      message: 'Python 后端未能就绪（健康检查超时或进程提前退出）。请查看日志后重试。',
+      detail: errorDetail(backend ? `启动器: ${backend.launchScript}\n端口: 127.0.0.1:${backendPort}` : undefined)
     });
     return;
   }
 
   try {
-    await deviceSession?.registerBootstrap(join(octopHome, "desktop-bootstrap-nonce"));
+    await deviceSession?.registerBootstrap(join(octopHome, 'desktop-bootstrap-nonce'));
   } catch (err) {
     desktopLog().warn(`[desktop] bootstrap device registration failed: ${String(err)}`);
   }
@@ -1074,14 +1307,14 @@ async function boot(): Promise<void> {
       await startDashboardDevServer({
         sourceDir: dashboardDev.sourceDir,
         port: dashboardDev.port,
-        apiPort: backendPort,
+        apiPort: backendPort
       });
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       desktopLog().error(`dashboard dev server failed: ${detail}`);
       early.showError({
-        message: "仪表盘开发服务器没有起来，页面无法热更新。",
-        detail: errorDetail(detail),
+        message: '仪表盘开发服务器没有起来，页面无法热更新。',
+        detail: errorDetail(detail)
       });
       return;
     }
@@ -1093,22 +1326,25 @@ async function boot(): Promise<void> {
   continueInEarlyWindow(early, appOrigin);
 }
 
-app.whenReady().then(boot).catch((err) => {
-  desktopLog().error(`octop-desktop boot failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-  app.quit();
-});
+app
+  .whenReady()
+  .then(boot)
+  .catch((err) => {
+    desktopLog().error(`octop-desktop boot failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    app.quit();
+  });
 
-app.on("second-instance", () => {
+app.on('second-instance', () => {
   revealAppWindow();
 });
 
 // macOS emits this for a Dock click. With no listener the process stays in the
 // Dock after the window is closed or hidden, and the click does nothing.
-app.on("activate", () => {
+app.on('activate', () => {
   revealAppWindow();
 });
 
-app.on("before-quit", (event) => {
+app.on('before-quit', (event) => {
   if (quitting) return;
   destroySystemTray();
   const sidecar = supervisor;
@@ -1127,18 +1363,18 @@ app.on("before-quit", (event) => {
   })()
     .catch((err) =>
       desktopLog().error(
-        `octop-desktop quit failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
-      ),
+        `octop-desktop quit failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`
+      )
     )
     .finally(() => app.quit());
 });
 
-app.on("window-all-closed", () => {
+app.on('window-all-closed', () => {
   // darwin + tray keeps the process so the Dock icon can open the window again.
   // Windows and Linux hide the dashboard window instead of closing it, so this
   // does not fire for that button. A real close (the splash, or closeBehavior
   // quit) still exits.
-  if (process.platform !== "darwin" || closeBehavior === "quit") app.quit();
+  if (process.platform !== 'darwin' || closeBehavior === 'quit') app.quit();
 });
 
 /**
@@ -1168,7 +1404,7 @@ async function shutdownFromSignal(signal: NodeJS.Signals): Promise<void> {
     await supervisor?.stop();
   } catch (err) {
     desktopLog().error(
-      `octop-desktop shutdown failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+      `octop-desktop shutdown failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`
     );
   } finally {
     // `app.exit` skips `before-quit`/`will-quit`, so nothing can keep the
@@ -1177,7 +1413,7 @@ async function shutdownFromSignal(signal: NodeJS.Signals): Promise<void> {
   }
 }
 
-for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
   // Ctrl+C in a dev terminal is a normal way to stop the app, so exit 0 instead
   // of 130: pnpm prints "ELIFECYCLE Command failed" for non-zero exits.
   process.on(signal, () => void shutdownFromSignal(signal));

@@ -27,8 +27,10 @@ import {
 } from "./sdkExports";
 import type {
   ActionDownloadWatcher,
+  ActionTabWatcher,
   DownloadedFileReader,
   PageActionUi,
+  TabWorksetPort,
 } from "@webskill/sdk/agent";
 import {
   OpfsProvider,
@@ -59,7 +61,19 @@ import {
   OctopPageAgentTransport,
   PAGE_AGENT_PERCEPTION_TIMEOUT_MS,
 } from "./transport";
-import { OctopTabWorksetPort, createRemoteTabWatcher } from "./pageTabs";
+import {
+  OctopLocalTabWorksetPort,
+  OctopTabWorksetPort,
+  createLocalTabWatcher,
+  createRemoteTabWatcher,
+} from "./pageTabs";
+import { localBrowserHost } from "./localHost";
+import { BUILTIN_ROOT, seedBuiltinSkills } from "./seedSkills";
+import {
+  createLocalDownloadReader,
+  createLocalDownloadWatcher,
+} from "./localDownloads";
+import { createLocalLinkedDocuments } from "./localLinkedDocuments";
 import { createPageActionConsent } from "./pageActionConsent";
 import { createDownloadConsent } from "./downloadConsent";
 import { createHostConnectFacade } from "./connectFacade";
@@ -83,8 +97,15 @@ export async function createWebSkillHost(
   const fs = new OpfsProvider({
     rootName: `octop-webskill-user-${init.userId}`,
   });
-  for (const root of ["/skills", "/managed", "/chat"]) {
+  for (const root of [BUILTIN_ROOT, "/skills", "/managed", "/chat"]) {
     if (!(await fs.exists(root))) await fs.mkdir(root);
+  }
+  // Seed the four built-in authoring skills before the skill manager is built,
+  // so perception/tool discovery sees them on the very first engine start.
+  try {
+    await seedBuiltinSkills(fs);
+  } catch (error) {
+    console.error("Failed to seed the built-in skills", error);
   }
   const runtimeConfigKey = `octop.webskill.runtime.${init.userId}`;
   const runtimeConfig = createWebSkillRuntimeConfigStore(
@@ -113,8 +134,37 @@ export async function createWebSkillHost(
     audit,
   });
   const targets = createRemoteTargetRegistry();
-  const transport = new OctopPageAgentTransport(bridge, { include: ["body"] });
+  // Desktop local-browser mode drives the shell's WebContentsViews directly;
+  // server mode keeps the backend WebSocket and its tab/download APIs.
+  const local = localBrowserHost();
+  const localTabPort = local ? new OctopLocalTabWorksetPort(local) : undefined;
+  const resolveTabId = (): string | undefined =>
+    localTabPort?.focusedHandle() ?? bridge.currentLocalTabId();
+  const transport = new OctopPageAgentTransport(
+    bridge,
+    { include: ["body"] },
+    resolveTabId,
+  );
+  let tabPort: TabWorksetPort;
+  let tabWatcher: ActionTabWatcher;
+  if (localTabPort) {
+    tabPort = localTabPort;
+    tabWatcher = createLocalTabWatcher(localTabPort);
+  } else {
+    const remote = new OctopTabWorksetPort(bridge);
+    tabPort = remote;
+    tabWatcher = createRemoteTabWatcher(remote);
+  }
+
   let currentPage: { key: string; url?: string; title?: string } | undefined;
+  const currentOrigin = (): string | undefined => {
+    if (currentPage?.url === undefined) return undefined;
+    try {
+      return new URL(currentPage.url).origin;
+    } catch {
+      return undefined;
+    }
+  };
   const pagePerception = new PagePerceptionPolicy({
     scope: { include: ["body"] },
     reader: createRemotePerceptionReader({
@@ -135,17 +185,9 @@ export async function createWebSkillHost(
   });
   const pageActionConsent = createPageActionConsent({
     userId: init.userId,
-    origin: () => {
-      if (currentPage?.url === undefined) return undefined;
-      try {
-        return new URL(currentPage.url).origin;
-      } catch {
-        return undefined;
-      }
-    },
+    origin: currentOrigin,
     locale: () => init.locale,
   });
-  const tabPort = new OctopTabWorksetPort(bridge);
   const pageTabs = new TabWorksetPolicy({
     port: tabPort,
     enabled: () => pageActions?.enabled === true,
@@ -198,23 +240,27 @@ export async function createWebSkillHost(
         .filter((id): id is string => typeof id === "string"),
     );
   };
-  const downloadWatcher: ActionDownloadWatcher = {
-    async open() {
-      const before = await downloadIds();
-      return {
-        async settle({ timeoutMs }) {
-          const end = Date.now() + timeoutMs;
-          while (Date.now() < end) {
-            const current = await downloadIds();
-            const fresh = [...current].filter((id) => !before.has(id)).length;
-            if (fresh > 0) return fresh;
-            await new Promise((resolve) => setTimeout(resolve, 150));
-          }
-          return 0;
+  const downloadWatcher: ActionDownloadWatcher = local
+    ? createLocalDownloadWatcher(local)
+    : {
+        async open() {
+          const before = await downloadIds();
+          return {
+            async settle({ timeoutMs }) {
+              const end = Date.now() + timeoutMs;
+              while (Date.now() < end) {
+                const current = await downloadIds();
+                const fresh = [...current].filter(
+                  (id) => !before.has(id),
+                ).length;
+                if (fresh > 0) return fresh;
+                await new Promise((resolve) => setTimeout(resolve, 150));
+              }
+              return 0;
+            },
+          };
         },
       };
-    },
-  };
 
   const pageActions: PageActionPolicy = new PageActionPolicy({
     scope: { include: ["body"] },
@@ -231,7 +277,7 @@ export async function createWebSkillHost(
     audit,
     diagnose: (ref) => explainResolution(targets.resolve(ref)),
     describePage: () => currentPage,
-    tabWatcher: createRemoteTabWatcher(tabPort),
+    tabWatcher,
     workset: {
       admit: async (opened) => {
         const handle = await tabPort.admit(opened);
@@ -247,7 +293,7 @@ export async function createWebSkillHost(
   const bundle = createBrowserChatbotHost({
     fs,
     managedRoot: "/managed",
-    skillRoots: ["/skills", "/managed"],
+    skillRoots: [BUILTIN_ROOT, "/skills", "/managed"],
     navigation: {
       openConsole: () => navigation.openConsole(),
       openConsoleTrace: navigation.openTrace,
@@ -256,103 +302,110 @@ export async function createWebSkillHost(
     pagePerception,
   });
 
-  const downloadReader: DownloadedFileReader = {
-    async list() {
-      const result = await bridge.call("downloads-list");
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        !Array.isArray((result as Record<string, unknown>).downloads)
-      ) {
-        throw new Error("The host download list is invalid");
-      }
-      notifyDownloadFailures(result);
-      const downloads = (
-        result as { downloads: Array<Record<string, unknown>> }
-      ).downloads;
-      const failures = (result as { failures?: Array<Record<string, unknown>> })
-        .failures;
-      if (
-        downloads.length === 0 &&
-        Array.isArray(failures) &&
-        failures.length > 0
-      ) {
-        const first = failures[0];
-        const name = typeof first?.name === "string" ? first.name : "download";
-        const reason =
-          typeof first?.reason === "string" ? first.reason : "unknown failure";
-        throw new Error(`The download could not be read: ${name}: ${reason}`);
-      }
-      return downloads
-        .filter(
-          (entry) =>
-            typeof entry.id === "string" &&
-            typeof entry.name === "string" &&
-            typeof entry.contentType === "string" &&
-            typeof entry.size === "number" &&
-            typeof entry.at === "string",
-        )
-        .map((entry) => ({
-          id: entry.id as string,
-          name: entry.name as string,
-          contentType: entry.contentType as string,
-          size: entry.size as number,
-          at: entry.at as string,
-        }));
-    },
-    async read(id: string) {
-      const result = await bridge.call("downloads-read", { id });
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        typeof (result as Record<string, unknown>).contentType !== "string" ||
-        typeof (result as Record<string, unknown>).data !== "string"
-      ) {
-        throw new Error("The host download read response is invalid");
-      }
-      const binary = atob((result as Record<string, string>).data);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-      }
-      return {
-        contentType: (result as Record<string, string>).contentType,
-        bytes,
+  const downloadReader: DownloadedFileReader = local
+    ? createLocalDownloadReader(local)
+    : {
+        async list() {
+          const result = await bridge.call("downloads-list");
+          if (
+            typeof result !== "object" ||
+            result === null ||
+            !Array.isArray((result as Record<string, unknown>).downloads)
+          ) {
+            throw new Error("The host download list is invalid");
+          }
+          notifyDownloadFailures(result);
+          const downloads = (
+            result as { downloads: Array<Record<string, unknown>> }
+          ).downloads;
+          const failures = (
+            result as { failures?: Array<Record<string, unknown>> }
+          ).failures;
+          if (
+            downloads.length === 0 &&
+            Array.isArray(failures) &&
+            failures.length > 0
+          ) {
+            const first = failures[0];
+            const name =
+              typeof first?.name === "string" ? first.name : "download";
+            const reason =
+              typeof first?.reason === "string"
+                ? first.reason
+                : "unknown failure";
+            throw new Error(
+              `The download could not be read: ${name}: ${reason}`,
+            );
+          }
+          return downloads
+            .filter(
+              (entry) =>
+                typeof entry.id === "string" &&
+                typeof entry.name === "string" &&
+                typeof entry.contentType === "string" &&
+                typeof entry.size === "number" &&
+                typeof entry.at === "string",
+            )
+            .map((entry) => ({
+              id: entry.id as string,
+              name: entry.name as string,
+              contentType: entry.contentType as string,
+              size: entry.size as number,
+              at: entry.at as string,
+            }));
+        },
+        async read(id: string) {
+          const result = await bridge.call("downloads-read", { id });
+          if (
+            typeof result !== "object" ||
+            result === null ||
+            typeof (result as Record<string, unknown>).contentType !==
+              "string" ||
+            typeof (result as Record<string, unknown>).data !== "string"
+          ) {
+            throw new Error("The host download read response is invalid");
+          }
+          const binary = atob((result as Record<string, string>).data);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          return {
+            contentType: (result as Record<string, string>).contentType,
+            bytes,
+          };
+        },
       };
-    },
-  };
   const buildLinkedDocument: NonNullable<
     ChatbotHostAdapter["linkedDocuments"]
-  > = {
-    get origin() {
-      if (currentPage?.url === undefined) return undefined;
-      try {
-        return new URL(currentPage.url).origin;
-      } catch {
-        return undefined;
-      }
-    },
-    async read(url: string) {
-      const result = await bridge.call("linked-document", { url });
-      if (
-        typeof result !== "object" ||
-        result === null ||
-        typeof (result as Record<string, unknown>).contentType !== "string" ||
-        typeof (result as Record<string, unknown>).data !== "string"
-      ) {
-        throw new Error("The host linked-document response is invalid");
-      }
-      const binary = atob((result as Record<string, string>).data);
-      const bytes = new Uint8Array(binary.length);
-      for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-      }
-      return {
-        mimeType: (result as Record<string, string>).contentType,
-        bytes,
+  > = local
+    ? createLocalLinkedDocuments(local, resolveTabId, currentOrigin)
+    : {
+        get origin() {
+          return currentOrigin();
+        },
+        async read(url: string) {
+          const result = await bridge.call("linked-document", { url });
+          if (
+            typeof result !== "object" ||
+            result === null ||
+            typeof (result as Record<string, unknown>).contentType !==
+              "string" ||
+            typeof (result as Record<string, unknown>).data !== "string"
+          ) {
+            throw new Error("The host linked-document response is invalid");
+          }
+          const binary = atob((result as Record<string, string>).data);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          return {
+            mimeType: (result as Record<string, string>).contentType,
+            bytes,
+          };
+        },
       };
-    },
-  };
   const adapter: ChatbotHostAdapter = {
     ...bundle.chatbotAdapter,
     pagePerception,
@@ -389,7 +442,7 @@ export async function createWebSkillHost(
   };
   const backend = createFsConsoleBackend({
     fs,
-    roots: ["/skills", "/managed"],
+    roots: [BUILTIN_ROOT, "/skills", "/managed"],
     manager: bundle.chatbotAdapter.skillManager,
     traces: createFsTraceSource(fs, "/chat"),
     versionStoreRoot: "/managed",

@@ -43,8 +43,8 @@ def test_validate_skips_invalid_urls() -> None:
 
 
 def test_validate_title_fallback_to_hostname() -> None:
-    out = validate_remote_browser_bookmarks([{"url": "https://cloud.tencent.com", "title": ""}])
-    assert out[0].title == "cloud.tencent.com"
+    out = validate_remote_browser_bookmarks([{"url": "https://jijian.huawei.com", "title": ""}])
+    assert out[0].title == "jijian.huawei.com"
 
 
 def test_validate_rejects_over_limit() -> None:

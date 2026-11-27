@@ -51,7 +51,7 @@ async function unregisterAllServiceWorkers(): Promise<void> {
 
 /**
  * Apply a waiting Service Worker update and reload once.
- * Only called from explicit UI actions (PwaUpdatePrompt).
+ * Invoked by explicit frontend actions when an update entry point exists.
  */
 export async function applyUpdate(): Promise<void> {
   if (applyingUpdate) return;

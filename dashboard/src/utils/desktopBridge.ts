@@ -4,11 +4,15 @@
  * Dashboard falls back to its existing Python self-update flow.
  */
 
+export type DesktopBrowserMode = "local" | "remote";
+
 export interface DesktopClientSettings {
   launchAtLogin: boolean;
   closeBehavior: "quit" | "tray";
   themeBackground: "system" | "light" | "dark";
   stableOnly: boolean;
+  /** Desktop Control → Browser page: local tabs or the backend stream. */
+  browserMode: DesktopBrowserMode;
 }
 
 export interface DesktopUpdateCheckResult {
@@ -70,6 +74,66 @@ export interface DesktopSessionBridge {
   revoke(accessToken: string): Promise<boolean>;
 }
 
+export interface DesktopBrowserTab {
+  id: string;
+  url: string;
+  title: string;
+  active: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isLoading: boolean;
+}
+
+export interface DesktopTabFetchResult {
+  status: number;
+  headers: Record<string, string>;
+  /** Base64 of the response body. */
+  body: string;
+}
+
+export interface DesktopDownloadEntry {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  at: string;
+}
+
+export interface DesktopBrowserHost {
+  tabs: {
+    list(): Promise<DesktopBrowserTab[]>;
+    create(options: { url: string; active?: boolean }): Promise<string>;
+    close(tabId: string): Promise<void>;
+    activate(tabId: string): Promise<void>;
+    navigate(tabId: string, url: string): Promise<void>;
+    goBack(tabId: string): Promise<void>;
+    goForward(tabId: string): Promise<void>;
+    reload(tabId: string): Promise<void>;
+    setViewportBounds(
+      tabId: string,
+      bounds: { x: number; y: number; width: number; height: number },
+    ): void;
+    /** Views sit above the page: false while the browser route is not shown. */
+    setVisible(visible: boolean): void;
+    onChanged(callback: () => void): () => void;
+    onEvent(callback: (event: unknown) => void): () => void;
+  };
+  frame: {
+    domRequest(tabId: string, request: unknown): Promise<unknown>;
+    fetchInTab(
+      tabId: string,
+      url: string,
+      init?: unknown,
+    ): Promise<DesktopTabFetchResult>;
+  };
+  downloads: {
+    list(): Promise<DesktopDownloadEntry[]>;
+    read(id: string): Promise<{ contentType: string; data: string }>;
+    openWindow(): Promise<string>;
+    settleWindow(token: string, timeoutMs: number): Promise<number>;
+  };
+}
+
 export interface OctopDesktopBridge {
   session?: DesktopSessionBridge;
   /**
@@ -120,6 +184,7 @@ export interface OctopDesktopBridge {
   checkForUpdates(): Promise<DesktopUpdateCheckResult>;
   /** Start the shell install. Takes no arguments; the page confirms first. */
   installUpdate(): Promise<void>;
+  browserHost?: DesktopBrowserHost;
 }
 
 declare global {

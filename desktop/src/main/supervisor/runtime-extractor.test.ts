@@ -7,11 +7,13 @@ import AdmZip from "adm-zip";
 
 import {
   bundledDashboardDir,
+  packagedDashboardDir,
   portableZipName,
   classifyRuntime,
   extractPortableZip,
   installedRuntimeDir,
   isSafeSymlinkTarget,
+  resolveDashboardDir,
 } from "./runtime-extractor";
 import { compareVersions } from "./version";
 
@@ -138,6 +140,49 @@ test("bundledDashboardDir is the copy inside the portable tree", () => {
   assert.equal(
     bundledDashboardDir(join("resources", "portable")),
     join("resources", "portable", "packages", "octop", "dashboard"),
+  );
+});
+
+test("packagedDashboardDir is the app resource copy", () => {
+  assert.equal(
+    packagedDashboardDir(join("resources")),
+    join("resources", "dashboard"),
+  );
+});
+
+test("resolveDashboardDir prefers the shipped resource over the portable copy", () => {
+  const resourcesRoot = join("resources");
+  const portableDir = join("home", "portable");
+  const packaged = join(resourcesRoot, "dashboard");
+  assert.equal(
+    resolveDashboardDir({
+      resourcesRoot,
+      portableDir,
+      exists: (path) => path === join(packaged, "index.html"),
+    }),
+    packaged,
+  );
+});
+
+test("resolveDashboardDir falls back to the portable copy and keeps the dev override", () => {
+  const resourcesRoot = join("resources");
+  const portableDir = join("home", "portable");
+  assert.equal(
+    resolveDashboardDir({
+      resourcesRoot,
+      portableDir,
+      exists: () => false,
+    }),
+    bundledDashboardDir(portableDir),
+  );
+  assert.equal(
+    resolveDashboardDir({
+      override: " D:\\repo\\src\\octop\\dashboard ",
+      resourcesRoot,
+      portableDir,
+      exists: () => false,
+    }),
+    "D:\\repo\\src\\octop\\dashboard",
   );
 });
 

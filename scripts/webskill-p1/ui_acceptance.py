@@ -172,7 +172,7 @@ async def run() -> dict[str, Any]:
                 if (typeof data === "string") {{
                     try {{
                         const message = JSON.parse(data);
-                        if (message.type === "start" && message.url === "https://cloud.tencent.com") {{
+                        if (message.type === "start" && message.url === "https://jijian.huawei.com") {{
                             message.url = {json.dumps(fixture_url)};
                             data = JSON.stringify(message);
                         }}
@@ -523,7 +523,11 @@ if __name__ == "__main__":
     if BASE_URL.startswith("https://"):
         scenario = "trusted" if os.environ.get("WEBSKILL_P1_TRUSTED_TLS") == "1" else "https"
         if os.environ.get("WEBSKILL_P1_LNA_DENY") == "1":
-            scenario += "-lna-policy" if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1" else "-lna-permission"
+            scenario += (
+                "-lna-policy"
+                if os.environ.get("WEBSKILL_P1_LNA_POLICY") == "1"
+                else "-lna-permission"
+            )
         result_name = f"ui-result-{scenario}.json"
     else:
         result_name = "ui-result.json"

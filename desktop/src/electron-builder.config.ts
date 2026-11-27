@@ -1,20 +1,20 @@
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
-import { macPrivacyExtendInfo, writeMacPrivacyLocalizations } from "./mac-privacy-plist";
-import { prepareBootstrapDeployment } from "./main/supervisor/bootstrap-deployment";
+import { macPrivacyExtendInfo, writeMacPrivacyLocalizations } from './mac-privacy-plist';
+import { prepareBootstrapDeployment, resolveBootstrapDeploymentConfig } from './main/supervisor/bootstrap-deployment';
 
 // The Python release version is authoritative. electron-builder needs SemVer in
 // package metadata, while bundled runtime names keep the original PEP 440 value
 // (e.g. 1.0.3b1 -> 1.0.3-beta.1 in the Electron metadata only).
-const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8")) as {
+const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as {
   version: string;
 };
 const productVersion = process.env.OCTOP_VERSION ?? pkg.version;
 const electronVersion = productVersion.replace(
   /^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$/,
   (_match, base: string, stage: string, number: string) =>
-    `${base}-${{ a: "alpha", b: "beta", rc: "rc" }[stage as "a" | "b" | "rc"]}.${number}`,
+    `${base}-${{ a: 'alpha', b: 'beta', rc: 'rc' }[stage as 'a' | 'b' | 'rc']}.${number}`
 );
 if (!/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(electronVersion)) {
   throw new Error(`Unsupported CCS Buddy release version: ${productVersion}`);
@@ -22,47 +22,66 @@ if (!/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/.test(electronVersion)) {
 const artifactName = process.env.OCTOP_PLATFORM
   ? `CCS-Buddy-desktop-${process.env.OCTOP_PLATFORM}-${productVersion}.\${ext}`
   : `CCS-Buddy-desktop-\${os}-\${arch}-\${version}.\${ext}`;
-const productName = "CCS Buddy";
-const deploymentConfig = process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG;
+const productName = 'CCS Buddy';
+// Brand builds keep users.json/models.json (gitignored) next to
+// resources/bootstrap/config.json; `pnpm package` then uses that config without
+// extra env. Explicit OCTOP_DESKTOP_BOOTSTRAP_CONFIG still overrides.
+const deploymentConfig = resolveBootstrapDeploymentConfig(
+  resolve(__dirname, 'resources/bootstrap'),
+  process.env.OCTOP_DESKTOP_BOOTSTRAP_CONFIG
+);
 const deployment = deploymentConfig
   ? prepareBootstrapDeployment(
       resolve(deploymentConfig),
-      resolve(dirname(deploymentConfig), "users.json"),
-      resolve(dirname(deploymentConfig), "models.json"),
-      resolve(__dirname, "release/bootstrap"),
+      resolve(dirname(deploymentConfig), 'users.json'),
+      resolve(dirname(deploymentConfig), 'models.json'),
+      resolve(__dirname, 'release/bootstrap')
     )
   : null;
-const bootstrapConfig = deployment?.configFile ?? "resources/bootstrap.json";
+const bootstrapConfig = deployment?.configFile ?? 'resources/bootstrap.json';
 const bootstrapSecrets = deployment?.secretsFile;
 
+// electron-builder normally downloads the Electron *zip* (even when
+// node_modules/electron/dist is already installed), because its cache is keyed
+// by the official archive checksum. On Windows point it at the installed
+// distribution to avoid the slow GitHub download; the directory contains
+// electron.exe, resources/, version and 45.0.0, which is exactly what the
+// packager copies. Other hosts keep the default download path (the directory
+// is a host-specific unpacked app, not a cross-build input).
+const localElectronDist = resolve(__dirname, 'node_modules/electron/dist');
+const useLocalElectronDist = process.platform === 'win32' && existsSync(localElectronDist);
+
 export default {
+  ...(useLocalElectronDist ? { electronDist: localElectronDist } : {}),
   extraMetadata: { version: electronVersion },
   artifactName,
-  appId: "com.huawei.jijian.ccsbuddy",
+  appId: 'com.huawei.jijian.ccsbuddy',
   productName,
   // extraResources places the portable tree outside asar. The shell reads
   // Dashboard from portable/packages/octop/dashboard, so it is not copied again.
   asar: true,
   // Bare "en" also keeps en-* region packs. zh_CN does not keep zh_TW.
   // zh-Hans InfoPlist.strings are written in afterPack, after this filter.
-  electronLanguages: ["en", "zh_CN"],
+  electronLanguages: ['en', 'zh_CN'],
   extraResources: [
-    { from: "resources/icon.ico", to: "icon.ico" },
-    { from: "resources/icon.png", to: "icon.png" },
-    { from: bootstrapConfig, to: "bootstrap.json" },
-    ...(bootstrapSecrets ? [{ from: bootstrapSecrets, to: "bootstrap.secrets.json" }] : []),
-    { from: "resources/portable", to: "portable" },
+    { from: resolve(__dirname, '../../src/octop/dashboard'), to: 'dashboard' },
+    { from: 'resources/icon.ico', to: 'icon.ico' },
+    { from: 'resources/icon.png', to: 'icon.png' },
+    { from: bootstrapConfig, to: 'bootstrap.json' },
+    ...(bootstrapSecrets ? [{ from: bootstrapSecrets, to: 'bootstrap.secrets.json' }] : []),
+    ...(deploymentConfig ? [{ from: 'resources/expert-general-assistant', to: 'expert-general-assistant' }] : []),
+    { from: 'resources/portable', to: 'portable' },
     // deb postinst sources this after files are unpacked. postrm inlines a copy
     // because dpkg deletes the install tree first.
-    { from: "build/linux-desktop-shortcut.sh", to: "linux-desktop-shortcut.sh" },
+    { from: 'build/linux-desktop-shortcut.sh', to: 'linux-desktop-shortcut.sh' }
   ],
-  files: ["out/**/*", "package.json"],
-  directories: { output: "release", buildResources: "resources" },
+  files: ['out/**/*', 'package.json'],
+  directories: { output: 'release', buildResources: 'resources' },
   mac: {
-    target: ["dmg", "zip"],
-    category: "public.app-category.productivity",
+    target: ['dmg', 'zip'],
+    category: 'public.app-category.productivity',
     // A full-bleed tile draws about 24% larger than other Dock and Launchpad icons.
-    icon: "resources/icon.icns",
+    icon: 'resources/icon.icns',
     // Releases are unsigned and not notarized. identity: null is required:
     // electron-builder otherwise takes the empty-password signing path and
     // aborts mid mac pipeline.
@@ -71,29 +90,27 @@ export default {
     gatekeeperAssess: false,
     // Usage strings for microphone, speech recognition, screen capture, and the
     // local network. Accessibility has no Info.plist key.
-    extendInfo: macPrivacyExtendInfo(),
+    extendInfo: macPrivacyExtendInfo()
   },
   afterPack(context: { electronPlatformName: string; appOutDir: string }): void {
-    if (context.electronPlatformName !== "darwin") return;
-    writeMacPrivacyLocalizations(
-      join(context.appOutDir, `${productName}.app`, "Contents", "Resources"),
-    );
+    if (context.electronPlatformName !== 'darwin') return;
+    writeMacPrivacyLocalizations(join(context.appOutDir, `${productName}.app`, 'Contents', 'Resources'));
   },
   // develop's drag-to-Applications art (resources/dmg-background.jpeg).
   // The 600×400 PNG sets the window size; the @2x sibling becomes the HiDPI TIFF.
   // Coordinates are icon centers, on the chevron.
   dmg: {
-    background: "resources/dmg-background.png",
+    background: 'resources/dmg-background.png',
     iconSize: 128,
     contents: [
-      { x: 154, y: 237, type: "file" },
-      { x: 454, y: 237, type: "link", path: "/Applications" },
-    ],
+      { x: 154, y: 237, type: 'file' },
+      { x: 454, y: 237, type: 'link', path: '/Applications' }
+    ]
   },
   win: {
-    icon: "resources/icon.ico",
+    icon: 'resources/icon.ico',
     // CI passes the native runner architecture, never cross-package both here.
-    target: ["nsis"],
+    target: ['nsis']
   },
   nsis: {
     oneClick: false,
@@ -105,30 +122,30 @@ export default {
     createDesktopShortcut: false,
     // Expands resources/portable/Octop-portable-*.zip into resources/sidecar
     // with tar.exe. The 40k-file tree is not packed as individual NSIS files.
-    include: "build/installer.nsh",
+    include: 'build/installer.nsh'
   },
   linux: {
-    target: ["deb", "rpm"],
-    executableName: "octop",
-    icon: "resources/icon.png",
-    category: "Utility",
-    maintainer: "基建部",
+    target: ['deb', 'rpm'],
+    executableName: 'octop',
+    icon: 'resources/icon.png',
+    category: 'Utility',
+    maintainer: '基小建'
   },
   deb: {
     // package.json name is octop-desktop. fpm package names live on the target,
     // not on linux (LinuxConfiguration rejects packageName).
-    packageName: "octop",
+    packageName: 'octop',
     // Neither apt nor rpm has a finish page. The install script places a
     // desktop icon for the account that ran the install (or each normal
     // account when the installer is only root). A later upgrade refreshes an
     // icon that is still there. The scripts also accept rpm's numeric $1.
-    afterInstall: "build/linux-after-install.sh",
-    afterRemove: "build/linux-after-remove.sh",
+    afterInstall: 'build/linux-after-install.sh',
+    afterRemove: 'build/linux-after-remove.sh'
   },
   rpm: {
-    packageName: "octop",
-    afterInstall: "build/linux-after-install.sh",
-    afterRemove: "build/linux-after-remove.sh",
+    packageName: 'octop',
+    afterInstall: 'build/linux-after-install.sh',
+    afterRemove: 'build/linux-after-remove.sh'
   },
-  publish: null,
+  publish: null
 } as const;

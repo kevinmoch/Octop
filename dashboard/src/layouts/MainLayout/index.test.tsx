@@ -48,10 +48,6 @@ vi.mock("../../context/LayoutModeContext", () => ({
   useLayoutMode: () => ({ layoutMode: "classic" }),
 }));
 
-vi.mock("../../components/PwaUpdatePrompt", () => ({
-  default: () => null,
-}));
-
 vi.mock("../../components/PwaInstallPrompt", () => ({
   PwaAutoPrompt: () => null,
 }));

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 type JsonObject = Record<string, unknown>;
@@ -6,6 +6,29 @@ type JsonObject = Record<string, unknown>;
 export interface BootstrapDeploymentResources {
   configFile: string;
   secretsFile: string;
+}
+
+/**
+ * Pick the brand build's bootstrap source.
+ *
+ * An explicit `OCTOP_DESKTOP_BOOTSTRAP_CONFIG` always wins (CI releases use
+ * it). Otherwise a checkout that has the gitignored `users.json` and
+ * `models.json` next to `resources/bootstrap/config.json` is a brand build:
+ * `pnpm package` picks those up without requiring extra environment setup.
+ * Plain deployments keep packaging the disabled `resources/bootstrap.json`
+ * template.
+ */
+export function resolveBootstrapDeploymentConfig(
+  bootstrapDir: string,
+  envValue: string | undefined,
+): string | null {
+  const explicit = (envValue ?? "").trim();
+  if (explicit) return explicit;
+  const config = join(bootstrapDir, "config.json");
+  if (!existsSync(config)) return null;
+  if (!existsSync(join(bootstrapDir, "users.json"))) return null;
+  if (!existsSync(join(bootstrapDir, "models.json"))) return null;
+  return config;
 }
 
 function readObject(file: string): JsonObject {

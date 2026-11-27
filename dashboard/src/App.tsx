@@ -19,7 +19,6 @@ import OidcComplete from "./pages/Login/OidcComplete";
 import SetupPage from "./pages/Setup";
 import InvitePage from "./pages/Invite";
 import AuthGuard from "./components/AuthGuard";
-import PwaUpdatePrompt from "./components/PwaUpdatePrompt";
 import DesktopWindowDragBand from "./components/DesktopWindowDragBand";
 import WindowsAppMenu from "./components/WindowsAppMenu";
 import OctopSpinner from "./components/OctopSpinner";
@@ -133,7 +132,6 @@ function ThemedApp() {
     >
       <AntdAppProvider>
         <DesktopChromeProvider value={desktopChrome}>
-          <PwaUpdatePrompt />
           {/* Login, setup and invite sit outside MainLayout, so the drag
               strip has to live above the router, not only inside the shell. */}
           <DesktopWindowDragBand />

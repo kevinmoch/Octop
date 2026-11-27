@@ -22,20 +22,19 @@ Inside the Electron package everything sits directly under `src/`: `main/`,
 
 ## Electron shell (pnpm + Node 24)
 
-`desktop/src` is an independent Node package managed by **pnpm 12.15.0**
-(the version `corepack use pnpm` resolves under Node 24). The version is declared
-in three places that must stay equal:
+`desktop/src` is an independent Node package managed by **pnpm 12.x** (CI pins
+12.15.0; `devEngines` accepts the 12.x range, so 12.18 also works). The
+`packageManager` field still pins the version `corepack use pnpm` resolves:
 
 | Where | Read by |
 |-------|---------|
 | `src/package.json` → `packageManager` | corepack, and pnpm's own version check |
-| `src/package.json` → `devEngines.packageManager` | pnpm 12 / npm native check (`onFail: error`) |
+| `src/package.json` → `devEngines.packageManager` | pnpm 12 / npm native check (`>=12 <13`, `onFail: error`) |
 | `mise.toml` → `[tools] pnpm` | `mise install` / `mise exec`, so PATH has the same binary |
 
-Measured behaviour: running an older pnpm in this directory silently re-execs
-12.15.0 (`Done in 4ms using pnpm v12.15.0`), while corepack-invoked mismatches
-fail with `ERR_PNPM_BAD_PM_VERSION`. Either way `pnpm-lock.yaml` cannot be
-rewritten by a different major.
+Measured behaviour: a pnpm 12.x install passes the range check; a different
+major fails with `ERR_PNPM_BAD_PM_VERSION`. `pnpm-lock.yaml` cannot be rewritten
+by a different major.
 
 Config is split by pnpm's own rules — since pnpm 11, `.npmrc` is read **only**
 for registry/auth, and the `package.json` `"pnpm"` field is ignored:
@@ -73,6 +72,17 @@ pnpm dev:start                  # relaunch without rebuilding the shell (Dashboa
 pnpm dev:no-sandbox             # same, minus the Chromium sandbox + GPU process
 pnpm package                    # electron-builder (requires staged resources)
 ```
+
+On Windows (PowerShell/cmd) use the Node launcher instead of the bash scripts:
+
+```powershell
+cd desktop\src
+node scripts\run-dev.mjs          # or: .\scripts\dev-win.cmd
+```
+
+`pnpm dev` runs `scripts/run-dev.sh`, which needs `bash`/`sed`; `node
+scripts\run-dev.mjs` needs only Node and calls `electron-vite` directly, so it
+works even when pnpm is not on PATH.
 
 All three launch scripts are `scripts/run-dev.sh` with different flags; `--`
 forwards the rest of the line to the Electron binary:
@@ -170,14 +180,20 @@ shell holds a **device credential** instead:
 
 A fresh install can also be initialized from a non-secret `bootstrap` section
 in `<OCTOP_HOME>/config.json`. The packaged `resources/bootstrap.json` is a
-disabled template. A brand build can set `OCTOP_DESKTOP_BOOTSTRAP_CONFIG` to a
-public `config.json`; sibling `users.json` and `models.json` (both gitignored)
-supply the admin password and provider API key. The build merges these files
-into the normal bootstrap config and a separate secret resource. The main
-process seeds config only when no user config exists. On Windows, the installer
-seeds secrets only alongside that new config and deletes the installed secret
-resource; successful initialization also removes the home secret file. Secrets
-may alternatively come from `<OCTOP_HOME>/bootstrap.secrets.json` (see
+disabled template. For this fork, a checkout with the gitignored `users.json`
+and `models.json` next to `resources/bootstrap/config.json` is treated as a
+brand build: `pnpm package` uses that config automatically (no extra env). Set
+`OCTOP_DESKTOP_BOOTSTRAP_CONFIG` to override the auto-detected file. The
+sibling files supply the admin password and provider API key. The build merges
+these files into the normal bootstrap config and a separate secret resource.
+The main process seeds config only when no user config exists; on later
+launches it backfills deployment defaults that are missing from the user's
+config (currently `desktop_browser_url`, the Windows local browser's start
+page) without overwriting any key the user already set.
+On Windows, the installer seeds secrets only alongside that new config and
+deletes the installed secret resource; successful initialization also removes
+the home secret file. Secrets may alternatively come from
+`<OCTOP_HOME>/bootstrap.secrets.json` (see
 `src/build/bootstrap.secrets.example.json`) or the documented environment
 variables. Successful initialization binds the initial admin to the shell's
 device credential through a one-time nonce; later launches use the normal device

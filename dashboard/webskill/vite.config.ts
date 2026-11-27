@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { webskillConfig } from "@webskill/chatbot/vite";
@@ -58,6 +65,28 @@ function browserPathShim(): Plugin {
   };
 }
 
+/**
+ * Ship the built-in skills next to the WebSkill entry.
+ *
+ * `src/seedSkills.ts` fetches `skills/builtin/<skill>/<file>` at first run and
+ * writes the bytes into OPFS; the files must therefore exist under the same
+ * `/webskill/` prefix as index.html.
+ */
+function copyBuiltinSkills(): Plugin {
+  const source = resolve(import.meta.dirname, "skills");
+  const target = resolve(
+    import.meta.dirname,
+    "../../src/octop/dashboard/webskill/skills",
+  );
+  return {
+    name: "octop-copy-builtin-skills",
+    closeBundle() {
+      rmSync(target, { recursive: true, force: true });
+      cpSync(source, target, { recursive: true });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   plugins: [
@@ -68,6 +97,7 @@ export default defineConfig({
     browserPathShim(),
     react(),
     browserExternalPathShim(),
+    copyBuiltinSkills(),
   ],
   resolve: {
     alias: [

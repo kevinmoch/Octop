@@ -15,6 +15,11 @@ export interface ClientSettings {
   themeBackground: "system" | "light" | "dark";
   /** Whether the shell update check should follow the stable channel only. */
   stableOnly: boolean;
+  /**
+   * Which browser the Dashboard's Control → Browser page shows on desktop.
+   * `remote` keeps the backend streaming viewer as the rollback path.
+   */
+  browserMode: "local" | "remote";
 }
 
 export interface PlatformInfo {
@@ -79,4 +84,28 @@ export const IPC_CHANNELS = {
   sessionRegister: "octop:session:register",
   sessionRenew: "octop:session:renew",
   sessionRevoke: "octop:session:revoke",
+  browserTabsList: "octop:browser:tabs:list",
+  browserTabsCreate: "octop:browser:tabs:create",
+  browserTabsClose: "octop:browser:tabs:close",
+  browserTabsActivate: "octop:browser:tabs:activate",
+  browserTabsNavigate: "octop:browser:tabs:navigate",
+  browserTabsGoBack: "octop:browser:tabs:go-back",
+  browserTabsGoForward: "octop:browser:tabs:go-forward",
+  browserTabsReload: "octop:browser:tabs:reload",
+  browserTabsSetBounds: "octop:browser:tabs:set-bounds",
+  browserTabsSetVisible: "octop:browser:tabs:set-visible",
+  browserTabsChanged: "octop:browser:tabs:changed",
+  browserTabsEvent: "octop:browser:tabs:event",
+  browserFrameDom: "octop:browser:frame:dom",
+  browserFrameFetch: "octop:browser:frame:fetch",
+  /** Main → tab preload: one PageAgent request. */
+  browserFrameRequest: "octop:browser:frame:request",
+  /** Tab preload → main: the reply to that request. */
+  browserFrameResponse: "octop:browser:frame:response",
+  /** Tab preload → main: native file picker for a page `attach` action. */
+  browserFramePickFiles: "octop:browser:frame:pick-files",
+  browserDownloadsList: "octop:browser:downloads:list",
+  browserDownloadsRead: "octop:browser:downloads:read",
+  browserDownloadsOpen: "octop:browser:downloads:open",
+  browserDownloadsSettle: "octop:browser:downloads:settle",
 } as const;

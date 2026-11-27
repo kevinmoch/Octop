@@ -7,6 +7,7 @@ import type {
 } from "@webskill/sdk/agent";
 import { WebSkillError } from "@webskill/sdk";
 import type { OctopHostBridge } from "./bridge";
+import type { LocalBrowserHost } from "./localHost";
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -116,6 +117,115 @@ export class OctopTabWorksetPort implements TabWorksetPort {
  */
 export function createRemoteTabWatcher(
   port: OctopTabWorksetPort,
+): ActionTabWatcher {
+  return {
+    async open(): Promise<ActionTabWindow> {
+      const before = new Set((await port.list()).map((tab) => tab.handle));
+      let settled = false;
+      return {
+        settle: async ({ timeoutMs }) => {
+          if (settled) return;
+          settled = true;
+          const deadline = Date.now() + Math.max(0, timeoutMs);
+          while (true) {
+            const fresh = (await port.list()).find(
+              (tab) => !before.has(tab.handle),
+            );
+            if (fresh !== undefined) {
+              port.rememberOpened(fresh.handle);
+              return {
+                ...(fresh.title !== undefined ? { title: fresh.title } : {}),
+                ...(fresh.url !== undefined ? { url: fresh.url } : {}),
+              };
+            }
+            if (Date.now() >= deadline) return;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        },
+      };
+    },
+  };
+}
+
+/**
+ * TabWorksetPort backed by the Electron shell's local browser (design doc
+ * §4.5.2). `focus` moves only the agent's logical target; the tab the user sees
+ * does not change.
+ */
+export class OctopLocalTabWorksetPort implements TabWorksetPort {
+  private pending?: string;
+  private focused?: string;
+
+  constructor(private readonly host: LocalBrowserHost) {}
+
+  async list(): Promise<readonly WorksetTab[]> {
+    const tabs = await this.host.tabs.list();
+    if (!Array.isArray(tabs)) {
+      throw new WebSkillError(
+        "TOOL_EXECUTION_FAILED",
+        "The host tab list is invalid",
+      );
+    }
+    return tabs
+      .filter(
+        (tab) =>
+          typeof tab?.id === "string" &&
+          tab.id.length > 0 &&
+          tab.id.length <= 80,
+      )
+      .map((tab) => ({
+        handle: tab.id,
+        ...(typeof tab.title === "string" ? { title: tab.title } : {}),
+        ...(typeof tab.url === "string" ? { url: tab.url } : {}),
+      }));
+  }
+
+  async focus(handle: string): Promise<void> {
+    this.focused = handle;
+  }
+
+  async close(handle: string): Promise<void> {
+    await this.host.tabs.close(handle);
+    if (this.pending === handle) this.pending = undefined;
+    if (this.focused === handle) this.focused = undefined;
+  }
+
+  async admit(opened: OpenedPageInfo): Promise<string> {
+    // A tab opened by the page itself (`window.open`, `target=_blank`) already
+    // exists: the main process created it, so reuse it instead of opening twice.
+    if (this.pending !== undefined) {
+      const existing = (await this.list()).find(
+        (tab) => tab.handle === this.pending,
+      );
+      this.pending = undefined;
+      if (existing !== undefined) return existing.handle;
+    }
+    if (opened.url === undefined || opened.url.length === 0) {
+      throw new WebSkillError(
+        "TOOL_EXECUTION_FAILED",
+        "The opened page has no URL",
+      );
+    }
+    return this.host.tabs.create({ url: opened.url, active: false });
+  }
+
+  async reset(): Promise<void> {
+    this.pending = undefined;
+    this.focused = undefined;
+  }
+
+  rememberOpened(handle: string): void {
+    this.pending = handle;
+  }
+
+  /** Agent focus, not the user's visible tab. */
+  focusedHandle(): string | undefined {
+    return this.focused;
+  }
+}
+
+export function createLocalTabWatcher(
+  port: OctopLocalTabWorksetPort,
 ): ActionTabWatcher {
   return {
     async open(): Promise<ActionTabWindow> {

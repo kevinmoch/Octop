@@ -7,6 +7,7 @@ export interface HostInit {
   userId: number;
   locale: HostLocale;
   theme: HostTheme;
+  localTabId?: string;
 }
 
 export type HostApi =
@@ -47,7 +48,7 @@ export function parseInit(value: unknown): HostInit | undefined {
     value.type !== "init"
   )
     return;
-  const { sessionId, userId, locale, theme } = value;
+  const { sessionId, userId, locale, theme, localTabId } = value;
   if (
     typeof sessionId !== "string" ||
     sessionId.length === 0 ||
@@ -58,7 +59,13 @@ export function parseInit(value: unknown): HostInit | undefined {
     (theme !== "light" && theme !== "dark")
   )
     return;
-  return { sessionId, userId: userId as number, locale, theme };
+  return {
+    sessionId,
+    userId: userId as number,
+    locale,
+    theme,
+    ...(typeof localTabId === "string" ? { localTabId } : {}),
+  };
 }
 
 export function isHostRequest(value: unknown): value is HostRequest {
@@ -109,6 +116,8 @@ export class OctopHostBridge {
   private initResolve!: (value: HostInit) => void;
   private initReject!: (error: Error) => void;
   private init?: HostInit;
+  /** Latest tab the Dashboard reported; absent in server mode. */
+  private localTabId?: string;
   private appearance?: Pick<HostInit, "locale" | "theme">;
   private readonly appearanceListeners = new Set<
     (appearance: Pick<HostInit, "locale" | "theme">) => void
@@ -140,6 +149,7 @@ export class OctopHostBridge {
       const init = parseInit(value);
       if (init) {
         this.init = init;
+        this.localTabId = init.localTabId;
         this.initResolve(init);
       } else {
         this.initReject(
@@ -160,6 +170,18 @@ export class OctopHostBridge {
         listener(this.appearance);
       return;
     }
+    if (
+      value.type === "local-tab" &&
+      (typeof value.tabId === "string" || value.tabId === null)
+    ) {
+      // The user switched tabs in the local browser: point page-agent traffic at
+      // the tab they are looking at unless the model focused another one.
+      this.localTabId =
+        typeof value.tabId === "string" && /^tab-\d{1,8}$/.test(value.tabId)
+          ? value.tabId
+          : undefined;
+      return;
+    }
     if (value.type !== "response" || typeof value.id !== "string") return;
     const waiter = this.pending.get(value.id);
     if (!waiter) return;
@@ -178,6 +200,11 @@ export class OctopHostBridge {
 
   async ready(): Promise<HostInit> {
     return this.initPromise;
+  }
+
+  /** Tab the Dashboard last reported, or the one from the init handshake. */
+  currentLocalTabId(): string | undefined {
+    return this.localTabId;
   }
 
   onAppearance(

@@ -28,6 +28,35 @@ export function bundledDashboardDir(portableDir: string): string {
   return join(portableDir, "packages", "octop", "dashboard");
 }
 
+/**
+ * Dashboard copied into the app's `resources/dashboard` by electron-builder.
+ *
+ * The packaged app must not read the Dashboard out of `<OCTOP_HOME>/portable`:
+ * that tree is extracted from the green runtime zip and can be older than the
+ * shell (same version, different frontend). Shipping the frontend next to the
+ * app keeps installer builds self-consistent without rebuilding the zip.
+ */
+export function packagedDashboardDir(resourcesRoot: string): string {
+  return join(resourcesRoot, "dashboard");
+}
+
+/**
+ * Pick the Dashboard root: explicit dev override, then the app resource copy,
+ * then the legacy location inside the portable runtime.
+ */
+export function resolveDashboardDir(options: {
+  override?: string;
+  resourcesRoot: string;
+  portableDir: string;
+  exists: (path: string) => boolean;
+}): string {
+  const override = (options.override ?? "").trim();
+  if (override) return override;
+  const packaged = packagedDashboardDir(options.resourcesRoot);
+  if (options.exists(join(packaged, "index.html"))) return packaged;
+  return bundledDashboardDir(options.portableDir);
+}
+
 export function installedRuntimeDir(
   resourcesRoot: string,
   platform: string,

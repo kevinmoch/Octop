@@ -5524,6 +5524,20 @@
       "autopilotDone": "所有步骤执行完成"
     }
   },
+  "localBrowser": {
+    "unavailable": "本地浏览器仅在桌面端可用。",
+    "newTab": "新建标签页",
+    "closeTab": "关闭标签页",
+    "back": "后退",
+    "forward": "前进",
+    "reload": "刷新",
+    "go": "访问",
+    "addressPlaceholder": "输入网址或搜索内容",
+    "toggleAi": "显示或隐藏 AI 助手",
+    "useRemote": "远程浏览器",
+    "useRemoteHint": "回退到服务器推流方案",
+    "useLocal": "本地浏览器"
+  },
   "remoteBrowser": {
     "title": "浏览器 AI+",
     "description": "实时查看和操控远端服务器的浏览器",
@@ -7664,6 +7678,10 @@
     "browser": {
       "title": "浏览器 AI+",
       "subtitle": "查看并操控远端无头浏览器，实时接管专家的网页操作"
+    },
+    "localBrowser": {
+      "title": "本地浏览器",
+      "subtitle": "真实的本地浏览器标签页，AI 可直接感知并操作页面"
     },
     "desktop": {
       "title": "远程桌面",
