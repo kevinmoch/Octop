@@ -38,6 +38,7 @@ const INITIAL: AppConfigInput = {
   enable_api_docs: false,
   require_setup_password: true,
   max_upload_mb: 100,
+  outbound_proxy_mode: "system",
   database: {
     driver: "sqlite",
     sqlite_path: "octop.db",
@@ -416,6 +417,27 @@ export default function AppConfigPanel() {
                   />
                 </Form.Item>
               </div>
+              <Form.Item
+                name="outbound_proxy_mode"
+                label={t("adminAppConfig.outboundProxyMode")}
+                extra={envExtra(
+                  t("adminAppConfig.outboundProxyModeHint"),
+                  "OCTOP_OUTBOUND_PROXY_MODE",
+                )}
+              >
+                <Select
+                  options={[
+                    {
+                      value: "system",
+                      label: t("adminAppConfig.outboundProxyModeSystem"),
+                    },
+                    {
+                      value: "direct",
+                      label: t("adminAppConfig.outboundProxyModeDirect"),
+                    },
+                  ]}
+                />
+              </Form.Item>
               <Form.Item
                 name="default_timezone"
                 label={t("adminAppConfig.timezone")}

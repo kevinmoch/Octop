@@ -56,6 +56,14 @@ class AppConfigBody(BaseModel):
     enable_api_docs: bool
     require_setup_password: bool
     max_upload_mb: int
+    outbound_proxy_mode: Literal["system", "direct"] = Field(
+        default="system",
+        description=(
+            "How outbound HTTP calls (model providers, marketplaces) reach the network. "
+            "``system`` honors environment / OS proxy settings; ``direct`` bypasses every "
+            "proxy. Boot-time setting — restart applies it."
+        ),
+    )
     database: DatabaseConfigBody
     tls: TlsConfigBody
 

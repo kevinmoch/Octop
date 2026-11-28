@@ -108,6 +108,7 @@ on each start. Schema (`OctopConfig` in `octop/config.py`):
   "require_setup_password": true,
   "bootstrap": {},
   "max_upload_mb": 100,
+  "outbound_proxy_mode": "system",
   "database": {
     "driver": "sqlite",
     "sqlite_path": "octop.db",
@@ -156,6 +157,18 @@ Notes:
   impose their own body-size limit (for example nginx
   `client_max_body_size`). Agent workspace file upload, plugin ZIPs,
   and backup archives use separate limits and are not this setting.
+- `outbound_proxy_mode` controls how the server's outbound HTTP calls
+  (model providers, expert marketplaces, webhook registrations) reach the
+  network. `system` (default) keeps the inherited behavior: httpx and
+  urllib read proxy settings from the environment, and on Windows also
+  from the per-user WinINET registry proxy — the same proxy a browser
+  uses, but without the browser's exception list. Corporate gateways can
+  then intercept intranet-bound provider traffic and return a block
+  page. `direct` makes every outbound call bypass all proxies (equivalent
+  to `NO_PROXY="*"` for the whole process). Set it when your model
+  endpoints are reachable directly; machines that need a proxy for
+  external access should keep `system`. Boot-time setting: restart the
+  service to apply it.
 - `plugins.<id>.enabled` is the **global** plugin switch (Dashboard Admin →
   Plugins). Bundled plugins are copied into `~/.octop/plugins/` on init and
   server start with `enabled: false`. `bundled_plugins_seeded` lists ids
@@ -190,6 +203,7 @@ Each variable, when set, takes precedence over the matching key in
 | `OCTOP_ENABLE_API_DOCS` | bool | `false` | Expose Scalar API docs at `/api/docs` |
 | `OCTOP_REQUIRE_SETUP_PASSWORD` | bool | `true` | Require wizard password during initial setup |
 | `OCTOP_MAX_UPLOAD_MB` | int | `100` | Max upload size in MiB for chat attachments, IM inbound, and knowledge documents (1–1024) |
+| `OCTOP_OUTBOUND_PROXY_MODE` | `system` \| `direct` | `system` | Outbound HTTP proxy mode for the whole process (`config.json → outbound_proxy_mode`); `direct` bypasses every proxy. Restart applies |
 | `OCTOP_DATABASE_URL` | string | empty | Full DSN — overrides the `OCTOP_DATABASE_*` fields below |
 | `OCTOP_DATABASE_DRIVER` | `sqlite` \| `postgresql` | `sqlite` | Storage backend |
 | `OCTOP_DATABASE_SQLITE_PATH` | path | `octop.db` | SQLite file path (relative to `OCTOP_HOME` unless absolute) |

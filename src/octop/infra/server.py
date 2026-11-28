@@ -417,6 +417,9 @@ class OctopServer:
         install_shell_output_decoding()
         config = ensure_mobile_capabilities_probed(self.paths.config)
         self.config = config
+        from octop.infra.utils.outbound_proxy import apply_outbound_proxy_mode  # noqa: PLC0415
+
+        apply_outbound_proxy_mode(config.outbound_proxy_mode)
 
         self.expert_catalog = ExpertCatalog(
             default_library_root(),
@@ -478,6 +481,9 @@ class OctopServer:
             return
         config = load_config(self.paths.config)
         self.config = config
+        from octop.infra.utils.outbound_proxy import apply_outbound_proxy_mode  # noqa: PLC0415
+
+        apply_outbound_proxy_mode(config.outbound_proxy_mode)
         db = open_database(config, self.paths)
         try:
             run_migrations(db)

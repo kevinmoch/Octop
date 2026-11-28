@@ -36,6 +36,7 @@ export interface AppConfigInput {
   enable_api_docs: boolean;
   require_setup_password: boolean;
   max_upload_mb: number;
+  outbound_proxy_mode: "system" | "direct";
   database: DatabaseConfigInput;
   tls: TlsConfigInput;
 }

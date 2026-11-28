@@ -23,6 +23,9 @@ def open_cli_services(home: Path | None = None) -> Iterator[SharedServices]:
     paths = PathLayout(home) if home is not None else PathLayout.from_env()
     apply_env_file(env_file_path(paths.root))
     config = load_config(paths.config)
+    from octop.infra.utils.outbound_proxy import apply_outbound_proxy_mode  # noqa: PLC0415
+
+    apply_outbound_proxy_mode(config.outbound_proxy_mode)
     db = open_database(config, paths)
     run_migrations(db)
     services = build_shared_services(db=db, paths=paths, config=config)

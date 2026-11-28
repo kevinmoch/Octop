@@ -22,6 +22,8 @@ from octop.infra.utils.json_file import JsonFileCorruptError, read_json_object, 
 
 _MAX_BYTES = 1_048_576
 
+_OUTBOUND_PROXY_MODES = frozenset({"system", "direct"})
+
 # Env vars that override the matching config.json field at process start.
 _ENV_OVERRIDE_KEYS = (
     "OCTOP_BIND_HOST",
@@ -37,6 +39,7 @@ _ENV_OVERRIDE_KEYS = (
     "OCTOP_ENABLE_API_DOCS",
     "OCTOP_REQUIRE_SETUP_PASSWORD",
     "OCTOP_MAX_UPLOAD_MB",
+    "OCTOP_OUTBOUND_PROXY_MODE",
     "OCTOP_DATABASE_URL",
     "OCTOP_DATABASE_DRIVER",
     "OCTOP_DATABASE_SQLITE_PATH",
@@ -251,6 +254,11 @@ def _display_config(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     origins = data.get("cors_origins", base.cors_origins)
     if not isinstance(origins, list):
         raise ValueError("cors_origins must be a list of strings")
+    proxy_mode = (
+        str(data.get("outbound_proxy_mode", base.outbound_proxy_mode) or "").strip().lower()
+    )
+    if proxy_mode not in _OUTBOUND_PROXY_MODES:
+        proxy_mode = base.outbound_proxy_mode
     config = {
         "bind_host": str(data.get("bind_host", base.bind_host) or base.bind_host),
         "port": _coerce_display_int(data.get("port", base.port), base.port),
@@ -282,6 +290,7 @@ def _display_config(data: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         "max_upload_mb": _coerce_display_int(
             data.get("max_upload_mb", base.max_upload_mb), base.max_upload_mb
         ),
+        "outbound_proxy_mode": proxy_mode,
         "database": {
             "driver": driver,
             "sqlite_path": str(
@@ -346,6 +355,10 @@ def _apply_structured(existing: dict[str, Any], incoming: dict[str, Any]) -> dic
     out["enable_api_docs"] = bool(incoming.get("enable_api_docs"))
     out["require_setup_password"] = bool(incoming.get("require_setup_password"))
     out["max_upload_mb"] = int(incoming["max_upload_mb"])
+    proxy_mode = str(incoming.get("outbound_proxy_mode", "system") or "system").strip().lower()
+    if proxy_mode not in _OUTBOUND_PROXY_MODES:
+        raise ValueError("outbound_proxy_mode must be system or direct")
+    out["outbound_proxy_mode"] = proxy_mode
     out["database"] = _merge_database(existing.get("database"), incoming.get("database") or {})
     out["tls"] = _merge_tls(existing.get("tls"), incoming.get("tls") or {})
     return out

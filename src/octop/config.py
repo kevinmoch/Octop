@@ -20,6 +20,8 @@ MAX_MAX_UPLOAD_MB = 1024
 DEFAULT_DESKTOP_BROWSER_URL = "https://jijian.huawei.com/"
 DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES = 30
 
+_VALID_OUTBOUND_PROXY_MODES = frozenset({"system", "direct"})
+
 _VALID_DRIVERS = frozenset({"sqlite", "postgresql"})
 
 _DATABASE_ENV_KEYS = (
@@ -149,6 +151,7 @@ class OctopConfig:
     capabilities: CapabilitiesConfig = field(default_factory=CapabilitiesConfig)
     max_upload_mb: int = DEFAULT_MAX_UPLOAD_MB
     browser_idle_timeout_minutes: int = DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES
+    outbound_proxy_mode: str = "system"
 
     @property
     def max_upload_bytes(self) -> int:
@@ -527,6 +530,12 @@ def validate_persisted_config(raw: dict[str, Any]) -> None:
     idle = _optional_int(raw, "browser_idle_timeout_minutes")
     if idle is not None and idle < 0:
         raise ValueError("browser_idle_timeout_minutes must be >= 0")
+    mode = _optional_str(raw, "outbound_proxy_mode")
+    if mode is not None:
+        normalized = mode.strip().lower()
+        if normalized not in _VALID_OUTBOUND_PROXY_MODES:
+            allowed = ", ".join(sorted(_VALID_OUTBOUND_PROXY_MODES))
+            raise ValueError(f"outbound_proxy_mode must be one of {allowed}")
 
     if "bootstrap" in raw:
         bootstrap = raw.get("bootstrap")
@@ -673,6 +682,15 @@ def load_config(path: Path) -> OctopConfig:
                 )
             ),
         )
+    if v := os.environ.get("OCTOP_OUTBOUND_PROXY_MODE"):
+        trimmed = v.strip().lower()
+        if trimmed in _VALID_OUTBOUND_PROXY_MODES:
+            merged["outbound_proxy_mode"] = trimmed
+        else:
+            logger.warning(
+                "env %s is not one of system, direct; ignoring override",
+                "OCTOP_OUTBOUND_PROXY_MODE",
+            )
 
     capabilities = _parse_capabilities_section(raw.get("capabilities"))
     if v := os.environ.get("OCTOP_ENABLE_MOBILE"):
@@ -784,4 +802,5 @@ def load_config(path: Path) -> OctopConfig:
                 )
             ),
         ),
+        outbound_proxy_mode=str(merged.get("outbound_proxy_mode") or "system"),
     )

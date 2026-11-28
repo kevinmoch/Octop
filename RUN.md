@@ -219,6 +219,10 @@ make -f desktop/portable/Makefile green
 在 PowerShell 中执行（只需要 Node，不需要 pnpm/bash/sed）：
 
 ```powershell
+# 重建 portable.zip
+& "C:\Program Files\Git\bin\bash.exe" -lc "cd /d/Github/Octop && bash desktop/portable/package.sh windows-amd64"
+& "C:\Program Files\Git\bin\bash.exe" -lc "cd /d/Github/Octop && bash desktop/portable/stage-electron-runtime.sh windows-amd64 1.0.3b6"
+
 cd D:\Github\Octop\desktop\src
 .\scripts\build-win.cmd          # 只构建 Electron 代码
 .\scripts\package-win.cmd --dir  # 生成免安装目录：release\win-unpacked\
